@@ -827,3 +827,7 @@ label.section.clashes:not(:has(input:checked)) .when {
 .choice.met h3 {
   color: var(--green);
 }
+
+.guessed {
+  color: var(--yellow);
+}

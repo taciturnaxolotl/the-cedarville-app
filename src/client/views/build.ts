@@ -13,6 +13,7 @@
  * an ordered list where the top entry is usually free.
  */
 
+import type { TermCatalog } from "../../catalog";
 import { type Candidate, type RankedChoice, rankChoices } from "../../choices";
 import { type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
@@ -24,7 +25,7 @@ import {
 } from "../../requirements";
 import { offeringsFromListing } from "../../schedule";
 import type { ProgramSummary } from "../../types";
-import { capture, installed, programs, resolveRules } from "../bridge";
+import { capture, catalogStatus, fetchCatalog, installed, programs, resolveRules } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { createStore, Subscriptions } from "../store";
@@ -43,6 +44,8 @@ interface State {
   available: ProgramSummary[];
   /** Rule pools once the server has asked Colleague what qualifies. */
   resolved: Map<string, string[]>;
+  /** Bumped when another term's seasons land, to reproject against them. */
+  seasonsAt: number;
   busy: string;
 }
 
@@ -140,6 +143,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     tracks: JSON.parse(localStorage.getItem(TRACKS) ?? "{}"),
     available: [],
     resolved: new Map(),
+    seasonsAt: 0,
     busy: "",
   });
 
@@ -161,14 +165,28 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     ),
   );
 
-  const seen = new Set(offeringsFromListing(catalog?.sections ?? []).map((o) => o.courseName));
-  const thisSeason: Season = (catalog?.term ?? "").includes("SU")
-    ? "summer"
-    : (catalog?.term ?? "").includes("SP")
-      ? "spring"
-      : "fall";
-  const offeredIn = (code: string, season: Season) =>
-    !seen.size || season !== thisSeason || seen.has(code);
+  /**
+   * Which courses run in which season, as far as we have actually looked.
+   *
+   * Colleague publishes a term or two ahead, so this is never complete. The
+   * distinction that matters is between a season we hold a listing for — where
+   * absence means the course is not taught then — and one we do not, where
+   * absence means nothing at all. Collapsing those two lets a fall-only course
+   * be scheduled in spring and calls it a plan.
+   */
+  const seasonOf = (term: string): Season =>
+    term.includes("SU") ? "summer" : term.includes("SP") ? "spring" : "fall";
+
+  const known = new Map<Season, Set<string>>();
+  const learn = (term: string, sections: TermCatalog["sections"]) => {
+    const season = seasonOf(term);
+    const set = known.get(season) ?? new Set<string>();
+    for (const o of offeringsFromListing(sections)) set.add(o.courseName);
+    known.set(season, set);
+  };
+  if (catalog?.sections?.length) learn(catalog.term, catalog.sections);
+
+  const offeredIn = (code: string, season: Season) => known.get(season)?.has(code) ?? true;
 
   // ---- layout ----------------------------------------------------------
 
@@ -200,6 +218,30 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         /* Signed out: the picker stays empty, the ranking still works. */
       });
   }
+
+  /**
+   * Learn the seasons from every term the server has crawled, not just the one
+   * loaded on screen. Two terms in hand makes "not taught in summer" a fact
+   * rather than an assumption, and costs one request each.
+   */
+  void catalogStatus()
+    .then(async (status) => {
+      const missing = status.terms
+        .map((t) => t.term)
+        .filter((t) => t !== "ALL" && t !== catalog?.term && t.length);
+      for (const term of missing) {
+        try {
+          const fetched = await fetchCatalog(term);
+          if (fetched.sections?.length) learn(term, fetched.sections);
+        } catch {
+          // One term short is a weaker projection, not a broken one.
+        }
+      }
+      if (missing.length) store.set({ seasonsAt: Date.now() });
+    })
+    .catch(() => {
+      /* No server: every season stays unknown, which `offeredIn` allows. */
+    });
 
   /** Ask the server to expand the rule groups, then re-rank with their pools. */
   function expandRules(current: ProgramTree[]) {
@@ -344,18 +386,28 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   function candidateRow(candidate: Candidate) {
     const { pinned } = store.get();
-    const isPinned = pinned.includes(candidate.code);
+    // A course the degree requires outright is not a choice, so it shows as
+    // taken and cannot be unpicked. Its neighbours stay pickable: the group
+    // being met is no reason to stop someone taking a second one.
+    const isPinned = candidate.forced || pinned.includes(candidate.code);
     const row = el("div", `candidate${isPinned ? " picked" : ""}`);
 
     const pick = el("button", "pick");
     pick.type = "button";
     pick.textContent = isPinned ? "✓" : "+";
-    pick.title = isPinned ? "unpick" : "pick this course";
-    pick.addEventListener("click", () =>
-      store.set({
-        pinned: isPinned ? pinned.filter((c) => c !== candidate.code) : [...pinned, candidate.code],
-      }),
-    );
+    if (candidate.forced) {
+      pick.disabled = true;
+      pick.title = "required outright by your degree — not something you choose";
+    } else {
+      pick.title = isPinned ? "unpick" : "pick this course";
+      pick.addEventListener("click", () =>
+        store.set({
+          pinned: isPinned
+            ? pinned.filter((c) => c !== candidate.code)
+            : [...pinned, candidate.code],
+        }),
+      );
+    }
     row.append(pick);
 
     row.append(el("b", undefined, candidate.code));
@@ -378,7 +430,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   subs.add(
     store.watch(
       (s) =>
-        `${s.pinned.join(",")}:${JSON.stringify(s.tracks)}:${s.resolved.size}:${trees.map((t) => t.code).join(",")}`,
+        `${s.pinned.join(",")}:${JSON.stringify(s.tracks)}:${s.resolved.size}:${s.seasonsAt}:${trees.map((t) => t.code).join(",")}`,
       () => {
         localStorage.setItem(PINS, JSON.stringify(store.get().pinned));
         localStorage.setItem(TRACKS, JSON.stringify(store.get().tracks));
@@ -391,6 +443,22 @@ export function mount(root: HTMLElement, ctx: Ctx) {
               `${ranking.baseline.totalCredits} credits · ${ranking.choices.length} choices left`,
           ),
         );
+        // Which seasons the projection actually checked. A season with no
+        // listing lets every course through, and a date resting on that is
+        // worth less than one that does not.
+        const guessed = (["fall", "spring", "summer"] as Season[]).filter((s) => !known.has(s));
+        if (guessed.length) {
+          const note = el(
+            "span",
+            "guessed",
+            ` · ${guessed.join(" and ")} unpublished, so anything is assumed to run then`,
+          );
+          note.title =
+            "Colleague publishes a term or two ahead. Courses are only checked against " +
+            "the seasons we hold a listing for; the rest are assumed available.";
+          summary.append(note);
+        }
+
         if (ranking.shared.length) {
           summary.append(
             el(

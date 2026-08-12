@@ -851,16 +851,18 @@ describe("build view — a requirement already met", () => {
 
   test("a met requirement still lets you pick more", () => {
     // Wanting a second course in a subject you like is a real thing to want,
-    // and the planner has no business refusing it.
+    // and the planner has no business refusing it. Only the course the degree
+    // requires outright is fixed.
     build.mount(root, { trees: [major(), minorNeeding(3)], enrolled: ["MAJ"] });
     const box = root.querySelector(".choice.met") as unknown as HTMLElement;
-    const buttons = Array.from(box.querySelectorAll(".pick")) as unknown as HTMLButtonElement[];
-    expect(buttons.length).toBeGreaterThan(1);
-    expect(buttons.some((b) => b.disabled)).toBe(false);
+    const rows = Array.from(box.querySelectorAll(".candidate"));
+    const locked = rows.filter(
+      (r) => (r.querySelector(".pick") as unknown as HTMLButtonElement).disabled,
+    );
+    expect(locked).toHaveLength(1);
+    expect(locked[0]?.textContent).toContain("CS-1210");
 
-    const art = Array.from(box.querySelectorAll(".candidate")).find((r) =>
-      r.textContent?.includes("ART-1100"),
-    )!;
+    const art = rows.find((r) => r.textContent?.includes("ART-1100"))!;
     (art.querySelector(".pick") as unknown as HTMLElement).click();
     expect(
       Array.from(root.querySelectorAll(".candidate.picked")).some((r) =>
@@ -874,5 +876,42 @@ describe("build view — a requirement already met", () => {
     // Six credits wanted, three of them forced: there is still a decision.
     build.mount(root, { trees: [major(), minorNeeding(6)], enrolled: ["MAJ"] });
     expect(root.querySelector(".choice.met")).toBeNull();
+  });
+});
+
+describe("build view — what the projection knows about seasons", () => {
+  const only = (groups: RawGroup[]) => normalize(program("BS.CYOPR", groups));
+  const required = [group({ Courses: [course("1", "CS", "1210")], DisplayText: "Take this" })];
+
+  test("a course the degree requires outright cannot be unpicked", () => {
+    const major = normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
+    const minor = normalize(
+      program("MIN", [
+        group({
+          Id: "e",
+          DisplayText: "One computing elective",
+          FromCourses: [course("1", "CS", "1210"), course("9", "ART", "1100")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    build.mount(root, { trees: [major, minor], enrolled: ["MAJ"] });
+
+    const rows = Array.from(root.querySelectorAll(".choice .candidate"));
+    const cs = rows.find((r) => r.textContent?.includes("CS-1210"))!;
+    const art = rows.find((r) => r.textContent?.includes("ART-1100"))!;
+
+    // Required: shown as taken, and not something you can toggle.
+    expect(cs.className).toContain("picked");
+    expect((cs.querySelector(".pick") as unknown as HTMLButtonElement).disabled).toBe(true);
+    // Its neighbour is still a live choice.
+    expect((art.querySelector(".pick") as unknown as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  test("names the seasons it had no listing for", () => {
+    build.mount(root, { trees: [only(required)], enrolled: ["BS.CYOPR"] });
+    const note = root.querySelector(".guessed");
+    expect(note?.textContent).toContain("fall and spring and summer");
+    expect(note?.textContent).toContain("assumed to run then");
   });
 });

@@ -105,6 +105,32 @@ one per user.
 The extension is then only needed for the one thing that is genuinely
 personal: your own program evaluation.
 
+### dumping a session (local only)
+
+Some of Colleague is genuinely personal and needs your own login: the program
+list, and any what-if evaluation. For poking at those from a shell rather than
+clicking through the extension:
+
+```sh
+# Chrome devtools -> Network -> any XHR on selfservice.cedarville.edu
+# -> right click -> Copy -> Copy as cURL
+pbpaste | bun scripts/session.ts save
+bun scripts/session.ts check
+
+bun scripts/as-me.ts programs minor
+bun scripts/as-me.ts evaluate BS.CMPEG
+```
+
+`document.cookie` will not do: `.ASPXAUTH` is HttpOnly, so the cookie that
+matters is invisible to page scripts.
+
+This is a development convenience and deliberately not part of the app. That
+cookie is the whole student account, including the ability to register and
+drop classes, so it is filtered down to the four cookies Self-Service actually
+authenticates with, written to `.data/session.json` at mode 0600, and never
+sent anywhere. The server holds only the public catalog and the extension
+holds no credentials at all; neither of them ever reads this file.
+
 Tests run with `test/setup.ts` preloaded, which pins `CATALOG_DB` to
 `:memory:`. Without it a stray import of `serve.ts` would open the real
 catalog database from a test.

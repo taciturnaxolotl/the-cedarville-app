@@ -11,6 +11,7 @@ import { normalize, type ProgramTree } from "../../requirements";
 import type { EvaluationResponse, RawGroup } from "../../types";
 import type { Ctx } from "../ctx";
 import * as overlap from "./overlap";
+import * as plan from "./plan";
 import * as schedule from "./schedule";
 import * as tree from "./tree";
 
@@ -413,6 +414,70 @@ describe("schedule view", () => {
 
     // The node is detached; clicking it must not throw or resurrect anything.
     expect(() => box.click()).not.toThrow();
+    expect(root.children).toHaveLength(0);
+  });
+});
+
+describe("plan view", () => {
+  /** Its own fixture: the schedule view's lives inside that describe block. */
+  const ctxWith = (courses: unknown[]): Ctx =>
+    ({
+      trees: [treeOf("BS.CYOPR")],
+      sections: {
+        term: "2026FA",
+        fetchedAt: "2026-08-12T00:00:00.000Z",
+        sections: [],
+        courses,
+      },
+    }) as unknown as Ctx;
+
+  const CHAIN = [
+    { Id: "1", SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
+    {
+      Id: "2",
+      SubjectCode: "CS",
+      Number: "2210",
+      Title: "Data Structures",
+      MinimumCredits: 3,
+      CourseRequisites: [
+        {
+          DisplayText: "Take CS-1210",
+          DisplayTextExtension: "- Must be completed prior to taking this course.",
+          IsRequired: true,
+        },
+      ],
+    },
+  ];
+
+  test("asks for data before projecting anything", () => {
+    plan.mount(root, { trees: [] });
+    expect(root.textContent).toContain("capture your requirements");
+  });
+
+  test("projects terms and shows the critical path", () => {
+    plan.mount(root, ctxWith(CHAIN));
+    expect(root.querySelector(".chain-node")).toBeTruthy();
+    expect(root.textContent).toContain("critical path");
+    expect(root.querySelectorAll(".term").length).toBeGreaterThan(0);
+  });
+
+  // A chain cannot be compressed by raising the credit cap, which is the
+  // whole point of showing the critical path.
+  test("the credit slider reprojects but cannot beat the chain", () => {
+    plan.mount(root, ctxWith(CHAIN));
+    const terms = () => root.querySelectorAll(".term:not(.unplaced)").length;
+    const before = terms();
+
+    const slider = root.querySelector("input[type=range]") as HTMLInputElement;
+    slider.value = "21";
+    // A range has no click() equivalent, and happy-dom's Event is structurally
+    // different from the DOM one, so the cast is the honest way through.
+    slider.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+    expect(terms()).toBeGreaterThanOrEqual(before);
+  });
+
+  test("destroy clears the outlet", () => {
+    plan.mount(root, ctxWith(CHAIN)).destroy();
     expect(root.children).toHaveLength(0);
   });
 });

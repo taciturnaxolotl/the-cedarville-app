@@ -558,3 +558,99 @@ label.section.clashes:not(:has(input:checked)) .when {
     padding-left: 16px;
   }
 }
+
+/* ---- the plan view ---- */
+
+.plan-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--surface);
+}
+
+.plan-controls input[type="range"] {
+  width: 190px;
+  accent-color: var(--lavender);
+}
+
+.plan-controls .cr {
+  min-width: 2ch;
+  color: var(--lavender);
+  font-variant-numeric: tabular-nums;
+}
+
+.chain {
+  margin: 16px 0 22px;
+}
+
+.chain h3 {
+  margin: 0 0 8px;
+  color: var(--peach);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.chain-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chain-node {
+  padding: 3px 9px;
+  border-radius: 3px;
+  border-left: 2px solid var(--peach);
+  background: var(--mantle);
+  cursor: help;
+}
+
+.arrow {
+  color: var(--overlay);
+}
+
+.term {
+  margin-bottom: 14px;
+  padding-left: 12px;
+  border-left: 2px solid var(--surface);
+}
+
+.term.summer {
+  border-left-color: var(--yellow);
+}
+
+.term.unplaced {
+  border-left-color: var(--red);
+}
+
+.term h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 5px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.term h3 .cr {
+  color: var(--overlay);
+  font-size: 11px;
+}
+
+.plan-course {
+  display: flex;
+  gap: 10px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.plan-course b {
+  min-width: 92px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.plan-course span {
+  color: var(--subtext);
+}

@@ -133,10 +133,24 @@ export type Eligibility =
  * `alsoTaking` covers the before-or-with case: a course you are enrolling in
  * this same term satisfies a corequisite but not a prerequisite.
  */
+export interface EligibilityOptions {
+  /**
+   * Whether a course exists in the catalog at all.
+   *
+   * Requisite text goes stale: Cedarville renumbered Calculus II from
+   * MATH-1720 to MATH-1715 and never updated the courses that name it, and a
+   * few entries carry transposed subject codes (CLUM for CLMU). Treating a
+   * course that cannot be taken as a hard blocker marks its dependents
+   * permanently unreachable, which is worse than admitting the doubt.
+   */
+  exists?: (code: string) => boolean;
+}
+
 export function eligibility(
   node: CourseNode,
   completed: ReadonlySet<string>,
   alsoTaking: ReadonlySet<string> = new Set(),
+  options: EligibilityOptions = {},
 ): Eligibility {
   const blocked = new Set<string>();
   const unclear: string[] = [];
@@ -150,6 +164,18 @@ export function eligibility(
     // all, which reads as "nothing in the way" and is the opposite of true.
     if (!requisite.understood) unclear.push(requisite.text);
     if (requisite.courses.length === 0) continue;
+
+    // A prerequisite naming a course the catalog does not have is a stale
+    // reference, not a wall. Say so rather than blocking forever.
+    const phantom = options.exists
+      ? requisite.courses.filter((c) => !options.exists!(c) && !completed.has(c))
+      : [];
+    if (phantom.length === requisite.courses.length) {
+      unclear.push(
+        `${requisite.text} — ${phantom.join(", ")} ${phantom.length === 1 ? "is" : "are"} not in the catalog, likely renumbered`,
+      );
+      continue;
+    }
 
     // A corequisite is satisfied by taking it now; a prerequisite is not.
     const satisfies = (code: string) =>

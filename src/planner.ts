@@ -95,7 +95,11 @@ export function projectPlan(request: PlanRequest): Plan {
       const node = graph.courses.get(code) ?? { code, title: "", requisites: [] };
       // Courses chosen earlier this term satisfy a corequisite but not a
       // prerequisite, which `eligibility` already distinguishes.
-      const verdict = eligibility(node, taken, new Set(courses.map((c) => c.code)));
+      // The graph knows every course the catalog lists, so it is also the
+      // authority on which requisite references have gone stale.
+      const verdict = eligibility(node, taken, new Set(courses.map((c) => c.code)), {
+        exists: (c) => graph.courses.has(c),
+      });
 
       // A named-but-unverifiable prerequisite is still a prerequisite. Reading
       // only `state` here once let a four-course Bible chain collapse into one

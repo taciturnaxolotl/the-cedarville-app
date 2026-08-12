@@ -241,3 +241,54 @@ describe("eligibility", () => {
     expect(eligibility(suggested, new Set())).toMatchObject({ state: "open" });
   });
 });
+
+describe("stale requisite references", () => {
+  /**
+   * Cedarville renumbered Calculus II from MATH-1720 to MATH-1715 without
+   * updating the courses that name it, and a few entries carry transposed
+   * subject codes. EGEE-2110 requires MATH-1720, so treating it as a hard
+   * blocker marks the course permanently unreachable.
+   */
+  const exists = (code: string) => ["MATH-1715", "CS-1210"].includes(code);
+
+  test("a prerequisite that is not in the catalog reports unknown, not blocked", () => {
+    const node: CourseNode = {
+      code: "EGEE-2110",
+      title: "x",
+      requisites: [req("Take MATH-1720")],
+    };
+    expect(eligibility(node, new Set())).toMatchObject({
+      state: "blocked",
+      blockedBy: ["MATH-1720"],
+    });
+
+    const verdict = eligibility(node, new Set(), new Set(), { exists });
+    expect(verdict.state).toBe("unknown");
+    expect(verdict.blockedBy).toEqual([]);
+    if (verdict.state === "unknown") expect(verdict.why[0]).toContain("renumbered");
+  });
+
+  test("a real missing prerequisite still blocks", () => {
+    const node: CourseNode = { code: "X-1000", title: "x", requisites: [req("Take CS-1210")] };
+    expect(eligibility(node, new Set(), new Set(), { exists })).toMatchObject({
+      state: "blocked",
+      blockedBy: ["CS-1210"],
+    });
+  });
+
+  test("a mix of real and phantom still blocks on the real one", () => {
+    const node: CourseNode = {
+      code: "X-2000",
+      title: "x",
+      requisites: [req("Take CS-1210 MATH-1720")],
+    };
+    const verdict = eligibility(node, new Set(), new Set(), { exists });
+    expect(verdict.state).toBe("blocked");
+    expect(verdict.blockedBy).toContain("CS-1210");
+  });
+
+  test("without an exists check, nothing changes", () => {
+    const node: CourseNode = { code: "X-3000", title: "x", requisites: [req("Take GONE-9999")] };
+    expect(eligibility(node, new Set())).toMatchObject({ state: "blocked" });
+  });
+});

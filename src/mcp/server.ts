@@ -387,7 +387,7 @@ function registerPersonal(server: McpServer) {
       const rows: string[] = [];
       for (const [code, node] of [...graph.courses].sort()) {
         if (subject && !code.toUpperCase().startsWith(`${subject.toUpperCase()}-`)) continue;
-        const verdict = eligibility(node, done, now);
+        const verdict = eligibility(node, done, now, { exists: (c) => graph.courses.has(c) });
         if (state !== "all" && verdict.state !== state) continue;
         rows.push(
           `${code.padEnd(11)} ${verdict.state.padEnd(8)} ` +

@@ -266,7 +266,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       store.watch(
         (s) => {
           if (!node) return "open";
-          const verdict = eligibility(node, completed, alsoTaking(s.picked));
+          const verdict = eligibility(node, completed, alsoTaking(s.picked), {
+            exists: (c) => graph.courses.has(c),
+          });
           return verdict.state === "open"
             ? "open"
             : `${verdict.state}:${verdict.blockedBy.join(",")}`;
@@ -287,7 +289,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           if (state === "blocked") {
             reason.textContent = `needs ${blocked?.split(",").filter(Boolean).join(", ")}`;
           } else {
-            const verdict = node && eligibility(node, completed, alsoTaking(store.get().picked));
+            const verdict =
+              node &&
+              eligibility(node, completed, alsoTaking(store.get().picked), {
+                exists: (c) => graph.courses.has(c),
+              });
             reason.textContent =
               verdict && verdict.state === "unknown"
                 ? verdict.why.join(" ")

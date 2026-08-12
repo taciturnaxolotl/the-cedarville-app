@@ -163,6 +163,20 @@ held 1010 nodes and was missing 99 of the 277 courses named as prerequisites
 
 With the full catalog: 2027 nodes, 27 missing, and the chains measure right.
 
+The 27 that remain are not gaps in the crawl — they are stale references in
+Colleague's own data. Cedarville renumbered Calculus II from `MATH-1720` to
+`MATH-1715` without updating the courses that name it; a few carry transposed
+subject codes (`CLUM` for `CLMU`, `EDMU` for `MUED`); a few name subjects that
+no longer exist.
+
+That matters because a prerequisite naming a course nobody can take marks its
+dependents permanently unreachable — 17 courses were blocked forever on
+phantoms. `eligibility` takes an optional `exists` check and reports those as
+`unknown` with an explanation, rather than as a wall. It does not guess that
+`MATH-1720` means `MATH-1715`: the numbers are close, the meaning is not
+certain, and quietly substituting one for the other is how a planner tells a
+student something false.
+
 ### expanding a rule
 
 An evaluation never says which courses satisfy `DABIOL25`, but the course

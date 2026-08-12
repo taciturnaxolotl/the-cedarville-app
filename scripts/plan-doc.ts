@@ -195,6 +195,7 @@ for (const code of [...coursesNeeded(cy, { credits: price, have }).courses].sort
     graph.courses.get(code) ?? { code, title: "", requisites: [] },
     done,
     inProgress,
+    { exists: (c) => graph.courses.has(c) },
   );
   if (verdict.state === "blocked") w(`- **${code}** needs ${verdict.blockedBy.join(", ")}`);
 }

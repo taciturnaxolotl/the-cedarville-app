@@ -29,6 +29,7 @@ import type { ProgramSummary } from "../../types";
 import { capture, catalogStatus, fetchCatalog, installed, programs, resolveRules } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
+import { CEILING, FULL_TIME, type Load, readLoad, verdictOf, writeLoad } from "../load";
 import { createStore, Subscriptions } from "../store";
 
 interface State {
@@ -47,6 +48,8 @@ interface State {
   resolved: Map<string, string[]>;
   /** Bumped when another term's seasons land, to reproject against them. */
   seasonsAt: number;
+  /** Credits a term, which decides the date more than any single choice. */
+  load: Load;
   busy: string;
 }
 
@@ -172,6 +175,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     available: [],
     resolved: new Map(),
     seasonsAt: 0,
+    load: readLoad(),
     busy: "",
   });
 
@@ -226,9 +230,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   // ---- layout ----------------------------------------------------------
 
   const picker = el("section", "picker");
+  const dials = el("section", "dials");
   const summary = el("p", "credits");
   const body = el("div");
-  root.replaceChildren(picker, summary, body);
+  root.replaceChildren(picker, dials, summary, body);
 
   if (trees.length === 0) {
     summary.textContent = "capture your requirements first, then add majors and minors here.";
@@ -318,7 +323,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       tracks: new Map(Object.entries(store.get().tracks).map(([k, v]) => [k, [v]])),
       graph,
       offeredIn,
-      slots: termsFrom({ year: 2027, season: "spring" }, 12, { capacity: 15 }),
+      slots: termsFrom({ year: 2027, season: "spring" }, 12, {
+        capacity: store.get().load.perTerm,
+        summerCapacity: store.get().load.summer,
+        includeSummers: store.get().load.summer > 0,
+      }),
     });
 
   expandRules(trees);
@@ -408,6 +417,60 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         go.disabled = Boolean(busy) || same;
         go.addEventListener("click", () => void evaluate(store.get().wanted));
         picker.append(go);
+      },
+    ),
+  );
+
+  // ---- how heavy a term ------------------------------------------------
+
+  /** One labelled slider, reporting as it moves rather than on release. */
+  function dial(
+    label: string,
+    value: number,
+    range: { min: number; max: number; step: number },
+    note: (n: number) => { text: string; kind: string },
+    onChange: (n: number) => void,
+  ) {
+    const wrap = el("label", "dial");
+    wrap.append(el("span", "dial-label", label));
+
+    const input = el("input");
+    input.type = "range";
+    input.min = String(range.min);
+    input.max = String(range.max);
+    input.step = String(range.step);
+    input.value = String(value);
+
+    const read = el("span", "dial-value", String(value));
+    const said = tag(note(value).text, note(value).kind);
+    input.addEventListener("input", () => onChange(Number(input.value)));
+
+    wrap.append(input, read, said);
+    return wrap;
+  }
+
+  subs.add(
+    store.watch(
+      (s) => `${s.load.perTerm}:${s.load.summer}`,
+      () => {
+        const { load } = store.get();
+        dials.replaceChildren();
+        dials.append(
+          dial(
+            "credits a term",
+            load.perTerm,
+            { min: FULL_TIME, max: CEILING, step: 0.5 },
+            verdictOf,
+            (perTerm) => store.set({ load: { ...store.get().load, perTerm } }),
+          ),
+          dial(
+            "credits a summer",
+            load.summer,
+            { min: 0, max: 12, step: 0.5 },
+            (n) => (n === 0 ? { text: "no summers", kind: "cheap" } : { text: "", kind: "" }),
+            (summer) => store.set({ load: { ...store.get().load, summer } }),
+          ),
+        );
       },
     ),
   );
@@ -502,10 +565,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   subs.add(
     store.watch(
       (s) =>
-        `${s.pinned.join(",")}:${JSON.stringify(s.tracks)}:${s.resolved.size}:${s.seasonsAt}:${trees.map((t) => t.code).join(",")}`,
+        `${s.pinned.join(",")}:${JSON.stringify(s.tracks)}:${JSON.stringify(s.load)}:${s.resolved.size}:${s.seasonsAt}:${trees.map((t) => t.code).join(",")}`,
       () => {
         localStorage.setItem(PINS, JSON.stringify(store.get().pinned));
         localStorage.setItem(TRACKS, JSON.stringify(store.get().tracks));
+        writeLoad(store.get().load);
         const ranking = rank(trees, store.get().resolved);
 
         summary.replaceChildren();

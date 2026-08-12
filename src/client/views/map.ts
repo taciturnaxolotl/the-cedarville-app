@@ -26,6 +26,7 @@ import { offeringsFromListing } from "../../schedule";
 import { catalogStatus, fetchCatalog, resolveRules } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el } from "../dom";
+import { readLoad } from "../load";
 import { createStore, Subscriptions } from "../store";
 
 const PINS = "cedarville:pins";
@@ -157,7 +158,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   // ---- layout ----------------------------------------------------------
 
-  const slots = termsFrom({ year: 2027, season: "spring" }, 12, { capacity: 15 });
+  // The same load the build view is set to, so the two never disagree about
+  // when the degree finishes.
+  const load = readLoad();
+  const slots = termsFrom({ year: 2027, season: "spring" }, 12, {
+    capacity: load.perTerm,
+    summerCapacity: load.summer,
+    includeSummers: load.summer > 0,
+  });
   const legend = el("p", "credits");
   const board = el("div", "board");
   root.replaceChildren(legend, board);

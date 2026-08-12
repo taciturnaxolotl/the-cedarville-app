@@ -928,3 +928,35 @@ label.section.clashes:not(:has(input:checked)) .when {
 .graph .node.transfer .code {
   fill: var(--overlay);
 }
+
+/* ---- load dials ---- */
+
+.dials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-bottom: 14px;
+}
+
+.dial {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtext);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.dial-label {
+  color: var(--overlay);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dial-value {
+  min-width: 2.5em;
+  color: var(--text);
+  text-align: right;
+}

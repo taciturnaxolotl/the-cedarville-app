@@ -1469,3 +1469,54 @@ describe("map view", () => {
     expect(root.children).toHaveLength(0);
   });
 });
+
+describe("build view — how heavy a term", () => {
+  const tree = () =>
+    normalize(
+      program("BS.CYOPR", [
+        group({
+          Id: "e",
+          DisplayText: "One elective",
+          FromCourses: [course("1", "ART", "1100"), course("2", "ART", "1200")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+
+  test("offers a term and a summer dial, within the school's own limits", () => {
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    const dials = Array.from(root.querySelectorAll(".dial input")) as unknown as HTMLInputElement[];
+    expect(dials).toHaveLength(2);
+    // 12 is full time and 18.5 the ceiling advisor approval alone can reach.
+    expect(dials[0]?.min).toBe("12");
+    expect(dials[0]?.max).toBe("18.5");
+    expect(dials[1]?.min).toBe("0");
+  });
+
+  test("says what the school would call a load of that size", () => {
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    expect(root.querySelector(".dials")?.textContent).toContain("a normal load");
+
+    const perTerm = root.querySelector(".dial input") as unknown as HTMLInputElement;
+    perTerm.value = "18";
+    perTerm.dispatchEvent(new window.Event("input") as unknown as Event);
+    expect(root.querySelector(".dials")?.textContent).toContain("overblock tuition");
+
+    perTerm.value = "12";
+    perTerm.dispatchEvent(new window.Event("input") as unknown as Event);
+    expect(root.querySelector(".dials")?.textContent).toContain("under a normal load");
+    localStorage.removeItem("cedarville:load");
+  });
+
+  test("remembers the load across a remount", () => {
+    const view = build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    const perTerm = root.querySelector(".dial input") as unknown as HTMLInputElement;
+    perTerm.value = "17";
+    perTerm.dispatchEvent(new window.Event("input") as unknown as Event);
+    view.destroy();
+
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    expect((root.querySelector(".dial input") as unknown as HTMLInputElement).value).toBe("17");
+    localStorage.removeItem("cedarville:load");
+  });
+});

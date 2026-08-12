@@ -144,10 +144,12 @@ export function eligibility(
   for (const requisite of node.requisites) {
     if (!requisite.required) continue;
 
-    if (!requisite.understood) {
-      unclear.push(requisite.text);
-      continue;
-    }
+    // An unparseable requisite still usually names courses: "Take CS-3310,
+    // junior status, and permission of instructor". Record the doubt, then go
+    // on to check the courses anyway — skipping them reports no blockers at
+    // all, which reads as "nothing in the way" and is the opposite of true.
+    if (!requisite.understood) unclear.push(requisite.text);
+    if (requisite.courses.length === 0) continue;
 
     // A corequisite is satisfied by taking it now; a prerequisite is not.
     const satisfies = (code: string) =>

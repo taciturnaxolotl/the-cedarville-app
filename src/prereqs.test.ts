@@ -202,6 +202,25 @@ describe("eligibility", () => {
     expect(eligibility(either, new Set())).toMatchObject({ state: "blocked" });
   });
 
+  // The doubt does not erase the courses the text names. Reporting no
+  // blockers at all reads as "nothing in the way", which is the opposite.
+  test("an unparseable condition still names the courses it mentions", () => {
+    const mixed: CourseNode = {
+      code: "Z-1000",
+      title: "Z",
+      requisites: [req("Take CS-3310, junior status, and permission of instructor.")],
+    };
+    const verdict = eligibility(mixed, new Set());
+    expect(verdict.state).toBe("unknown");
+    expect(verdict.blockedBy).toEqual(["CS-3310"]);
+
+    // And once that course is done, only the human condition remains.
+    expect(eligibility(mixed, new Set(["CS-3310"]))).toMatchObject({
+      state: "unknown",
+      blockedBy: [],
+    });
+  });
+
   test("an unparseable condition reports unknown, never open", () => {
     const gated: CourseNode = {
       code: "PA-5000",

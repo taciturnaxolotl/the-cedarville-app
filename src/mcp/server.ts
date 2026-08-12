@@ -17,6 +17,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import { aliasesOf, buildEquivalences } from "../equivalence";
 import { merge } from "../merge";
 import { criticalPath, projectPlan, type Season, termsFrom } from "../planner";
 import {
@@ -304,13 +305,34 @@ function planningContext() {
     })),
   );
 
+  // Colleague publishes course equivalence on section records, not on the
+  // catalog view, so a transcript from an earlier catalog year still matches.
+  const codeForId = new Map(records.map((c) => [String(c.Id), `${c.SubjectCode}-${c.Number}`]));
+  const equivalences = buildEquivalences(
+    [...fall.sections, ...summer.sections]
+      .map((s) => ({
+        code: s.CourseName,
+        // Declared on the nested course record, not on the section itself.
+        equatedIds: ((s as { Course?: { EquatedCourseIds?: string[] } }).Course?.EquatedCourseIds ??
+          []) as string[],
+      }))
+      .filter((x) => x.code && x.equatedIds.length),
+    (id) => codeForId.get(id),
+  );
+
   const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseName));
   const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));
   // Spring is unpublished; absence from fall is taken to mean spring.
   const offeredIn = (code: string, season: Season) =>
     season === "summer" ? inSummer.has(code) : season === "fall" ? inFall.has(code) : true;
 
-  return { graph, titles, offeredIn, credits: (c: string) => credits.get(c) ?? 3 };
+  return {
+    graph,
+    titles,
+    offeredIn,
+    aliases: (c: string) => aliasesOf(equivalences, c),
+    credits: (c: string) => credits.get(c) ?? 3,
+  };
 }
 
 function registerPersonal(server: McpServer) {
@@ -431,7 +453,7 @@ function registerPersonal(server: McpServer) {
           `No captured evaluation${program ? ` for ${program}` : ""}. Have: ${Object.keys(trees).join(", ") || "none"}`,
         );
 
-      const { graph, credits, offeredIn, titles } = planningContext();
+      const { graph, credits, offeredIn, titles, aliases } = planningContext();
       const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
       const season = start.startsWith("SP") ? "spring" : "fall";
       const year = 2000 + Number(start.slice(2));
@@ -442,6 +464,7 @@ function registerPersonal(server: McpServer) {
         graph,
         credits,
         offeredIn,
+        aliases,
         slots: termsFrom({ year, season: season as "spring" | "fall" }, 12, {
           capacity: credits_per_term,
           includeSummers: include_summers,

@@ -292,3 +292,28 @@ describe("stale requisite references", () => {
     expect(eligibility(node, new Set())).toMatchObject({ state: "blocked" });
   });
 });
+
+describe("requisites met by an equivalent course", () => {
+  const aliases = (code: string) => (code === "EGCP-1010" ? ["EGCP-1010", "ENGR-1910"] : [code]);
+
+  test("a prerequisite is satisfied by the course that replaced it", () => {
+    const node: CourseNode = {
+      code: "EGCP-2120",
+      title: "Microcontrollers",
+      requisites: [req("Take EGCP-1010")],
+    };
+    expect(eligibility(node, new Set(["ENGR-1910"]))).toMatchObject({ state: "blocked" });
+    expect(eligibility(node, new Set(["ENGR-1910"]), new Set(), { aliases })).toMatchObject({
+      state: "open",
+    });
+  });
+
+  test("an equivalent completion also clears a phantom reference", () => {
+    const node: CourseNode = { code: "X-1000", title: "x", requisites: [req("Take ENGR-1910")] };
+    const verdict = eligibility(node, new Set(["EGCP-1010"]), new Set(), {
+      aliases: (c) => (c === "ENGR-1910" ? ["ENGR-1910", "EGCP-1010"] : [c]),
+      exists: () => false,
+    });
+    expect(verdict.state).toBe("open");
+  });
+});

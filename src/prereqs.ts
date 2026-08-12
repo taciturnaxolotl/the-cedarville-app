@@ -135,6 +135,12 @@ export type Eligibility =
  */
 export interface EligibilityOptions {
   /**
+   * Codes that count as a given course. A transcript from an earlier catalog
+   * year carries course codes the current one has never heard of, and
+   * Colleague tracks the equivalences itself.
+   */
+  aliases?: (code: string) => string[];
+  /**
    * Whether a course exists in the catalog at all.
    *
    * Each entering class is locked to a catalog year, and courses are retired
@@ -168,10 +174,16 @@ export function eligibility(
     if (!requisite.understood) unclear.push(requisite.text);
     if (requisite.courses.length === 0) continue;
 
+    // A corequisite is satisfied by taking it now; a prerequisite is not.
+    const satisfies = (code: string) =>
+      (options.aliases ? options.aliases(code) : [code]).some(
+        (c) => completed.has(c) || (requisite.timing !== "before" && alsoTaking.has(c)),
+      );
+
     // A prerequisite naming a course the catalog does not have is a stale
     // reference, not a wall. Say so rather than blocking forever.
     const phantom = options.exists
-      ? requisite.courses.filter((c) => !options.exists!(c) && !completed.has(c))
+      ? requisite.courses.filter((c) => !options.exists!(c) && !satisfies(c))
       : [];
     if (phantom.length === requisite.courses.length) {
       unclear.push(
@@ -179,10 +191,6 @@ export function eligibility(
       );
       continue;
     }
-
-    // A corequisite is satisfied by taking it now; a prerequisite is not.
-    const satisfies = (code: string) =>
-      completed.has(code) || (requisite.timing !== "before" && alsoTaking.has(code));
 
     const met =
       requisite.mode === "any"

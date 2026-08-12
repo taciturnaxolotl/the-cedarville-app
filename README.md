@@ -170,6 +170,19 @@ Calculus II, is named by five courses, and no longer exists — today it is
 `MATH-1715`. A few entries also carry transposed subject codes (`CLUM` for
 `CLMU`, `EDMU` for `MUED`) or name subjects that are gone.
 
+Where Colleague *does* track the drift, it is worth using. `EquatedCourseIds`
+declares which courses count as each other — `ENGR-1910` is now `EGCP-1010`,
+`COM-1410` is now `THTR-1410` — and it is published on section records, not on
+the catalog view. Harvesting it yields 323 linked codes, so a transcript
+carrying an older catalog's codes still matches modern requirements.
+
+It resolves only 3 of the 27 phantoms, and the reason is worth stating.
+`MATH-1720` and `MATH-1715` are both Calculus II and one replaced the other,
+but they carry 5 and 4 credits and Colleague equates neither to the other.
+They are different courses, not a renumbering. Inferring equivalence from
+adjacent numbers would tell a student a requirement is met when it is not, so
+`buildEquivalences` only ever reads what the registrar declared.
+
 The same drift shows up a second way: about 1% of course codes carry two
 records, a course being retired beside its replacement, both live during the
 transition. Colleague tells them apart by id and picks per the student's

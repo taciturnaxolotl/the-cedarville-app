@@ -32,6 +32,8 @@ export interface PlanRequest {
   credits: (code: string) => number;
   /** Whether a course is taught in a season, as far as we have seen. */
   offeredIn: (code: string, season: Season) => boolean;
+  /** Codes that count as a given course, for transcripts from older catalogs. */
+  aliases?: (code: string) => string[];
   slots: TermSlot[];
 }
 
@@ -66,7 +68,7 @@ export interface Plan {
  * longest chain, and putting gates first is exactly how you shorten it.
  */
 export function projectPlan(request: PlanRequest): Plan {
-  const { graph, credits, offeredIn, slots } = request;
+  const { graph, credits, offeredIn, slots, aliases } = request;
   const taken = new Set(request.completed);
   // Callers assemble `need` from requirement pools, which happily list work
   // already done; scheduling it again would invent terms out of nothing.
@@ -99,6 +101,7 @@ export function projectPlan(request: PlanRequest): Plan {
       // authority on which requisite references have gone stale.
       const verdict = eligibility(node, taken, new Set(courses.map((c) => c.code)), {
         exists: (c) => graph.courses.has(c),
+        ...(aliases ? { aliases } : {}),
       });
 
       // A named-but-unverifiable prerequisite is still a prerequisite. Reading

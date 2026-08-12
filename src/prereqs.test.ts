@@ -6,6 +6,7 @@ import {
   downstream,
   eligibility,
   parseRequisite,
+  prerequisitesOf,
 } from "./prereqs";
 
 const BEFORE = "- Must be completed prior to taking this course.";
@@ -360,5 +361,42 @@ describe("a requisite spanning a curriculum change", () => {
     expect(verdict.state).toBe("unknown");
     expect(verdict.blockedBy).toEqual([]);
     if (verdict.state === "unknown") expect(verdict.why[0]).toContain("MATH-1720");
+  });
+});
+
+describe("the chain behind a course", () => {
+  const graph = buildGraph([
+    { code: "DEEP-4000", title: "", requisites: [req("Take DEEP-3000")] },
+    { code: "DEEP-3000", title: "", requisites: [req("Take DEEP-2000")] },
+    { code: "DEEP-2000", title: "", requisites: [] },
+    { code: "EITHER-3000", title: "", requisites: [req("Take DEEP-2000 or DEEP-3000")] },
+    { code: "COREQ-3000", title: "", requisites: [req("Take DEEP-2000", WITH)] },
+    { code: "LOOP-1000", title: "", requisites: [req("Take LOOP-2000")] },
+    { code: "LOOP-2000", title: "", requisites: [req("Take LOOP-1000")] },
+  ]);
+
+  test("collects the whole transitive chain", () => {
+    expect([...prerequisitesOf(graph, "DEEP-4000")].sort()).toEqual(["DEEP-2000", "DEEP-3000"]);
+  });
+
+  test("stops at what is already passed", () => {
+    expect([...prerequisitesOf(graph, "DEEP-4000", new Set(["DEEP-3000"]))]).toEqual([]);
+  });
+
+  test("takes the shallowest branch when a requisite offers a choice", () => {
+    // DEEP-2000 is takeable now; DEEP-3000 would drag its own chain along.
+    expect([...prerequisitesOf(graph, "EITHER-3000")]).toEqual(["DEEP-2000"]);
+  });
+
+  test("a corequisite gates nothing", () => {
+    expect([...prerequisitesOf(graph, "COREQ-3000")]).toEqual([]);
+  });
+
+  test("a cycle in the catalog terminates", () => {
+    expect([...prerequisitesOf(graph, "LOOP-1000")].sort()).toEqual(["LOOP-1000", "LOOP-2000"]);
+  });
+
+  test("a course the catalog does not have contributes nothing", () => {
+    expect([...prerequisitesOf(graph, "GHOST-1000")]).toEqual([]);
   });
 });

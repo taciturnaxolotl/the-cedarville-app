@@ -222,6 +222,47 @@ export function eligibility(
 }
 
 /**
+ * Every course that must be passed before `code`, transitively.
+ *
+ * Choosing a course is never just that course. A student who picks a 4000-level
+ * elective has also picked the two courses gating it, and pricing the choice
+ * without them says a three-credit decision when it is a nine-credit one.
+ *
+ * Where a requisite offers alternatives, the shallowest is taken — the same
+ * "cheapest satisfying path" the requirement solver uses, applied to time
+ * rather than credits.
+ */
+export function prerequisitesOf(
+  graph: Graph,
+  code: string,
+  completed: ReadonlySet<string> = new Set(),
+  seen = new Set<string>(),
+): Set<string> {
+  const needed = new Set<string>();
+  if (seen.has(code)) return needed; // A cycle in the catalog; do not hang on it.
+  seen.add(code);
+
+  for (const requisite of graph.courses.get(code)?.requisites ?? []) {
+    // A corequisite is taken alongside, so it gates nothing.
+    if (!requisite.required || requisite.timing === "with") continue;
+
+    const open = requisite.courses.filter((c) => !completed.has(c) && graph.courses.has(c));
+    if (open.length === 0) continue;
+
+    const chosen =
+      requisite.mode === "any"
+        ? [open.reduce((a, b) => (depth(graph, a) <= depth(graph, b) ? a : b))]
+        : open;
+
+    for (const needs of chosen) {
+      needed.add(needs);
+      for (const deeper of prerequisitesOf(graph, needs, completed, seen)) needed.add(deeper);
+    }
+  }
+  return needed;
+}
+
+/**
  * Everything that becomes reachable once `code` is done, transitively.
  *
  * This is the number that should drive planning order: a course gating eleven

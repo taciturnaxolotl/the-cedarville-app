@@ -19,7 +19,15 @@ import { CatalogStore } from "./src/server/store";
 
 const PORT = 5173;
 const ROOT = "public";
-const REFRESH_EVERY_MS = 6 * 60 * 60 * 1000;
+/**
+ * How often to *consider* refreshing, deliberately much shorter than how
+ * stale a catalog is allowed to get. Ticking at exactly the staleness
+ * threshold means the catalog is always a few seconds too young when the
+ * timer fires, so every other cycle is skipped and the real cadence quietly
+ * doubles.
+ */
+const TICK_MS = 30 * 60 * 1000;
+const MAX_AGE_HOURS = 6;
 const dev = process.env.NODE_ENV !== "production";
 
 await mkdir(".data", { recursive: true });
@@ -119,7 +127,7 @@ for (const row of store.stats()) {
 async function keepWarm() {
   try {
     for (const { code } of await availableTerms()) {
-      if (isStale(store.read(code))) await refresh(code);
+      if (isStale(store.read(code), MAX_AGE_HOURS)) await refresh(code);
     }
   } catch (err) {
     console.warn(`term list unavailable — ${err instanceof Error ? err.message : err}`);
@@ -128,5 +136,5 @@ async function keepWarm() {
 
 if (process.env.CRAWL !== "off") {
   void keepWarm();
-  setInterval(keepWarm, REFRESH_EVERY_MS);
+  setInterval(keepWarm, TICK_MS);
 }

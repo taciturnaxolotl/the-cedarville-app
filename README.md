@@ -73,8 +73,12 @@ to anyone: it is what the signed-out search page uses. One search in
 `SectionListing` view returns sections directly, so a whole term is about sixty
 pages rather than one request per course.
 
-The server therefore crawls the catalog itself, anonymously, on boot and every
-six hours, and caches it in SQLite. Fall 2026 is 1784 sections across 943
+The server therefore crawls the catalog itself, anonymously, on boot and then
+whenever a term's cache passes six hours old, and caches it in SQLite. It
+checks every thirty minutes rather than every six hours: ticking at exactly
+the staleness threshold means the catalog is always a few seconds too young
+when the timer fires, so every other cycle gets skipped and the real cadence
+quietly doubles. Fall 2026 is 1784 sections across 943
 courses and takes about thirty seconds. No student session is spent on data
 that is identical for all of them, and the registrar sees one crawl instead of
 one per user.

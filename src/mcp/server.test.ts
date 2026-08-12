@@ -181,6 +181,33 @@ describe("the opt-in boundary", () => {
   }, 20_000);
 });
 
+describe("planning tools", () => {
+  // These need a captured evaluation, which the seeded temp DB does not have,
+  // so assert the failure is legible rather than a crash.
+  test("plan_terms explains itself when there is no capture", async () => {
+    const replies = await session(
+      ["--personal"],
+      [
+        {
+          jsonrpc: "2.0",
+          id: 11,
+          method: "tools/call",
+          params: { name: "plan_terms", arguments: { program: "NOPE.XX" } },
+        },
+      ],
+    );
+    const body = replies.get(11)?.result?.content?.[0]?.text ?? "";
+    expect(replies.get(11)?.result?.isError).toBe(true);
+    expect(body.toLowerCase()).toMatch(/no captured evaluation|evaluations\.json/);
+  }, 20_000);
+
+  test("critical_path is registered only with --personal", async () => {
+    expect(await listTools()).not.toContain("critical_path");
+    expect(await listTools(["--personal"])).toContain("plan_terms");
+    expect(await listTools(["--personal"])).toContain("critical_path");
+  }, 20_000);
+});
+
 describe("catalog tools", () => {
   test("an unknown term is an error, not an empty success", async () => {
     const replies = await session(

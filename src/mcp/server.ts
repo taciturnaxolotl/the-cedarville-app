@@ -18,6 +18,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import { merge } from "../merge";
+import { criticalPath, projectPlan, type Season, termsFrom } from "../planner";
 import {
   buildGraph,
   type CourseNode,
@@ -33,6 +34,7 @@ import {
   normalize,
   openGroups,
   type ProgramTree,
+  walkGroups,
 } from "../requirements";
 import { conflicts, DAY_NAMES, formatTime, offeringsFromListing } from "../schedule";
 import { CatalogStore } from "../server/store";
@@ -275,6 +277,61 @@ async function loadTrees(): Promise<Record<string, ProgramTree>> {
   );
 }
 
+/** Shared setup for the planning tools: graph, credits, seasons. */
+function planningContext() {
+  const fall = store.read("2026FA");
+  const summer = store.read("2026SU");
+  const records = [...(fall.courses ?? []), ...(summer.courses ?? [])];
+
+  const credits = new Map(
+    records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
+  );
+  const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
+  const graph = buildGraph(
+    records.map((c) => ({
+      code: `${c.SubjectCode}-${c.Number}`,
+      title: c.Title,
+      requisites: (c.CourseRequisites ?? []).map(parseRequisite),
+    })),
+  );
+
+  const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseName));
+  const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));
+  // Spring is unpublished; absence from fall is taken to mean spring.
+  const offeredIn = (code: string, season: Season) =>
+    season === "summer" ? inSummer.has(code) : season === "fall" ? inFall.has(code) : true;
+
+  return { graph, titles, offeredIn, credits: (c: string) => credits.get(c) ?? 3 };
+}
+
+/** Named requirements, plus enough of each choose-from pool to meet its minimum. */
+function requiredCourses(
+  tree: ProgramTree,
+  credits: (c: string) => number,
+  have: ReadonlySet<string>,
+): Set<string> {
+  const need = new Set<string>();
+  for (const { requirement, group } of walkGroups(tree)) {
+    const label = group.text || requirement.text;
+    if (/Graphic Design|Linguistics|Video Game|Artificial Intelligence Track/i.test(label))
+      continue;
+    const c = group.constraint;
+    if (c.kind === "take-all") {
+      for (const x of c.courses) need.add(x.CourseName);
+    } else if (c.kind === "choose-from" && group.status.completion !== "Completed") {
+      let want = group.min.credits ?? 3;
+      for (const x of c.courses
+        .filter((x) => !have.has(x.CourseName))
+        .sort((a, b) => credits(a.CourseName) - credits(b.CourseName))) {
+        if (want <= 0) break;
+        need.add(x.CourseName);
+        want -= credits(x.CourseName);
+      }
+    }
+  }
+  return need;
+}
+
 function registerPersonal(server: McpServer) {
   server.registerTool(
     "my_requirements",
@@ -363,6 +420,100 @@ function registerPersonal(server: McpServer) {
       if (rows.length === 0) return text("Nothing matches.");
       return text(
         [`${done.size} completed, ${now.size} in progress`, ...rows.slice(0, 200)].join("\n"),
+      );
+    },
+  );
+
+  server.registerTool(
+    "plan_terms",
+    {
+      description:
+        "Project which term each remaining requirement lands in, respecting prerequisites, seasons and a credit cap. Answers 'when do I graduate' rather than 'how many credits'.",
+      inputSchema: z.object({
+        program: z.string().default("BS.CYOPR").describe('Program code, e.g. "BS.CYOPR".'),
+        credits_per_term: z.number().int().min(6).max(21).default(15),
+        include_summers: z.boolean().default(true),
+        start: z
+          .string()
+          .default("SP27")
+          .describe('First term to plan, e.g. "SP27". The term in progress is excluded.'),
+      }),
+    },
+    async ({ program, credits_per_term, include_summers, start }) => {
+      const trees = await loadTrees();
+      const tree = trees[program];
+      if (!tree)
+        return fail(
+          `No captured evaluation for ${program}. Have: ${Object.keys(trees).join(", ")}`,
+        );
+
+      const { graph, credits, offeredIn, titles } = planningContext();
+      const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
+      const season = start.startsWith("SP") ? "spring" : "fall";
+      const year = 2000 + Number(start.slice(2));
+
+      const plan = projectPlan({
+        need: requiredCourses(tree, credits, have),
+        completed: have,
+        graph,
+        credits,
+        offeredIn,
+        slots: termsFrom({ year, season: season as "spring" | "fall" }, 12, {
+          capacity: credits_per_term,
+          includeSummers: include_summers,
+        }),
+      });
+
+      const toGo = tree.credits.minimum - tree.credits.completed - tree.credits.inProgress;
+      const lines = [
+        `${program}: ${toGo} credits remain; this plan schedules ${plan.totalCredits} across named requirements.`,
+        `Finishes ${plan.finishes ?? "never within the horizon"} at ${credits_per_term}/term${include_summers ? " with summers" : ""}.`,
+        "",
+      ];
+      for (const term of plan.terms) {
+        lines.push(`${term.slot.name}  (${term.credits} cr)`);
+        for (const c of term.courses) {
+          lines.push(
+            `   ${c.code.padEnd(11)} ${String(c.credits).padStart(2)}  ${titles.get(c.code) ?? ""}${c.caution ? "   [verify: unparsed condition]" : ""}`,
+          );
+        }
+      }
+      if (plan.unscheduled.length) {
+        lines.push("", "not placed:");
+        for (const u of plan.unscheduled) lines.push(`   ${u.code.padEnd(11)} ${u.why}`);
+      }
+      lines.push(
+        "",
+        "Caveats: class standing is not modelled, so senior capstones may appear early;",
+        "spring offerings are inferred from absence in the fall catalog.",
+      );
+      return text(lines.join("\n"));
+    },
+  );
+
+  server.registerTool(
+    "critical_path",
+    {
+      description:
+        "The longest chain of prerequisites still ahead. This is the floor on how many terms remain, and no credit load shortens it.",
+      inputSchema: z.object({ program: z.string().default("BS.CYOPR") }),
+    },
+    async ({ program }) => {
+      const trees = await loadTrees();
+      const tree = trees[program];
+      if (!tree) return fail(`No captured evaluation for ${program}.`);
+
+      const { graph, credits, titles } = planningContext();
+      const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
+      const path = criticalPath(graph, requiredCourses(tree, credits, have), have);
+      if (path.length === 0) return text("Nothing left with prerequisites.");
+
+      return text(
+        [
+          `${path.length} terms minimum, whatever the credit load:`,
+          "",
+          ...path.map((c, i) => `  ${i + 1}. ${c.padEnd(11)} ${titles.get(c) ?? ""}`),
+        ].join("\n"),
       );
     },
   );

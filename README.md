@@ -26,6 +26,7 @@ another tab, and click capture.
     src/merge.ts         which course satisfies a requirement in both majors
     src/schedule.ts      meeting times, seat counts, and date-aware conflicts
     src/prereqs.ts       what a course needs, and what needs it
+    src/planner.ts       which term each requirement lands in
     src/catalog.ts        the one shape that is public rather than personal
     src/server/colleague.ts  guest client: the catalog needs no session
     src/server/crawler.ts    one term per crawl, ~60 pages
@@ -118,9 +119,10 @@ Five tools are always available, over public catalog data:
 `list_terms`, `search_courses`, `course_details`, `list_sections`,
 `check_conflicts`.
 
-Three more read a captured evaluation, and are **only registered when the
+Five more read a captured evaluation, and are **only registered when the
 server is started with `--personal`** (or `CEDARVILLE_MCP_PERSONAL=1`):
-`my_requirements`, `my_eligibility`, `compare_programs`.
+`my_requirements`, `my_eligibility`, `compare_programs`, `plan_terms`,
+`critical_path`.
 
 The opt-in is structural, not a runtime check. Without the flag those tools do
 not appear in `tools/list` and calling one returns "tool not found" — there is
@@ -129,6 +131,23 @@ none of them can register for a class or write anything back to Colleague.
 
 The server reads `.data/catalog.sqlite` directly, so the planner server does
 not need to be running, but a crawl must have happened at least once.
+
+### planning
+
+`src/planner.ts` answers the question a credit total cannot: *when*. Credits
+set a floor, but a four-deep prerequisite chain cannot be compressed by taking
+a heavier load, and a spring-only course cannot move to autumn.
+
+```sh
+bun scripts/plan-doc.ts     # writes .data/plan.md
+```
+
+The same engine backs the `plan_terms` and `critical_path` MCP tools. Four
+things it deliberately does not model, each of which can move a date: class
+standing (so senior capstones may be placed years early), coherence within a
+language sequence, the unpublished spring catalog, and shared-credit caps
+between programs. The generated doc lists them at the bottom rather than
+implying a precision it does not have.
 
 ### dumping a session (local only)
 

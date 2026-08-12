@@ -27,6 +27,25 @@ export interface TermCatalog {
 }
 
 /**
+ * Colleague names a term "2026SP", which sorts alphabetically and wrongly:
+ * `FA` precedes `SP`, so a plain sort puts autumn ahead of the spring before
+ * it. An academic year runs spring, summer, autumn.
+ */
+const SEASON_ORDER: Record<string, number> = { SP: 0, SU: 1, FA: 2 };
+
+/** Sortable key for a term code, ascending in time. */
+export function termKey(code: string): number {
+  const year = Number(code.slice(0, 4));
+  return (Number.isFinite(year) ? year : 0) * 10 + (SEASON_ORDER[code.slice(4)] ?? 9);
+}
+
+/** Oldest first. Negate for newest first. */
+export const compareTerms = (a: string, b: string) => termKey(a) - termKey(b);
+
+/** "2026SP" as the projection writes it: "SP26". */
+export const shortTerm = (code: string) => `${code.slice(4)}${code.slice(2, 4)}`;
+
+/**
  * A course as the catalog view returns it. `CourseRequisites` is the only
  * machine-readable prerequisite data Colleague exposes: the section view
  * carries an opaque rule id instead.

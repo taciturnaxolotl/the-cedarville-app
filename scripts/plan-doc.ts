@@ -9,6 +9,7 @@
  */
 
 import { absorbed, creditCeiling, impliedOverlap, matchProgram, totalCredits } from "../src/book";
+import { compareTerms } from "../src/catalog";
 import { criticalPath, projectPlan, type Season, termsFrom } from "../src/planner";
 import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
 import {
@@ -35,8 +36,9 @@ const cached = store
   .stats()
   .map((s) => s.term)
   .filter((t) => t !== "ALL")
-  .sort()
-  .reverse();
+  // Newest first, by the academic calendar rather than the alphabet: a plain
+  // sort puts "2026FA" before "2026SP" and calls the older term the newer one.
+  .sort((a, b) => compareTerms(b, a));
 const regularTerm = cached.find((t) => !t.includes("SU"));
 const summerTerm = cached.find((t) => t.includes("SU"));
 if (!regularTerm) throw new Error("no catalog cached; run the planner server once to crawl");

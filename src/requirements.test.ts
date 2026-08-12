@@ -1460,3 +1460,38 @@ describe("the transcript, by term", () => {
     expect(coursesTaken(tree)).toEqual([]);
   });
 });
+
+describe("the transcript runs in calendar order", () => {
+  const credit = (name: string, term: string) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: 3,
+    VerifiedGrade: "A",
+    Term: term,
+    IsCompletedCredit: true,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+  });
+
+  test("spring comes before the autumn of the same year", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          AppliedAcademicCredits: [
+            credit("A-1000", "2026FA"),
+            credit("B-1000", "2026SP"),
+            credit("C-1000", "2025FA"),
+            credit("D-1000", "2026SU"),
+          ],
+        }),
+      ]),
+    );
+    expect(coursesTaken(tree).map((t) => t.name)).toEqual(["FA25", "SP26", "SU26", "FA26"]);
+  });
+});

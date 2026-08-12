@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { ListingSection } from "./catalog";
-import { ageInHours, emptyCatalog, forCourses, isStale, type TermCatalog } from "./catalog";
+import {
+  ageInHours,
+  compareTerms,
+  emptyCatalog,
+  forCourses,
+  isStale,
+  shortTerm,
+  type TermCatalog,
+} from "./catalog";
 
 const HOUR = 3_600_000;
 const at = (iso: string, sections = 1): TermCatalog => ({
@@ -48,5 +56,38 @@ describe("narrowing", () => {
     };
     expect(forCourses(catalog, new Set(["2"])).map((s) => s.Id)).toEqual(["b"]);
     expect(forCourses(catalog, new Set())).toEqual([]);
+  });
+});
+
+describe("ordering terms", () => {
+  test("an academic year runs spring, summer, autumn", () => {
+    // The alphabet says FA, SP, SU — which puts autumn before the spring
+    // that preceded it and reads as a year of school in the wrong order.
+    expect(["2026FA", "2026SU", "2026SP"].sort(compareTerms)).toEqual([
+      "2026SP",
+      "2026SU",
+      "2026FA",
+    ]);
+  });
+
+  test("years come before seasons", () => {
+    expect(["2026SP", "2025FA"].sort(compareTerms)).toEqual(["2025FA", "2026SP"]);
+  });
+
+  test("newest first is the same comparator, negated", () => {
+    expect(["2025FA", "2026SP", "2026FA"].sort((a, b) => compareTerms(b, a))).toEqual([
+      "2026FA",
+      "2026SP",
+      "2025FA",
+    ]);
+  });
+
+  test("shortens a term the way the projection writes one", () => {
+    expect(shortTerm("2026SP")).toBe("SP26");
+    expect(shortTerm("2025FA")).toBe("FA25");
+  });
+
+  test("an unrecognised season sorts last within its year rather than throwing", () => {
+    expect(["2026XX", "2026FA"].sort(compareTerms)).toEqual(["2026FA", "2026XX"]);
   });
 });

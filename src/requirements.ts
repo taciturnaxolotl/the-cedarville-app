@@ -8,6 +8,7 @@
  * at every call site.
  */
 
+import { compareTerms, shortTerm } from "./catalog";
 import type {
   AppliedCredit,
   CourseRef,
@@ -530,7 +531,7 @@ export function coursesTaken(tree: ProgramTree): TakenTerm[] {
       seen.add(credit.CourseName);
 
       const term = byTerm.get(credit.Term) ?? {
-        name: `${credit.Term.slice(4)}${credit.Term.slice(2, 4)}`,
+        name: shortTerm(credit.Term),
         code: credit.Term,
         courses: [],
       };
@@ -542,7 +543,7 @@ export function coursesTaken(tree: ProgramTree): TakenTerm[] {
       byTerm.set(credit.Term, term);
     }
   }
-  return [...byTerm.values()].sort((a, b) => a.code.localeCompare(b.code));
+  return [...byTerm.values()].sort((a, b) => compareTerms(a.code, b.code));
 }
 
 /** Courses the student is enrolled in now, which satisfy a corequisite. */

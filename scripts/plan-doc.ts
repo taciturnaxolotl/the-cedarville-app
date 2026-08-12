@@ -8,6 +8,7 @@
  * Local only: it reads a transcript.
  */
 
+import { absorbed, creditCeiling, impliedOverlap, matchProgram, totalCredits } from "../src/book";
 import { criticalPath, projectPlan, type Season, termsFrom } from "../src/planner";
 import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
 import {
@@ -18,6 +19,7 @@ import {
   normalize,
 } from "../src/requirements";
 import { offeringsFromListing } from "../src/schedule";
+import type { Book } from "../src/server/book";
 import { resolveGroup } from "../src/server/colleague";
 import { CatalogStore } from "../src/server/store";
 
@@ -65,6 +67,19 @@ const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.cour
 const regularSeason: Season = regularTerm.includes("SP") ? "spring" : "fall";
 const offeredIn = (code: string, season: Season) =>
   season === "summer" ? inSummer.has(code) : season === regularSeason ? inFall.has(code) : true;
+
+/**
+ * The printed catalog, if it has been scraped. Colleague gives requirements;
+ * the book gives the arithmetic to check a plan against. Optional on purpose —
+ * a missing book costs the checksum, not the plan.
+ */
+const books = (
+  await Array.fromAsync(
+    new Bun.Glob("book-*.json").scan({ cwd: ".data", absolute: true }),
+    async (path) => (await Bun.file(path).json()) as Book,
+  )
+).sort((a, b) => b.year.localeCompare(a.year));
+const book = books[0];
 
 const snapshot = await Bun.file(".data/evaluations.json").json();
 // Whatever was captured, in capture order: no program code is named here.
@@ -144,6 +159,8 @@ for (const tree of trees) {
   w();
 
   const toGo = tree.credits.minimum - tree.credits.completed - tree.credits.inProgress;
+  const printed = book && matchProgram(book.programs, new Set([...need, ...have]));
+
   if (plan.totalCredits > toGo) {
     w(`This schedules ${plan.totalCredits} credits against a ${toGo}-credit gap, so read the date`);
     w("as an upper bound rather than a promise. A degree minimum is a floor, and the named");
@@ -151,6 +168,40 @@ for (const tree of trees) {
     w("general-education slot at once. The planner counts each course once, but cannot tell");
     w("which *other* slot it also fills, so it schedules for both.");
     w();
+  }
+
+  // The catalog is the only place the overlap is stated, so it is the only
+  // thing that can tell an honest over-schedule from a bookkeeping artefact.
+  if (printed) {
+    const ceiling = creditCeiling(printed);
+    const projected = tree.credits.completed + tree.credits.inProgress + plan.totalCredits;
+    const overlap = impliedOverlap(printed) + absorbed(printed, price);
+
+    w(
+      `Checked against the ${book.year} catalog, page ${printed.page} (“${printed.title}”, ${totalCredits(printed)} credits).`,
+    );
+    w();
+    if (overlap) {
+      w(`The catalog counts **${overlap} credits twice**, so a plan may legitimately exceed the`);
+      w("degree total by that much:");
+      w();
+      for (const d of printed.doubleCounts)
+        w(`- ${label(d.course)} also pays for the ${d.requirement} general education requirement`);
+      w();
+    } else {
+      w("The catalog's own arithmetic closes exactly: no course is declared as counting toward");
+      w("two requirements. Anything this plan schedules past the degree total is over-scheduling");
+      w("on our side rather than a requirement filling two slots.");
+      w();
+    }
+    if (ceiling !== undefined && projected > ceiling + overlap) {
+      w(
+        `⚠️ This plan reaches **${projected} credits** against a stated ceiling of ${ceiling + overlap}.`,
+      );
+      w(`That ${(projected - ceiling - overlap).toFixed(1)}-credit excess is a bug in this model,`);
+      w("not a feature of the degree. Treat the finish date as pessimistic.");
+      w();
+    }
   }
   for (const term of plan.terms) {
     w(`### ${term.slot.name} · ${term.credits} credits`);

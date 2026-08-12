@@ -111,21 +111,30 @@ function priceOf(candidate: Candidate): { text: string; kind: string; why: strin
         "something else past the end of the plan",
     };
   }
-  if (candidate.addedTerms === 0) {
-    return candidate.addedCredits === 0
-      ? { text: "free", kind: "free", why: "it fits in credits you are already spending" }
-      : {
-          text: `+${candidate.addedCredits} cr`,
-          kind: "cheap",
-          why: "extra credits, but the finish term does not move",
-        };
+  return delta(candidate.addedTerms, candidate.addedCredits);
+}
+
+/** Signs the numbers, so a saving reads as one rather than as "free". */
+function delta(terms: number, credits: number): { text: string; kind: string; why: string } {
+  const signed = (n: number, unit: string) =>
+    `${n > 0 ? "+" : "−"}${Math.abs(n)} ${unit}${unit === "term" && Math.abs(n) !== 1 ? "s" : ""}`;
+
+  if (terms === 0 && credits === 0) {
+    return { text: "free", kind: "free", why: "it fits in credits you are already spending" };
   }
-  const terms = `+${candidate.addedTerms} term${candidate.addedTerms === 1 ? "" : "s"}`;
-  return {
-    text: `${terms}, +${candidate.addedCredits} cr`,
-    kind: "bad",
-    why: "choosing this pushes your finish date out",
-  };
+  if (terms === 0) {
+    return credits < 0
+      ? {
+          text: signed(credits, "cr"),
+          kind: "free",
+          why: "switching to this gives you those credits back",
+        }
+      : { text: signed(credits, "cr"), kind: "cheap", why: "extra credits, but the date holds" };
+  }
+  const both = `${signed(terms, "term")}, ${signed(credits, "cr")}`;
+  return terms < 0
+    ? { text: both, kind: "free", why: "switching to this brings your finish date in" }
+    : { text: both, kind: "bad", why: "choosing this pushes your finish date out" };
 }
 
 export function mount(root: HTMLElement, ctx: Ctx) {
@@ -200,10 +209,12 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     return { destroy: () => root.replaceChildren() };
   }
 
-  const have = new Set([
-    ...completedCourses(trees[0] as ProgramTree),
-    ...inProgressCourses(trees[0] as ProgramTree),
-  ]);
+  const passed = completedCourses(trees[0] as ProgramTree);
+  const running = inProgressCourses(trees[0] as ProgramTree);
+  // A plan starts after this term, so a course under way counts as held — but
+  // telling a student they "already passed" something they sit for in December
+  // is simply untrue, so the two are kept apart for the wording.
+  const have = new Set([...passed, ...running]);
   const price = (c: string) => credits.get(c) ?? 3;
 
   // ---- fetching --------------------------------------------------------
@@ -382,10 +393,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     // A course already passed counts as much as one the degree forces on you,
     // and counts more plainly: HON-1010 met the humanities slot two years ago,
     // and listing HUM-1400 at "+1 term" implies work that is behind you.
-    const done = choice.satisfiedBy.map((c) => ({ code: c.code, credits: c.credits, done: true }));
+    const done = choice.satisfiedBy.map((c) => ({
+      code: c.code,
+      credits: c.credits,
+      done: passed.has(c.code),
+      running: running.has(c.code) && !passed.has(c.code),
+    }));
     const forced = choice.candidates
       .filter((c) => c.forced)
-      .map((c) => ({ code: c.code, credits: c.credits, done: false }));
+      .map((c) => ({ code: c.code, credits: c.credits, done: false, running: false }));
     const covering = [...done, ...forced];
     const covered = covering.reduce((n, c) => n + c.credits, 0);
     return covered >= choice.credits ? covering : [];
@@ -520,19 +536,17 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             row.append(pick);
             row.append(el("span", "label", option.label));
 
-            if (option.status.completion === "Completed") {
+            if (done) {
               row.append(tag("already met", "free"));
             } else if (option.addedTerms === null) {
               row.append(tag("won't schedule", "bad"));
-            } else if (option.addedTerms === 0 && option.addedCredits === 0) {
-              row.append(tag("cheapest", "free"));
+            } else if (option.taken) {
+              row.append(tag("current", "free"));
             } else {
-              const terms = option.addedTerms
-                ? `+${option.addedTerms} term${option.addedTerms === 1 ? "" : "s"}, `
-                : "";
-              row.append(
-                tag(`${terms}+${option.addedCredits} cr`, option.addedTerms ? "bad" : "cheap"),
-              );
+              const cost = delta(option.addedTerms, option.addedCredits);
+              const badge = tag(cost.text, cost.kind);
+              badge.title = cost.why;
+              row.append(badge);
             }
             box.append(row);
           }
@@ -573,7 +587,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
                 "p",
                 "muted",
                 `${met.map((c) => c.code).join(" and ")} covers this — ` +
-                  `${met.every((c) => c.done) ? "already passed" : met.some((c) => c.done) ? "partly passed, partly required anyway" : "your degree requires it anyway"}. ` +
+                  `${met.every((c) => c.running) ? "you are taking it now" : met.some((c) => c.done || c.running) ? "already on your transcript" : "your degree requires it anyway"}. ` +
                   "Pick more if you want them; they will be priced like anything else.",
               ),
             );

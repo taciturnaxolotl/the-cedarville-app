@@ -1002,10 +1002,8 @@ describe("build view — a route already walked", () => {
     expect(box.querySelector(".reset")).toBeNull();
   });
 
-  test("a requirement met by a course already passed says so", () => {
-    // HON-1010 met the humanities slot years ago; listing HUM-1400 at a term's
-    // cost implies work that is behind you.
-    const tree = normalize(
+  const humanities = (credit: ReturnType<typeof applied>) =>
+    normalize(
       program("BS.CYOPR", [
         group({
           Id: "hum",
@@ -1013,14 +1011,59 @@ describe("build view — a route already walked", () => {
           FromCourses: [course("1", "HUM", "1400"), course("2", "HON", "1010")],
           MinCredits: 3,
           CompletionStatus: "PartiallyCompleted",
-          AppliedAcademicCredits: [applied("HON-1010", 5)],
+          AppliedAcademicCredits: [credit],
         }),
       ]),
     );
-    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+
+  test("a requirement met by coursework on the transcript says so", () => {
+    // Listing HUM-1400 at a term's cost implies work that is behind you.
+    build.mount(root, { trees: [humanities(applied("HON-1010", 5))], enrolled: ["BS.CYOPR"] });
     const box = root.querySelector(".choice.met") as unknown as HTMLElement;
     expect(box).toBeTruthy();
     expect(box.textContent).toContain("HON-1010 covers this");
-    expect(box.textContent).toContain("already passed");
+    expect(box.textContent).toContain("already on your transcript");
+  });
+
+  test("a course under way is not described as passed", () => {
+    // A plan starts after this term, so it counts as held — but a student
+    // sitting the exam in December has not "already passed" anything.
+    const running = { ...applied("HON-1010", 5), IsCompletedCredit: false, VerifiedGrade: "" };
+    build.mount(root, { trees: [humanities(running)], enrolled: ["BS.CYOPR"] });
+    const box = root.querySelector(".choice.met") as unknown as HTMLElement;
+    expect(box.textContent).toContain("you are taking it now");
+    expect(box.textContent).not.toContain("passed");
+  });
+});
+
+describe("build view — a saving reads as a saving", () => {
+  const graph = [
+    { SubjectCode: "CS", Number: "3220", Title: "Web", MinimumCredits: 3 },
+    { SubjectCode: "ART", Number: "1100", Title: "Drawing", MinimumCredits: 9 },
+  ] as unknown as NonNullable<Ctx["allCourses"]>;
+
+  const elective = normalize(
+    program("BS.CYOPR", [
+      group({
+        Id: "e",
+        DisplayText: "One elective",
+        FromCourses: [course("1", "CS", "3220"), course("9", "ART", "1100")],
+        MinCredits: 3,
+      }),
+    ]),
+  );
+
+  test("shows what switching back would give you", () => {
+    build.mount(root, { trees: [elective], enrolled: ["BS.CYOPR"], allCourses: graph });
+    const rows = () => Array.from(root.querySelectorAll(".candidate"));
+
+    // Pin the nine-credit course, then the three-credit one is a six-credit
+    // saving — not "free", which is what a clamp at zero would have said.
+    const art = rows().find((r) => r.textContent?.includes("ART-1100"))!;
+    (art.querySelector(".pick") as unknown as HTMLElement).click();
+
+    const cs = rows().find((r) => r.textContent?.includes("CS-3220"))!;
+    expect(cs.querySelector(".tag")?.textContent).toBe("−6 cr");
+    localStorage.removeItem("cedarville:pins");
   });
 });

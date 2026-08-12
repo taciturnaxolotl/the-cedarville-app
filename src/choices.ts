@@ -31,8 +31,10 @@ export interface Candidate {
   code: string;
   credits: number;
   /**
-   * Terms this choice adds to the finish date, against the cheapest plan.
+   * Terms this choice adds to the finish date, against the current plan.
    * Zero means free: taking it costs nothing you were not already paying.
+   * Negative means it would bring the date in — which happens once something
+   * dearer has been pinned and this is the way back.
    *
    * Null is the narrow case of a course that cannot be scheduled at all —
    * itself or its chain stranded, or something else pushed off the end by
@@ -192,19 +194,27 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     }
   }
 
-  // One price per course, not per course per group: the same course costs the
-  // same whichever pool it was reached from, and pools overlap heavily.
+  // Memoised per pool: within a requirement, picking one course means not
+  // picking another, so the same course can cost differently in two pools.
   type Price = { addedTerms: number | null; addedCredits: number; requires: string[] };
   const priced = new Map<string, Price>();
-  const price = (code: string): Price => {
-    const cached = priced.get(code);
+  const price = (code: string, pool: readonly string[]): Price => {
+    // Keyed by pool as well as course: a swap inside one requirement is a
+    // different question from the same swap inside another.
+    const key = `${pool.join(",")}|${code}`;
+    const cached = priced.get(key);
     if (cached) return cached;
 
     // Choosing a course chooses its prerequisites too, and they cost real
     // terms. Pinning the course alone would leave it unschedulable and report
     // the choice as impossible rather than merely expensive.
     const requires = [...prerequisitesOf(options.graph, code, options.have, solved.courses)];
-    const pinned = new Set([...(options.pinned ?? []), code, ...requires]);
+    // Within a requirement this is a swap, not an addition: picking one course
+    // from a pool means not picking another. Adding it on top would price the
+    // cheap alternative to an expensive pin as though you would take both, and
+    // a student looking to undo a costly choice would be told it costs more.
+    const kept = [...(options.pinned ?? [])].filter((c) => c === code || !pool.includes(c));
+    const pinned = new Set([...kept, code, ...requires]);
     const withIt = coursesNeededAcross(trees, { ...options, pinned });
     const plan = planFor(withIt.courses, options);
 
@@ -217,12 +227,15 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
       requires.some((r) => stranded.has(r)) ||
       plan.unscheduled.length > baseUnplaced;
 
+    // Not clamped at zero. Once something expensive is pinned, the cheaper
+    // alternatives genuinely shorten the plan, and a saving reported as "free"
+    // is the one number a student most wants to see.
     const result: Price = {
-      addedTerms: blocked ? null : Math.max(0, finishIndex(plan, options.slots) - baseAt),
-      addedCredits: Math.max(0, plan.totalCredits - baseCredits),
+      addedTerms: blocked ? null : finishIndex(plan, options.slots) - baseAt,
+      addedCredits: plan.totalCredits - baseCredits,
       requires,
     };
-    priced.set(code, result);
+    priced.set(key, result);
     return result;
   };
 
@@ -288,7 +301,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     const ranked = rest.slice(0, budget).map((code) => ({
       code,
       credits: options.credits(code),
-      ...price(code),
+      ...price(code, choice.pool),
       satisfies: wanted.get(code) ?? [],
       forced: false,
       chosen: false,

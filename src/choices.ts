@@ -21,7 +21,6 @@ import {
   coursesNeededAcross,
   groupKey,
   type NeedOptions,
-  type OpenChoice,
   type ProgramTree,
   type Shortfall,
   type Unenumerable,

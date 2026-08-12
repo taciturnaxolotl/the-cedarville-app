@@ -11,14 +11,13 @@
  */
 
 import type { TermCatalog } from "../../catalog";
-import { buildMap, type CourseMap, type MapNode } from "../../map";
+import { buildMap, type CourseMap } from "../../map";
 import { projectPlan, type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite, prerequisitesOf } from "../../prereqs";
 import {
   completedCourses,
   coursesNeededAcross,
   expectedCredits,
-  groupKey,
   inProgressCourses,
   type ProgramTree,
 } from "../../requirements";

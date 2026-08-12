@@ -1459,7 +1459,7 @@ describe("map view", () => {
   test("hovering a course dims everything off its chain", () => {
     map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     const first = root.querySelector(".graph .node") as unknown as HTMLElement;
-    first.dispatchEvent(new window.Event("mouseenter"));
+    first.dispatchEvent(new window.Event("mouseenter") as unknown as Event);
     expect(root.textContent).toContain("tracing");
   });
 

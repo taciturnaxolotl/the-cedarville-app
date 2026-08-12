@@ -10,7 +10,7 @@
  * of the degree you have actually assembled rather than the cheapest one.
  */
 
-import type { TermCatalog } from "../../catalog";
+import { seasonsOffered } from "../../catalog";
 import { buildMap, type CourseMap } from "../../map";
 import { projectPlan, type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite, prerequisitesOf } from "../../prereqs";
@@ -92,17 +92,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     ),
   );
 
-  const seasonOf = (term: string): Season =>
-    term.includes("SU") ? "summer" : term.includes("SP") ? "spring" : "fall";
-  const known = new Map<Season, Set<string>>();
-  const learn = (term: string, sections: TermCatalog["sections"]) => {
-    const season = seasonOf(term);
-    const set = known.get(season) ?? new Set<string>();
-    for (const o of offeringsFromListing(sections)) set.add(o.courseName);
-    known.set(season, set);
+  // Which seasons a course runs in, as the registrar states it rather than as
+  // one term's section listing implies. See the note in the build view.
+  const seasons = new Map<string, ReturnType<typeof seasonsOffered>>(
+    records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]),
+  );
+  const offeredIn = (code: string, season: Season) => {
+    const stated = seasons.get(code);
+    return !stated?.length || stated.includes(season);
   };
-  if (catalog?.sections?.length) learn(catalog.term, catalog.sections);
-  const offeredIn = (code: string, season: Season) => known.get(season)?.has(code) ?? true;
 
   const stretched = expectedCredits(trees, (c) => ({
     min: credits.get(c) ?? 3,
@@ -122,25 +120,6 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   const solve = (resolved: Map<string, string[]>) =>
     coursesNeededAcross(trees, { credits: price, have, resolved, pinned, tracks, pursuing });
-
-  void catalogStatus()
-    .then(async (status) => {
-      const missing = status.terms
-        .map((t) => t.term)
-        .filter((t) => t !== "ALL" && t !== catalog?.term);
-      for (const term of missing) {
-        try {
-          const fetched = await fetchCatalog(term);
-          if (fetched.sections?.length) learn(term, fetched.sections);
-        } catch {
-          /* One term short is a weaker picture, not a broken one. */
-        }
-      }
-      if (missing.length) store.set({ seasonsAt: Date.now() });
-    })
-    .catch(() => {
-      /* No server: every season stays unknown, which offeredIn allows. */
-    });
 
   const first = solve(new Map());
   void resolveRules(first.unenumerable.filter((u) => !u.bucket).map((u) => u.ids))

@@ -912,11 +912,29 @@ describe("build view — what the projection knows about seasons", () => {
     expect((art.querySelector(".pick") as unknown as HTMLButtonElement).disabled).toBe(false);
   });
 
-  test("names the seasons it had no listing for", () => {
+  test("counts the courses the catalog says nothing about", () => {
+    // Silence is not a refusal, but a date resting on several of them is
+    // worth less than one that is not — so say how many.
     build.mount(root, { trees: [only(required)], enrolled: ["BS.CYOPR"] });
     const note = root.querySelector(".guessed");
-    expect(note?.textContent).toContain("fall and spring and summer");
-    expect(note?.textContent).toContain("assumed to run then");
+    expect(note?.textContent).toContain("state no season");
+    expect(note?.getAttribute("title")).toContain("assumes any");
+  });
+
+  test("places a course against the season the registrar states", () => {
+    const allCourses = [
+      {
+        SubjectCode: "CS",
+        Number: "1210",
+        Title: "Intro",
+        MinimumCredits: 3,
+        TermsOffered: "Fall Only",
+      },
+    ] as unknown as NonNullable<Ctx["allCourses"]>;
+    build.mount(root, { trees: [only(required)], enrolled: ["BS.CYOPR"], allCourses });
+    // Autumn-only, so it can never land in the spring term the plan opens on.
+    const lands = root.querySelector(".candidate .lands")?.textContent ?? "";
+    expect(lands.startsWith("SP")).toBe(false);
   });
 });
 

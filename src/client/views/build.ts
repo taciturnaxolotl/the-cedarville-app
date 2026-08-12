@@ -13,7 +13,7 @@
  * an ordered list where the top entry is usually free.
  */
 
-import type { TermCatalog } from "../../catalog";
+import { seasonsOffered } from "../../catalog";
 import { type Candidate, type RankedChoice, rankChoices } from "../../choices";
 import { type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
@@ -213,27 +213,23 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   );
 
   /**
-   * Which courses run in which season, as far as we have actually looked.
+   * Which seasons a course runs in, as the registrar states it.
    *
-   * Colleague publishes a term or two ahead, so this is never complete. The
-   * distinction that matters is between a season we hold a listing for — where
-   * absence means the course is not taught then — and one we do not, where
-   * absence means nothing at all. Collapsing those two lets a fall-only course
-   * be scheduled in spring and calls it a plan.
+   * This was inferred from one term's section listing, and inference got it
+   * wrong for 367 courses — every course absent from the single autumn we hold
+   * was read as never taught in autumn. `TermsOffered` says it outright, and
+   * has been in the crawled course records all along.
+   *
+   * A course that states nothing is treated as available: 82 of them do, and
+   * silence is not a refusal.
    */
-  const seasonOf = (term: string): Season =>
-    term.includes("SU") ? "summer" : term.includes("SP") ? "spring" : "fall";
-
-  const known = new Map<Season, Set<string>>();
-  const learn = (term: string, sections: TermCatalog["sections"]) => {
-    const season = seasonOf(term);
-    const set = known.get(season) ?? new Set<string>();
-    for (const o of offeringsFromListing(sections)) set.add(o.courseName);
-    known.set(season, set);
+  const seasons = new Map<string, ReturnType<typeof seasonsOffered>>(
+    records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]),
+  );
+  const offeredIn = (code: string, season: Season) => {
+    const stated = seasons.get(code);
+    return !stated?.length || stated.includes(season);
   };
-  if (catalog?.sections?.length) learn(catalog.term, catalog.sections);
-
-  const offeredIn = (code: string, season: Season) => known.get(season)?.has(code) ?? true;
 
   // ---- layout ----------------------------------------------------------
 
@@ -275,30 +271,6 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         /* Signed out: the picker stays empty, the ranking still works. */
       });
   }
-
-  /**
-   * Learn the seasons from every term the server has crawled, not just the one
-   * loaded on screen. Two terms in hand makes "not taught in summer" a fact
-   * rather than an assumption, and costs one request each.
-   */
-  void catalogStatus()
-    .then(async (status) => {
-      const missing = status.terms
-        .map((t) => t.term)
-        .filter((t) => t !== "ALL" && t !== catalog?.term && t.length);
-      for (const term of missing) {
-        try {
-          const fetched = await fetchCatalog(term);
-          if (fetched.sections?.length) learn(term, fetched.sections);
-        } catch {
-          // One term short is a weaker projection, not a broken one.
-        }
-      }
-      if (missing.length) store.set({ seasonsAt: Date.now() });
-    })
-    .catch(() => {
-      /* No server: every season stays unknown, which `offeredIn` allows. */
-    });
 
   /** Ask the server to expand the rule groups, then re-rank with their pools. */
   function expandRules(current: ProgramTree[]) {
@@ -624,19 +596,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
               `${ranking.baseline.totalCredits} credits · ${ranking.choices.length} choices left`,
           ),
         );
-        // Which seasons the projection actually checked. A season with no
-        // listing lets every course through, and a date resting on that is
-        // worth less than one that does not.
-        const guessed = (["fall", "spring", "summer"] as Season[]).filter((s) => !known.has(s));
-        if (guessed.length) {
-          const note = el(
-            "span",
-            "guessed",
-            ` · ${guessed.join(" and ")} unpublished, so anything is assumed to run then`,
-          );
+        // Courses the registrar says nothing about are let through, and a date
+        // resting on several of them is worth less than one that is not.
+        const silent = ranking.baseline.terms
+          .flatMap((t) => t.courses)
+          .filter((c) => !seasons.get(c.code)?.length).length;
+        if (silent) {
+          const note = el("span", "guessed", ` · ${silent} courses state no season`);
           note.title =
-            "Colleague publishes a term or two ahead. Courses are only checked against " +
-            "the seasons we hold a listing for; the rest are assumed available.";
+            "The catalog does not say when these run, so the projection assumes any " +
+            "term. Everything else is placed against the seasons the registrar states.";
           summary.append(note);
         }
 

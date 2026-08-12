@@ -6,8 +6,11 @@ import {
   emptyCatalog,
   forCourses,
   isStale,
+  runsIn,
+  seasonsOffered,
   shortTerm,
   type TermCatalog,
+  yearsOffered,
 } from "./catalog";
 
 const HOUR = 3_600_000;
@@ -89,5 +92,49 @@ describe("ordering terms", () => {
 
   test("an unrecognised season sorts last within its year rather than throwing", () => {
     expect(["2026XX", "2026FA"].sort(compareTerms)).toEqual(["2026FA", "2026XX"]);
+  });
+});
+
+describe("when the registrar says a course runs", () => {
+  test("reads every spelling the catalog uses", () => {
+    // Seven spellings cover all 1,945 courses that state one.
+    expect(seasonsOffered({ TermsOffered: "Fall/Spring" })).toEqual(["fall", "spring"]);
+    expect(seasonsOffered({ TermsOffered: "Spring Only" })).toEqual(["spring"]);
+    expect(seasonsOffered({ TermsOffered: "Fall Only" })).toEqual(["fall"]);
+    expect(seasonsOffered({ TermsOffered: "Fall/Spring/Summer" })).toEqual([
+      "fall",
+      "spring",
+      "summer",
+    ]);
+    expect(seasonsOffered({ TermsOffered: "Summer Only" })).toEqual(["summer"]);
+  });
+
+  test("silence is not a refusal", () => {
+    // 82 courses state nothing, and reading that as "never" strands them.
+    expect(seasonsOffered({})).toEqual([]);
+    expect(seasonsOffered({ TermsOffered: "" })).toEqual([]);
+  });
+});
+
+describe("courses that run in alternate years", () => {
+  test("reads the cycle", () => {
+    expect(yearsOffered({ YearsOffered: "All Years" })).toBe("all");
+    expect(yearsOffered({ YearsOffered: "Odd Years (ex: 2021-22)" })).toBe("odd");
+    expect(yearsOffered({ YearsOffered: "Even Years (ex: 2020-21)" })).toBe("even");
+    expect(yearsOffered({})).toBe("all");
+  });
+
+  test("an academic year is named for the autumn that opens it", () => {
+    // CRJU-4160 runs spring of odd academic years: spring 2028 sits in
+    // 2027-28, so it runs; spring 2029 sits in 2028-29, so it does not.
+    expect(runsIn("odd", 2028, "spring")).toBe(true);
+    expect(runsIn("odd", 2029, "spring")).toBe(false);
+    expect(runsIn("odd", 2027, "fall")).toBe(true);
+    expect(runsIn("odd", 2028, "fall")).toBe(false);
+  });
+
+  test("a course taught every year runs whenever", () => {
+    expect(runsIn("all", 2028, "spring")).toBe(true);
+    expect(runsIn("all", 2029, "fall")).toBe(true);
   });
 });

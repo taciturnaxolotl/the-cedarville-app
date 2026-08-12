@@ -42,6 +42,51 @@ export function termKey(code: string): number {
 /** Oldest first. Negate for newest first. */
 export const compareTerms = (a: string, b: string) => termKey(a) - termKey(b);
 
+/**
+ * The seasons a course is taught, as the registrar states them.
+ *
+ * `TermsOffered` is prose but a closed set of it: seven spellings cover all
+ * 1,945 courses that carry one. An empty result means the field was absent,
+ * which is not the same as "never" — 82 courses say nothing, and a caller
+ * should read that as unknown rather than as a refusal.
+ */
+export function seasonsOffered(record: {
+  TermsOffered?: string;
+}): ("fall" | "spring" | "summer")[] {
+  const text = (record.TermsOffered ?? "").toLowerCase();
+  if (!text) return [];
+  const seasons: ("fall" | "spring" | "summer")[] = [];
+  if (text.includes("fall")) seasons.push("fall");
+  if (text.includes("spring")) seasons.push("spring");
+  if (text.includes("summer")) seasons.push("summer");
+  return seasons;
+}
+
+/**
+ * Which academic years a course runs in, for the ones that alternate.
+ *
+ * "Odd Years (ex: 2021-22)" means the academic year beginning in an odd year,
+ * so a spring term belongs to the year before it. `CRJU-4160` runs spring of
+ * odd academic years: spring 2028 yes, spring 2029 no.
+ */
+export type YearCycle = "all" | "odd" | "even";
+
+export function yearsOffered(record: { YearsOffered?: string }): YearCycle {
+  const text = (record.YearsOffered ?? "").toLowerCase();
+  if (text.includes("odd")) return "odd";
+  if (text.includes("even")) return "even";
+  return "all";
+}
+
+/** Whether a course that alternates runs in the academic year a term sits in. */
+export function runsIn(cycle: YearCycle, year: number, season: "fall" | "spring" | "summer") {
+  if (cycle === "all") return true;
+  // An academic year is named for the autumn that opens it, so spring and
+  // summer belong to the year before them.
+  const academic = season === "fall" ? year : year - 1;
+  return cycle === "odd" ? academic % 2 === 1 : academic % 2 === 0;
+}
+
 /** "2026SP" as the projection writes it: "SP26". */
 export const shortTerm = (code: string) => `${code.slice(4)}${code.slice(2, 4)}`;
 
@@ -64,6 +109,16 @@ export interface CatalogCourseRecord {
    * colloquium it is an alternative to, when the two are equal.
    */
   MaximumCredits?: number;
+  /**
+   * When the registrar says the course runs: "Fall/Spring", "Spring Only",
+   * "Fall/Spring/Summer". This is the answer to a question we had been
+   * guessing at from a single term's section listing, and guessing wrong —
+   * `EGCP-4210` is Fall Only and was inferred spring-only purely because it
+   * did not appear in the one autumn we hold.
+   */
+  TermsOffered?: string;
+  /** "All Years", or "Odd Years (ex: 2021-22)" for a course taught alternately. */
+  YearsOffered?: string;
   CourseRequisites?: {
     DisplayText?: string | null;
     DisplayTextExtension?: string | null;

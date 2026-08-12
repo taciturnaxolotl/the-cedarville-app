@@ -1,0 +1,249 @@
+/* Catppuccin Macchiato, matching the palette in the repo README. */
+:root {
+  --base: #24273a;
+  --mantle: #1e2030;
+  --crust: #181926;
+  --surface: #363a4f;
+  --overlay: #6e738d;
+  --text: #cad3f5;
+  --subtext: #a5adcb;
+  --lavender: #b7bdf8;
+  --green: #a6da95;
+  --yellow: #eed49f;
+  --peach: #f5a97f;
+  --red: #ed8796;
+  --sky: #91d7e3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 28px 32px 64px;
+  background: var(--base);
+  color: var(--text);
+  font:
+    13px / 1.6 "JetBrains Mono",
+    "SF Mono",
+    ui-monospace,
+    monospace;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+#who,
+#status {
+  margin: 0;
+  color: var(--overlay);
+  font-size: 12px;
+}
+
+#status.err {
+  color: var(--red);
+}
+
+#controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--surface);
+}
+
+label {
+  color: var(--subtext);
+  font-size: 12px;
+}
+
+select,
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--mantle);
+  border: 1px solid var(--surface);
+  border-radius: 3px;
+  padding: 6px 10px;
+}
+
+select {
+  max-width: 320px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--lavender);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#capture {
+  color: var(--crust);
+  background: var(--lavender);
+  border-color: var(--lavender);
+}
+
+nav {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0;
+}
+
+nav button.on {
+  color: var(--crust);
+  background: var(--lavender);
+  border-color: var(--lavender);
+}
+
+/* ---- tree ---- */
+
+.program {
+  margin-bottom: 26px;
+}
+
+.program > h2 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.credits {
+  margin-bottom: 12px;
+  color: var(--overlay);
+  font-size: 12px;
+}
+
+details {
+  border-left: 1px solid var(--surface);
+  margin: 2px 0 2px 4px;
+  padding-left: 12px;
+}
+
+summary {
+  cursor: pointer;
+  padding: 3px 0;
+  list-style: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::before {
+  content: "▸ ";
+  color: var(--overlay);
+}
+
+details[open] > summary::before {
+  content: "▾ ";
+}
+
+.group {
+  padding: 4px 0 4px 14px;
+  border-left: 1px solid var(--surface);
+  margin-left: 4px;
+}
+
+/* A status dot carries completion; the label carries planning. */
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--overlay);
+}
+.dot.Completed {
+  background: var(--green);
+}
+.dot.PartiallyCompleted {
+  background: var(--yellow);
+}
+.dot.NotStarted {
+  background: var(--surface);
+  border: 1px solid var(--overlay);
+}
+
+.tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--mantle);
+  color: var(--subtext);
+  font-size: 11px;
+}
+.tag.rule {
+  color: var(--peach);
+}
+.tag.planned {
+  color: var(--sky);
+}
+
+.courses {
+  margin: 5px 0 2px;
+  color: var(--subtext);
+  font-size: 12px;
+  word-spacing: 2px;
+}
+
+.muted {
+  color: var(--overlay);
+}
+
+/* ---- overlap ---- */
+
+.pool {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--surface);
+}
+
+.pool .sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 6px;
+}
+
+.pool .side b {
+  display: block;
+  color: var(--lavender);
+  font-weight: 500;
+}
+
+.count {
+  color: var(--green);
+}
+
+.unresolved li {
+  margin-bottom: 5px;
+  color: var(--subtext);
+}
+
+table {
+  border-collapse: collapse;
+  margin-bottom: 18px;
+}
+
+td {
+  padding: 2px 16px 2px 0;
+}

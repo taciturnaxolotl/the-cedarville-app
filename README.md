@@ -2,6 +2,47 @@
 
 the everything app :D
 
+## course planning
+
+Colleague Self-Service gates every endpoint behind a student session, so the
+data has to be fetched from inside a browser that already has one. That is the
+extension's entire job. Everything else is a static page.
+
+```sh
+bun install
+bun run dev        # builds both, serves the planner on :5173
+```
+
+Then load `dist/` unpacked at `chrome://extensions`, sign in to Self-Service in
+another tab, and click capture.
+
+### shape
+
+    src/client.ts        Self-Service endpoints + the antiforgery handshake
+    src/content.ts       runs on selfservice.cedarville.edu; fetches, nothing else
+    src/background.ts    the bridge; only whitelisted origins may call it
+    src/types.ts         raw Colleague shapes, shared by both halves
+    src/requirements.ts  Ellucian's 40-field Group as a tagged union
+    src/merge.ts         which course satisfies a requirement in both majors
+    src/client/          the planner: no framework, one CSS file, mount/destroy views
+
+The split is by change rate. Auth bridging is stable and security-sensitive;
+the planner changes every time we learn something new about Colleague. The two
+halves share only `types.ts`.
+
+Nothing is uploaded. There is no API and no database; a capture lives in the
+student's own `localStorage`.
+
+### what it refuses to guess
+
+Colleague states some requirements as opaque server-side rules (`DABIOL25`,
+"one laboratory course from the biological sciences") and some as department
+filters that no evaluation endpoint resolves. Those are reported as
+`unresolved` rather than matched loosely, because a planner padded with maybes
+is worse than a shorter honest one. Schools also cap credits shared between
+two majors, and that policy lives in the academic catalog, not the API: pass
+`sharedCreditCap` to `merge` to have it checked.
+
 The canonical repo for this is hosted on tangled over at [`https://tangled.org/dunkirk.sh/the-cedarville-app`](https://tangled.org/dunkirk.sh/the-cedarville-app)
 
 <p align="center">

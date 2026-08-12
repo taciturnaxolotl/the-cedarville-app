@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>the cedarville app</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header>
+      <h1>the cedarville app</h1>
+      <p id="who">not connected</p>
+    </header>
+
+    <section id="controls">
+      <label for="whatif">evaluate a second major</label>
+      <select id="whatif" disabled>
+        <option value="">none</option>
+      </select>
+      <button id="capture" type="button" disabled>capture</button>
+      <span id="status"></span>
+    </section>
+
+    <nav id="tabs" hidden>
+      <button data-view="requirements" class="on" type="button">requirements</button>
+      <button data-view="overlap" type="button">overlap</button>
+    </nav>
+
+    <main id="outlet"></main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

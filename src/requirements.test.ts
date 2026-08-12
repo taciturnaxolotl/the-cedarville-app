@@ -1350,3 +1350,38 @@ describe("a choice the prose has already made", () => {
     expect(solved.choices[0]?.pool).toHaveLength(2);
   });
 });
+
+describe("a pinned course is a choice, not a requirement", () => {
+  const literature = () =>
+    normalize(
+      program("A", [
+        group({
+          DisplayText: "2000-level Literature course",
+          FromCourses: [course("1", "LIT", "2090"), course("2", "LIT", "2330")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+
+  test("picking one does not make it required", () => {
+    const solved = coursesNeededAcross([literature()], {
+      credits: () => 3,
+      have: new Set(),
+      pinned: new Set(["LIT-2330"]),
+    });
+    // It is bought, because the student asked for it.
+    expect(solved.courses.has("LIT-2330")).toBe(true);
+    // But nothing in the degree requires it, so it stays theirs to unpick.
+    expect(solved.required.has("LIT-2330")).toBe(false);
+  });
+
+  test("a course the degree does require is still reported as required", () => {
+    const tree = normalize(program("A", [group({ Courses: [course("1", "CS", "1210")] })]));
+    const solved = coursesNeededAcross([tree], {
+      credits: () => 3,
+      have: new Set(),
+      pinned: new Set(["CS-1210"]),
+    });
+    expect(solved.required.has("CS-1210")).toBe(true);
+  });
+});

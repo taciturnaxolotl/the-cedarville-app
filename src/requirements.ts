@@ -1031,7 +1031,7 @@ export function coursesNeededAcross(
    */
   required: Set<string>;
 } {
-  const courses = new Set<string>(options.pinned ?? []);
+  const courses = new Set<string>();
   const choices: OpenChoice[] = [];
   const branches: OpenBranch[] = [];
   const unenumerable: Unenumerable[] = [];
@@ -1044,7 +1044,12 @@ export function coursesNeededAcross(
     unenumerable.push(...walked.unenumerable);
   }
 
+  // Taken before the pins go in. A course the student chose is not a course
+  // the degree requires, and folding the two together made picking a
+  // literature elective turn it into an unpickable "already required" — the
+  // interface telling them their own decision had been made for them.
   const required = new Set(courses);
+  for (const code of options.pinned ?? []) courses.add(code);
 
   // A choice its own pool cannot close is worth naming. Colleague states
   // "two sections of the Honors Seminar" as a four-credit group over a pool

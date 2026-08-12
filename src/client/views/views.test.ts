@@ -1383,3 +1383,33 @@ describe("build view — a choice the prose has already made", () => {
     expect(root.textContent).not.toContain("required for this combination");
   });
 });
+
+describe("build view — picking does not lock", () => {
+  test("a chosen literature course stays unpickable-again, not required", () => {
+    const tree = normalize(
+      program("BS.CYOPR", [
+        group({
+          Id: "lit",
+          DisplayText: "2000-level Literature course",
+          FromCourses: [course("1", "LIT", "2090"), course("2", "LIT", "2330")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+
+    const rowFor = (code: string) =>
+      Array.from(root.querySelectorAll(".candidate")).find((r) => r.textContent?.includes(code))!;
+    (rowFor("LIT-2330").querySelector(".pick") as unknown as HTMLElement).click();
+
+    const picked = rowFor("LIT-2330");
+    expect(picked.className).toContain("picked");
+    // The student's own decision must remain theirs to undo.
+    expect((picked.querySelector(".pick") as unknown as HTMLButtonElement).disabled).toBe(false);
+    expect(picked.textContent).not.toContain("already required");
+
+    (picked.querySelector(".pick") as unknown as HTMLElement).click();
+    expect(rowFor("LIT-2330").className).not.toContain("picked");
+    localStorage.removeItem("cedarville:pins");
+  });
+});

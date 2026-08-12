@@ -11,6 +11,7 @@ import { normalize, type ProgramTree } from "../../requirements";
 import type { EvaluationResponse, RawGroup } from "../../types";
 import type { Ctx } from "../ctx";
 import * as build from "./build";
+import * as map from "./map";
 import * as overlap from "./overlap";
 import * as plan from "./plan";
 import * as schedule from "./schedule";
@@ -1411,5 +1412,60 @@ describe("build view — picking does not lock", () => {
     (picked.querySelector(".pick") as unknown as HTMLElement).click();
     expect(rowFor("LIT-2330").className).not.toContain("picked");
     localStorage.removeItem("cedarville:pins");
+  });
+});
+
+describe("map view", () => {
+  const allCourses = [
+    { SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
+    {
+      SubjectCode: "CS",
+      Number: "1220",
+      Title: "OO Design",
+      MinimumCredits: 3,
+      CourseRequisites: [
+        {
+          DisplayText: "Take CS-1210",
+          DisplayTextExtension: "- Must be completed prior to taking this course.",
+          IsRequired: true,
+        },
+      ],
+    },
+  ] as unknown as NonNullable<Ctx["allCourses"]>;
+
+  const tree = normalize(
+    program("BS.CYOPR", [
+      group({ Courses: [course("1", "CS", "1210"), course("2", "CS", "1220")] }),
+    ]),
+  );
+
+  test("asks for a capture before it can draw anything", () => {
+    map.mount(root, { trees: [] });
+    expect(root.textContent).toContain("capture your requirements");
+  });
+
+  test("draws a node per course and an edge per prerequisite", () => {
+    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    expect(root.querySelectorAll(".graph .node")).toHaveLength(2);
+    expect(root.querySelectorAll(".graph .edge")).toHaveLength(1);
+    expect(root.textContent).toContain("prerequisite links");
+  });
+
+  test("marks the chain that sets the finish date", () => {
+    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    expect(root.querySelectorAll(".graph .node.critical").length).toBeGreaterThan(0);
+  });
+
+  test("hovering a course dims everything off its chain", () => {
+    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    const first = root.querySelector(".graph .node") as unknown as HTMLElement;
+    first.dispatchEvent(new window.Event("mouseenter"));
+    expect(root.textContent).toContain("tracing");
+  });
+
+  test("destroys cleanly", () => {
+    const view = map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    view.destroy();
+    expect(root.children).toHaveLength(0);
   });
 });

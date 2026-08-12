@@ -232,6 +232,43 @@ export function eligibility(
  * "cheapest satisfying path" the requirement solver uses, applied to time
  * rather than credits.
  */
+/**
+ * The courses standing immediately in front of this one.
+ *
+ * One level, not the closure. A drawing wants the edges the catalog actually
+ * states: `CS-2210` waits on `CS-1220`, which waits on `CS-1210`. Adding the
+ * implied `CS-1210 → CS-2210` says nothing new and crosses the picture.
+ */
+export function gatesOf(
+  graph: Graph,
+  code: string,
+  completed: ReadonlySet<string> = new Set(),
+  planned: ReadonlySet<string> = new Set(),
+): string[] {
+  const gates: string[] = [];
+  for (const requisite of graph.courses.get(code)?.requisites ?? []) {
+    // A corequisite is taken alongside, so it gates nothing.
+    if (!requisite.required || requisite.timing === "with") continue;
+
+    // "Take A or B" with A already passed is satisfied outright; adding B
+    // because A was filtered out buys a course for a requisite that is met.
+    if (requisite.mode === "any" && requisite.courses.some((c) => completed.has(c))) continue;
+
+    const open = requisite.courses.filter((c) => !completed.has(c) && graph.courses.has(c));
+    if (open.length === 0) continue;
+
+    if (requisite.mode === "any") {
+      gates.push(
+        open.find((c) => planned.has(c)) ??
+          open.reduce((a, b) => (depth(graph, a) <= depth(graph, b) ? a : b)),
+      );
+    } else {
+      gates.push(...open);
+    }
+  }
+  return [...new Set(gates)];
+}
+
 export function prerequisitesOf(
   graph: Graph,
   code: string,
@@ -250,32 +287,9 @@ export function prerequisitesOf(
   if (seen.has(code)) return needed; // A cycle in the catalog; do not hang on it.
   seen.add(code);
 
-  for (const requisite of graph.courses.get(code)?.requisites ?? []) {
-    // A corequisite is taken alongside, so it gates nothing.
-    if (!requisite.required || requisite.timing === "with") continue;
-
-    // "Take A or B" with A already passed is satisfied outright; adding B
-    // because A was filtered out buys a course for a requisite that is met.
-    const met = requisite.courses.filter((c) => completed.has(c));
-    if (requisite.mode === "any" && met.length) continue;
-
-    const open = requisite.courses.filter((c) => !completed.has(c) && graph.courses.has(c));
-    if (open.length === 0) continue;
-
-    const chosen =
-      requisite.mode === "any"
-        ? [
-            open.find((c) => planned.has(c)) ??
-              open.reduce((a, b) => (depth(graph, a) <= depth(graph, b) ? a : b)),
-          ]
-        : open;
-
-    for (const needs of chosen) {
-      needed.add(needs);
-      for (const deeper of prerequisitesOf(graph, needs, completed, planned, seen)) {
-        needed.add(deeper);
-      }
-    }
+  for (const gate of gatesOf(graph, code, completed, planned)) {
+    needed.add(gate);
+    for (const deeper of prerequisitesOf(graph, gate, completed, planned, seen)) needed.add(deeper);
   }
   return needed;
 }

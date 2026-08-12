@@ -836,3 +836,66 @@ label.section.clashes:not(:has(input:checked)) .when {
   color: var(--sky);
   font-size: 11px;
 }
+
+/* ---- map ---- */
+
+.board {
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.graph {
+  display: block;
+}
+
+.graph .term-label {
+  fill: var(--overlay);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.graph .edge {
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+
+.graph .edge.critical {
+  stroke: var(--peach);
+  stroke-width: 2;
+}
+
+/* Dimming rather than hiding: the shape of the whole plan stays readable
+   while one chain is traced through it. */
+.graph .edge.dim {
+  stroke: var(--surface);
+  opacity: 0.25;
+}
+
+.graph .node rect {
+  fill: var(--mantle);
+  stroke: var(--surface);
+}
+
+.graph .node.critical rect {
+  stroke: var(--peach);
+}
+
+.graph .node .code {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.graph .node .sub {
+  fill: var(--overlay);
+  font-size: 9px;
+}
+
+.graph .node {
+  cursor: default;
+}
+
+.graph .node.dim {
+  opacity: 0.3;
+}

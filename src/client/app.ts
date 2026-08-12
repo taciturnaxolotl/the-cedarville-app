@@ -29,6 +29,7 @@ import {
 import { $ } from "./dom";
 import { createStore } from "./store";
 import * as build from "./views/build";
+import * as map from "./views/map";
 import * as overlap from "./views/overlap";
 import * as plan from "./views/plan";
 import * as schedule from "./views/schedule";
@@ -36,7 +37,7 @@ import * as tree from "./views/tree";
 
 const STORE = "cedarville:last-capture";
 const SECTIONS = "cedarville:last-sections";
-const VIEWS = { build, requirements: tree, overlap, schedule, plan } as const;
+const VIEWS = { build, map, requirements: tree, overlap, schedule, plan } as const;
 type ViewName = keyof typeof VIEWS;
 
 interface Shell {

@@ -296,8 +296,7 @@ describe("schedule view", () => {
     expect(root.textContent).toContain("nothing picked yet");
 
     const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
-    box.checked = true;
-    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    box.click();
 
     expect(root.textContent).toContain("1 sections · 3 credits");
     expect(root.querySelector(".grid")).toBeTruthy();
@@ -309,10 +308,10 @@ describe("schedule view", () => {
     schedule.mount(root, withSections());
     const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
 
-    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    box.click();
     expect(root.querySelector(".grid")).toBeTruthy();
 
-    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    box.click();
     expect(root.textContent).toContain("nothing picked yet");
     expect(root.querySelector(".grid")).toBeFalsy();
   });
@@ -321,7 +320,7 @@ describe("schedule view", () => {
     localStorage.clear();
     const first = schedule.mount(root, withSections());
     const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
-    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    box.click();
     first.destroy();
 
     schedule.mount(root, withSections());
@@ -336,8 +335,8 @@ describe("schedule view", () => {
     const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
     view.destroy();
 
-    // The node is detached; firing at it must not throw or resurrect anything.
-    expect(() => box.dispatchEvent(new window.Event("change"))).not.toThrow();
+    // The node is detached; clicking it must not throw or resurrect anything.
+    expect(() => box.click()).not.toThrow();
     expect(root.children).toHaveLength(0);
   });
 });

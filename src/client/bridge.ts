@@ -80,6 +80,16 @@ export async function fetchCatalog(term: string, courseIds?: string[]): Promise<
   return (await res.json()) as TermCatalog;
 }
 
+/** Every course the school lists, offered or not. The graph needs all of them. */
+export async function fetchAllCourses(): Promise<TermCatalog["courses"]> {
+  try {
+    const res = await fetch("/catalog/ALL");
+    return res.ok ? ((await res.json()) as TermCatalog).courses : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface CatalogStatus {
   terms: { term: string; sections: number; courses: number; fetchedAt: string }[];
   refreshing: string[];

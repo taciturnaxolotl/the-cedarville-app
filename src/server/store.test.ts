@@ -187,3 +187,40 @@ describe("catalog store", () => {
     db.close();
   });
 });
+
+describe("the full course catalog", () => {
+  /**
+   * Prerequisites routinely name courses nobody is teaching this year, so the
+   * catalog is stored term-lessly under a sentinel alongside the per-term
+   * offerings. Built from term data alone the graph lost 36% of its nodes.
+   */
+  test("stores courses with no sections at all", () => {
+    const db = store();
+    db.replace({
+      term: "ALL",
+      fetchedAt: "2026-08-12T00:00:00.000Z",
+      sections: [],
+      courses: [{ Id: "c9", SubjectCode: "EGEE", Number: "2010", Title: "Circuits" }],
+    });
+
+    expect(db.readCourses("ALL")).toHaveLength(1);
+    // And it does not pretend to be a term with offerings.
+    expect(db.read("ALL").sections).toEqual([]);
+    db.close();
+  });
+
+  test("the sentinel does not collide with a real term", () => {
+    const db = store();
+    db.replace(catalog());
+    db.replace({
+      term: "ALL",
+      fetchedAt: "2026-08-12T00:00:00.000Z",
+      sections: [],
+      courses: [{ Id: "c9", SubjectCode: "EGEE", Number: "2010", Title: "Circuits" }],
+    });
+
+    expect(db.readCourses("ALL").map((c) => c.Id)).toEqual(["c9"]);
+    expect(db.read("2026FA").sections).toHaveLength(2);
+    db.close();
+  });
+});

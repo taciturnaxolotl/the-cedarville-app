@@ -169,3 +169,56 @@ export interface Seats {
   waitlisted: number;
   status: string;
 }
+
+/**
+ * Every course in the catalog, whether or not it runs this year.
+ *
+ * The per-term crawl answers "what is offered"; this answers "what exists".
+ * They have to be separate, because a prerequisite is often a course nobody
+ * is teaching this year — EGEE-2010 roots a four-course engineering chain and
+ * appears in neither cached term. Built from term-scoped data alone, the
+ * graph loses 36% of its prerequisite nodes and silently understates depth on
+ * a third of its courses.
+ */
+export const ALL_COURSES = "ALL";
+
+export async function crawlAllCourses(
+  options: CrawlOptions = {},
+  client = new GuestColleague(),
+): Promise<CatalogCourseRecord[]> {
+  const { delayMs = 300, onProgress, signal } = options;
+  const byId = new Map<string, CatalogCourseRecord>();
+
+  let page = 1;
+  let pages = 1;
+
+  while (page <= pages) {
+    if (signal?.aborted) break;
+
+    // No term filter: the whole catalog rather than one term's offerings.
+    const result = await client.search({ pageNumber: page, searchResultsView: "CatalogListing" });
+    pages = Math.max(result.TotalPages ?? 1, 1);
+
+    for (const raw of result.CourseFullModels ?? []) {
+      const course = raw as CatalogCourseRecord;
+      // The same course appears once per catalog year; the first wins.
+      if (course?.Id && !byId.has(course.Id)) byId.set(course.Id, course);
+    }
+
+    onProgress?.({ term: ALL_COURSES, page, pages, sections: byId.size, phase: "courses" });
+    page++;
+    if (page <= pages && delayMs > 0) await sleep(delayMs);
+  }
+  return [...byId.values()];
+}
+
+/** Crawls the full catalog and stores it under the ALL sentinel. */
+export async function refreshAllCourses(
+  store: CatalogStore,
+  options: CrawlOptions = {},
+): Promise<number> {
+  const courses = await crawlAllCourses(options);
+  if (courses.length === 0) return 0;
+  store.replace({ term: ALL_COURSES, fetchedAt: new Date().toISOString(), sections: [], courses });
+  return courses.length;
+}

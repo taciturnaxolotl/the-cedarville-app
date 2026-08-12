@@ -44,7 +44,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     return { destroy: () => root.replaceChildren() };
   }
 
-  const records = catalog.courses ?? [];
+  // What exists backs the graph; what is offered decides the seasons.
+  const records = ctx.allCourses?.length ? ctx.allCourses : (catalog.courses ?? []);
   const credits = new Map(
     records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
   );

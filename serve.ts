@@ -15,7 +15,13 @@
 import { mkdir } from "node:fs/promises";
 import { isStale } from "./src/catalog";
 import { resolveGroup } from "./src/server/colleague";
-import { availableTerms, liveSeats, refreshTerm } from "./src/server/crawler";
+import {
+  ALL_COURSES,
+  availableTerms,
+  liveSeats,
+  refreshAllCourses,
+  refreshTerm,
+} from "./src/server/crawler";
 import { CatalogStore, type RuleKey, ruleKey } from "./src/server/store";
 
 const PORT = 5173;
@@ -188,6 +194,20 @@ for (const row of store.stats()) {
 /** Refresh anything stale on boot, then keep it warm. */
 async function keepWarm() {
   try {
+    // What *exists*, separate from what is offered: a prerequisite is often a
+    // course nobody teaches this year, and without it the graph loses a third
+    // of its depth.
+    if (isStale(store.read(ALL_COURSES), MAX_AGE_HOURS * 28)) {
+      const n = await refreshAllCourses(store, {
+        onProgress: ({ page, pages, sections }) => {
+          if (page % 10 === 0 || page === pages) {
+            console.log(`  catalog: page ${page}/${pages}, ${sections} courses`);
+          }
+        },
+      });
+      if (n) console.log(`catalog: ${n} courses (every course, not just this term's)`);
+    }
+
     for (const { code } of await availableTerms()) {
       if (isStale(store.read(code), MAX_AGE_HOURS)) await refresh(code);
     }

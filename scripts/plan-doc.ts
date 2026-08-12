@@ -22,6 +22,7 @@ const store = new CatalogStore();
 const cached = store
   .stats()
   .map((s) => s.term)
+  .filter((t) => t !== "ALL")
   .sort()
   .reverse();
 const regularTerm = cached.find((t) => !t.includes("SU"));
@@ -31,7 +32,11 @@ if (!regularTerm) throw new Error("no catalog cached; run the planner server onc
 const fall = store.read(regularTerm);
 const summer = summerTerm ? store.read(summerTerm) : { sections: [], courses: [] };
 
-const records = [...(fall.courses ?? []), ...(summer.courses ?? [])];
+// Requisites come from the whole catalog; seasons from the cached terms.
+const everything = store.readCourses("ALL");
+const records = everything.length
+  ? everything
+  : [...(fall.courses ?? []), ...(summer.courses ?? [])];
 const credits = new Map(
   records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
 );

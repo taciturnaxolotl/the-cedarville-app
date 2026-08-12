@@ -60,8 +60,14 @@ export function ageInHours(catalog: TermCatalog, now = Date.now()): number {
   return (now - Date.parse(catalog.fetchedAt)) / 3_600_000;
 }
 
+/**
+ * Empty means stale, but "empty" differs by catalog: a term is defined by its
+ * sections, while the full course list has none at all and is defined by its
+ * courses.
+ */
 export const isStale = (catalog: TermCatalog, maxAgeHours = 6, now = Date.now()) =>
-  catalog.sections.length === 0 || ageInHours(catalog, now) > maxAgeHours;
+  (catalog.sections.length === 0 && (catalog.courses?.length ?? 0) === 0) ||
+  ageInHours(catalog, now) > maxAgeHours;
 
 /** Sections whose course is in the given set, for narrowing to a degree plan. */
 export function forCourses(catalog: TermCatalog, courseIds: Set<string>): ListingSection[] {

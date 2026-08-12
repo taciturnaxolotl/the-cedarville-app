@@ -149,6 +149,20 @@ Groups it cannot enumerate — a Colleague rule, or a filter over attributes the
 evaluation does not carry — come back separately as `unenumerable`, each
 carrying the ids needed to expand it.
 
+### what exists vs what is offered
+
+Two crawls, and they answer different questions. The per-term crawl says what
+runs when; a term-less `CatalogListing` crawl says what the school teaches at
+all, stored under the `ALL` sentinel.
+
+They cannot be one crawl, because a prerequisite is routinely a course nobody
+is teaching this year. `EGEE-2010` roots a four-course engineering chain and
+appears in neither cached term. Built from term-scoped data alone the graph
+held 1010 nodes and was missing 99 of the 277 courses named as prerequisites
+— 36% — silently reporting depth 1 where the truth was 5.
+
+With the full catalog: 2027 nodes, 27 missing, and the chains measure right.
+
 ### expanding a rule
 
 An evaluation never says which courses satisfy `DABIOL25`, but the course

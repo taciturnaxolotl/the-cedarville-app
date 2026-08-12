@@ -198,11 +198,18 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     board.replaceChildren();
     const canvas = svg("svg", { width: map.width, height: map.height, class: "graph" });
 
+    const shortTerms = new Set(plan.terms.filter((t) => t.short).map((t) => t.slot.name));
     for (const term of map.terms) {
       canvas.append(
         Object.assign(
-          svg("text", { x: term.x, y: 14, class: `term-label${term.past ? " past" : ""}` }),
-          { textContent: `${term.name} · ${term.credits}cr` },
+          svg("text", {
+            x: term.x,
+            y: 14,
+            class: `term-label${term.past ? " past" : ""}${shortTerms.has(term.name) ? " short" : ""}`,
+          }),
+          {
+            textContent: `${term.name} · ${term.credits}cr${shortTerms.has(term.name) ? " · part time" : ""}`,
+          },
         ),
       );
     }

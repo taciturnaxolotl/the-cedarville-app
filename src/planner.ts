@@ -56,6 +56,12 @@ export interface PlannedTerm {
   slot: TermSlot;
   courses: PlannedCourse[];
   credits: number;
+  /**
+   * Below the slot's minimum, so the student would be part time. Reported
+   * rather than avoided: a light term is fixed by adding a course, and
+   * rearranging the degree around it costs a great deal more.
+   */
+  short?: boolean;
 }
 
 export interface Plan {
@@ -75,10 +81,6 @@ export interface Plan {
  * pass is good enough here: the binding constraint is nearly always the
  * longest chain, and putting gates first is exactly how you shorten it.
  */
-/** Credits still owed, used to tell a light final term from a stranded one. */
-const creditsOf = (codes: ReadonlySet<string>, credits: (code: string) => number) =>
-  [...codes].reduce((n, c) => n + credits(c), 0);
-
 export function projectPlan(request: PlanRequest): Plan {
   const { graph, credits, offeredIn, slots, aliases } = request;
   const taken = new Set(request.completed);
@@ -129,28 +131,17 @@ export function projectPlan(request: PlanRequest): Plan {
       used += price;
     }
 
-    // A term that cannot reach full time is not worth opening: enrolling for
-    // three credits makes a student part time for a semester, with everything
-    // that follows for aid and standing. Hold the work back and let a later
-    // term take it.
-    //
-    // Only when holding back is free, though. A course that gates other work
-    // has to be taken whatever the term looks like, or deferring it defers
-    // everything behind it and the degree never finishes. And a term that
-    // clears the last of the work is the final one, where a light load is
-    // simply how a degree ends.
-    const finishes = used === creditsOf(remaining, credits);
+    // A term below full time is worth flagging, not worth refusing. Deferring
+    // the work to protect the student's status pushes the degree out a term,
+    // when the real remedy is cheaper: add a course. Say which terms are light
+    // and let them decide.
     const short = slot.minimum !== undefined && used > 0 && used < slot.minimum;
-    const gates = courses.some((c) =>
-      [...(graph.unlocks.get(c.code) ?? [])].some((next) => remaining.has(next)),
-    );
-    if (short && !finishes && !gates) continue;
 
     for (const c of courses) {
       taken.add(c.code);
       remaining.delete(c.code);
     }
-    terms.push({ slot, courses, credits: used });
+    terms.push({ slot, courses, credits: used, ...(short ? { short: true } : {}) });
   }
 
   const unscheduled = [...remaining].map((code) => ({

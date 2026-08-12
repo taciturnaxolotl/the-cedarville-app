@@ -191,74 +191,59 @@ describe("critical path", () => {
   });
 });
 
-describe("a term worth opening", () => {
-  const three = buildGraph([
+describe("a term below full time", () => {
+  const two = buildGraph([
     { code: "AA-1000", title: "", requisites: [] },
     { code: "BB-1000", title: "", requisites: [] },
   ]);
 
-  const plan = (minimum: number | undefined, capacity: number) =>
-    projectPlan({
-      need: ["AA-1000", "BB-1000"],
-      completed: new Set(),
-      graph: three,
-      credits: () => 3,
-      offeredIn: () => true,
-      slots: termsFrom({ year: 2027, season: "spring" }, 4, {
-        capacity,
-        includeSummers: false,
-        ...(minimum === undefined ? {} : { minimum }),
-      }),
-    });
-
-  test("holds work back rather than enrolling a student part time", () => {
-    // Three credits in a term of their own makes a student part time for a
-    // semester. AA and BB gate nothing, so deferring one is free.
-    const held = plan(6, 3);
-    expect(held.terms.every((t) => t.credits >= 6 || t === held.terms.at(-1))).toBe(true);
-  });
-
-  test("takes a short term anyway when the work gates what follows", () => {
-    // Deferring a course that unlocks others defers everything behind it.
-    const chain = buildGraph([
-      { code: "AA-1000", title: "", requisites: [] },
-      { code: "ZZ-4000", title: "", requisites: [req("Take AA-1000")] },
-    ]);
-    const p = projectPlan({
-      need: ["AA-1000", "ZZ-4000"],
-      completed: new Set(),
-      graph: chain,
-      credits: () => 3,
-      offeredIn: () => true,
-      slots: termsFrom({ year: 2027, season: "spring" }, 4, {
-        capacity: 3,
-        includeSummers: false,
-        minimum: 12,
-      }),
-    });
-    expect(p.terms.map((t) => t.courses[0]?.code)).toEqual(["AA-1000", "ZZ-4000"]);
-    expect(p.unscheduled).toEqual([]);
-  });
-
-  test("a light final term is simply how a degree ends", () => {
-    // One course left and nothing to hold it back for.
+  test("is flagged rather than avoided", () => {
+    // Rearranging a degree around a light term costs a term; adding a course
+    // costs a course. Say which terms are light and let the student decide.
     const p = projectPlan({
       need: ["AA-1000"],
       completed: new Set(),
-      graph: three,
+      graph: two,
       credits: () => 3,
       offeredIn: () => true,
       slots: termsFrom({ year: 2027, season: "spring" }, 2, {
-        capacity: 12,
+        capacity: 17,
         includeSummers: false,
         minimum: 12,
       }),
     });
-    expect(p.terms).toHaveLength(1);
-    expect(p.terms[0]?.credits).toBe(3);
+    expect(p.terms[0]?.short).toBe(true);
+    expect(p.unscheduled).toEqual([]);
   });
 
-  test("without a minimum it opens whatever term it can", () => {
-    expect(plan(undefined, 3).terms).toHaveLength(2);
+  test("a full term is not flagged", () => {
+    const p = projectPlan({
+      need: ["AA-1000", "BB-1000"],
+      completed: new Set(),
+      graph: two,
+      credits: () => 6,
+      offeredIn: () => true,
+      slots: termsFrom({ year: 2027, season: "spring" }, 2, {
+        capacity: 17,
+        includeSummers: false,
+        minimum: 12,
+      }),
+    });
+    expect(p.terms[0]?.short).toBeUndefined();
+  });
+
+  test("no minimum means nothing to flag", () => {
+    const p = projectPlan({
+      need: ["AA-1000"],
+      completed: new Set(),
+      graph: two,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: termsFrom({ year: 2027, season: "spring" }, 2, {
+        capacity: 17,
+        includeSummers: false,
+      }),
+    });
+    expect(p.terms[0]?.short).toBeUndefined();
   });
 });

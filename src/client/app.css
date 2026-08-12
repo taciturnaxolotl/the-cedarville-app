@@ -965,3 +965,8 @@ label.section.clashes:not(:has(input:checked)) .when {
   padding: 4px 10px;
   font-size: 11px;
 }
+
+/* A light term is a thing to fix with one more course, not a thing to hide. */
+.graph .term-label.short {
+  fill: var(--yellow);
+}

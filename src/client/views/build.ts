@@ -51,16 +51,38 @@ function namesOf(tree: ProgramTree): string[] {
 }
 
 /** "+2 terms" reads better than a bare number, and null is not a number. */
-function priceOf(candidate: Candidate): { text: string; kind: string } {
-  if (candidate.forced) return { text: "already required", kind: "free" };
-  if (candidate.addedTerms === null) return { text: "does not fit", kind: "bad" };
+function priceOf(candidate: Candidate): { text: string; kind: string; why: string } {
+  if (candidate.forced) {
+    return {
+      text: "already required",
+      kind: "free",
+      why: "another requirement buys this course anyway, so it costs nothing here",
+    };
+  }
+  if (candidate.addedTerms === null) {
+    return {
+      text: "won't schedule",
+      kind: "bad",
+      why:
+        "no term fits this course or its prerequisites, or taking it pushes " +
+        "something else past the end of the plan",
+    };
+  }
   if (candidate.addedTerms === 0) {
     return candidate.addedCredits === 0
-      ? { text: "free", kind: "free" }
-      : { text: `+${candidate.addedCredits} cr`, kind: "cheap" };
+      ? { text: "free", kind: "free", why: "it fits in credits you are already spending" }
+      : {
+          text: `+${candidate.addedCredits} cr`,
+          kind: "cheap",
+          why: "extra credits, but the finish term does not move",
+        };
   }
   const terms = `+${candidate.addedTerms} term${candidate.addedTerms === 1 ? "" : "s"}`;
-  return { text: `${terms}, +${candidate.addedCredits} cr`, kind: "bad" };
+  return {
+    text: `${terms}, +${candidate.addedCredits} cr`,
+    kind: "bad",
+    why: "choosing this pushes your finish date out",
+  };
 }
 
 export function mount(root: HTMLElement, ctx: Ctx) {
@@ -283,7 +305,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     row.append(el("span", "title", label(candidate.code)));
 
     const cost = priceOf(candidate);
-    row.append(tag(cost.text, cost.kind));
+    const badge = tag(cost.text, cost.kind);
+    badge.title = cost.why;
+    row.append(badge);
 
     // A course paying into two programs is the finding worth surfacing.
     const across = [...new Set(candidate.satisfies.map((s) => s.program))];

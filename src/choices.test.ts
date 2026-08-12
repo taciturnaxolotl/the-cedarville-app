@@ -190,6 +190,49 @@ describe("pricing a choice", () => {
     expect(ranking.choices[0]!.candidates[0]!.code).toBe("ART-1100");
   });
 
+  test("buys the prerequisites of what the cover picks", () => {
+    // LIT-2090 closes the literature slot and needs LIT-1990 first, which no
+    // requirement asks for. Without the chain the projection strands it.
+    const tree = normalize(
+      program("A", [
+        group({
+          DisplayText: "literature",
+          FromCourses: [course("1", "LIT", "2090")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    const ranking = rankChoices([tree], base([node("LIT-2090", ["LIT-1990"]), node("LIT-1990")]));
+    expect(ranking.baseline.unscheduled).toEqual([]);
+    expect(ranking.baseline.totalCredits).toBe(6);
+  });
+
+  test("one stranded course in the baseline does not poison every candidate", () => {
+    // NEVER-4000 is required and taught in no season we model, so it can never
+    // be placed. That is its problem, not the elective pool's — and reporting
+    // it as everyone's problem made every course in every pool read the same.
+    const tree = normalize(
+      program("A", [
+        group({ Courses: [course("8", "NEVER", "4000")] }),
+        group({
+          Id: "e",
+          DisplayText: "one elective",
+          FromCourses: [course("1", "ART", "1100"), course("2", "ART", "1200")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    const ranking = rankChoices([tree], {
+      ...base([node("NEVER-4000"), node("ART-1100"), node("ART-1200")]),
+      offeredIn: (code: string) => code !== "NEVER-4000",
+    });
+
+    expect(ranking.baseline.unscheduled.map((u) => u.code)).toEqual(["NEVER-4000"]);
+    const priced = ranking.choices.flatMap((c) => c.candidates).filter((c) => !c.forced);
+    expect(priced.length).toBeGreaterThan(0);
+    expect(priced.every((c) => c.addedTerms !== null)).toBe(true);
+  });
+
   test("reports which programs a candidate pays into", () => {
     const shared = course("1", "GBIO", "1000");
     const a = normalize(

@@ -31,7 +31,10 @@ export interface Candidate {
   /**
    * Terms this choice adds to the finish date, against the cheapest plan.
    * Zero means free: taking it costs nothing you were not already paying.
-   * Null means the plan no longer finishes inside the horizon at all.
+   *
+   * Null is the narrow case of a course that cannot be scheduled at all —
+   * itself or its chain stranded, or something else pushed off the end by
+   * taking it. It is not a way of saying "we are unsure".
    */
   addedTerms: number | null;
   /** Credits it adds beyond the baseline plan. Zero when already required. */
@@ -77,16 +80,39 @@ export interface RankOptions extends NeedOptions {
   limit?: number;
 }
 
-/** Where a term falls in the run of slots, or null if the plan never lands. */
-function finishIndex(plan: Plan, slots: readonly TermSlot[]): number | null {
-  if (!plan.finishes || plan.unscheduled.length) return null;
+/**
+ * Where a term falls in the run of slots.
+ *
+ * Always a number. An earlier version returned null when the plan left
+ * anything unplaced, which sounds careful and is not: one stranded course in
+ * the baseline then made every candidate in every pool report "does not fit",
+ * because the comparison was against nothing.
+ */
+function finishIndex(plan: Plan, slots: readonly TermSlot[]): number {
+  if (!plan.finishes) return slots.length;
   const at = slots.findIndex((s) => s.name === plan.finishes);
-  return at < 0 ? null : at;
+  return at < 0 ? slots.length : at;
+}
+
+/**
+ * A course set closed over its prerequisites.
+ *
+ * A requirement pool lists what satisfies it, never what that costs to reach.
+ * `LIT-2090` closes the literature slot and needs `LIT-1990` first, which no
+ * requirement asks for — so the projection took `LIT-2090`, found it blocked
+ * every term, and reported it unplaceable. The chain is part of the purchase.
+ */
+function closure(need: Iterable<string>, options: RankOptions): Set<string> {
+  const all = new Set(need);
+  for (const code of [...all]) {
+    for (const required of prerequisitesOf(options.graph, code, options.have)) all.add(required);
+  }
+  return all;
 }
 
 function planFor(need: Iterable<string>, options: RankOptions): Plan {
   return projectPlan({
-    need,
+    need: closure(need, options),
     completed: options.have,
     graph: options.graph,
     credits: options.credits,
@@ -108,6 +134,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
   const baseline = planFor(solved.courses, options);
   const baseAt = finishIndex(baseline, options.slots);
   const baseCredits = baseline.totalCredits;
+  const baseUnplaced = baseline.unscheduled.length;
 
   // Which programs want a course, gathered before ranking so a candidate can
   // say "this one counts toward both your major and your minor".
@@ -136,10 +163,18 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     const pinned = new Set([...(options.pinned ?? []), code, ...requires]);
     const withIt = coursesNeededAcross(trees, { ...options, pinned });
     const plan = planFor(withIt.courses, options);
-    const at = finishIndex(plan, options.slots);
+
+    // Unschedulable means *this* course could not be placed, or taking it
+    // stranded something that fitted before. A course stranded in the
+    // baseline for its own reasons is not this candidate's fault.
+    const stranded = new Set(plan.unscheduled.map((u) => u.code));
+    const blocked =
+      stranded.has(code) ||
+      requires.some((r) => stranded.has(r)) ||
+      plan.unscheduled.length > baseUnplaced;
 
     const result: Price = {
-      addedTerms: at === null || baseAt === null ? null : Math.max(0, at - baseAt),
+      addedTerms: blocked ? null : Math.max(0, finishIndex(plan, options.slots) - baseAt),
       addedCredits: Math.max(0, plan.totalCredits - baseCredits),
       requires,
     };

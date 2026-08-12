@@ -263,9 +263,10 @@ describe("schedule view", () => {
     expect(root.textContent).toContain("pick a term");
   });
 
-  test("lists a section under the requirement it would close", () => {
+  test("groups sections under a course card inside its requirement", () => {
     schedule.mount(root, withSections());
     expect(root.querySelectorAll("details.req").length).toBeGreaterThan(0);
+    expect(root.querySelectorAll("details.course").length).toBe(1);
     expect(root.textContent).toContain("CS-1210");
     expect(root.textContent).toContain("MonWed 9:00am\u20139:50am");
     expect(root.textContent).toContain("Dr Who");
@@ -274,7 +275,16 @@ describe("schedule view", () => {
   test("shows a full section as full rather than hiding it", () => {
     schedule.mount(root, withSections());
     expect(root.querySelector(".tag.full")).toBeTruthy();
-    expect(root.textContent).toContain("0 of 30 open");
+    expect(root.textContent).toContain("0/30");
+    expect(root.querySelector(".tag.seats")?.getAttribute("title")).toContain("0 of 30 seats open");
+  });
+
+  // The point of the overhaul: a course says whether you can take it.
+  test("a course with no requisites reads as ready", () => {
+    schedule.mount(root, withSections());
+    const card = root.querySelector("details.course") as HTMLElement;
+    expect(card.dataset.state).toBe("open");
+    expect(root.querySelector(".gate.open")?.textContent).toBe("ready");
   });
 
   test("starts with an empty week", () => {
@@ -287,6 +297,72 @@ describe("schedule view", () => {
     expect(root.children).toHaveLength(0);
   });
 
+  /**
+   * The whole reason for the overhaul: a course whose prerequisite the
+   * student has not completed must say so, name the missing course, and not
+   * simply look identical to one they can take.
+   */
+  const withPrereq = (): Ctx => {
+    const ctx = withSections() as any;
+    ctx.sections.courses = [
+      {
+        Id: "1",
+        SubjectCode: "CS",
+        Number: "1210",
+        Title: "Intro",
+        CourseRequisites: [
+          {
+            DisplayText: "Take CS-1000",
+            DisplayTextExtension: "- Must be completed prior to taking this course.",
+            IsRequired: true,
+          },
+        ],
+      },
+    ];
+    return ctx as Ctx;
+  };
+
+  test("a blocked course names what it is waiting on", () => {
+    localStorage.clear();
+    schedule.mount(root, withPrereq());
+
+    const card = root.querySelector("details.course") as HTMLElement;
+    expect(card.dataset.state).toBe("blocked");
+    expect(root.querySelector(".gate.blocked")?.textContent).toBe("blocked");
+    expect(root.textContent).toContain("needs CS-1000");
+  });
+
+  test("hiding blocked courses removes them from view", () => {
+    localStorage.clear();
+    schedule.mount(root, withPrereq());
+    const card = root.querySelector("details.course") as HTMLElement;
+    expect(card.hidden).toBe(false);
+
+    const filter = root.querySelector(".toggle input") as HTMLInputElement;
+    filter.click();
+    expect(card.hidden).toBe(true);
+
+    filter.click();
+    expect(card.hidden).toBe(false);
+  });
+
+  test("an unparseable condition reads as check, not as ready", () => {
+    localStorage.clear();
+    const ctx = withPrereq() as any;
+    ctx.sections.courses[0].CourseRequisites = [
+      {
+        DisplayText: "Permission of the instructor.",
+        DisplayTextExtension: "- Must be completed prior to taking this course.",
+        IsRequired: true,
+      },
+    ];
+    schedule.mount(root, ctx as Ctx);
+
+    const card = root.querySelector("details.course") as HTMLElement;
+    expect(card.dataset.state).toBe("unknown");
+    expect(root.textContent).toContain("Permission of the instructor");
+  });
+
   // The refactor this replaced ran a full DOM sweep on every tick. These
   // assert the reactive path: an event sets state, state repaints the parts
   // that depend on it, and nothing else is touched.
@@ -295,7 +371,7 @@ describe("schedule view", () => {
     schedule.mount(root, withSections());
     expect(root.textContent).toContain("nothing picked yet");
 
-    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    const box = root.querySelector("label.section input") as HTMLInputElement;
     box.click();
 
     expect(root.textContent).toContain("1 sections · 3 credits");
@@ -306,7 +382,7 @@ describe("schedule view", () => {
   test("unticking puts the week back", () => {
     localStorage.clear();
     schedule.mount(root, withSections());
-    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    const box = root.querySelector("label.section input") as HTMLInputElement;
 
     box.click();
     expect(root.querySelector(".grid")).toBeTruthy();
@@ -319,12 +395,12 @@ describe("schedule view", () => {
   test("a pick survives a remount", () => {
     localStorage.clear();
     const first = schedule.mount(root, withSections());
-    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    const box = root.querySelector("label.section input") as HTMLInputElement;
     box.click();
     first.destroy();
 
     schedule.mount(root, withSections());
-    const restored = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    const restored = root.querySelector("label.section input") as HTMLInputElement;
     expect(restored.checked).toBe(true);
     expect(root.textContent).toContain("1 sections");
   });
@@ -332,7 +408,7 @@ describe("schedule view", () => {
   test("destroy detaches subscriptions so a stale view cannot repaint", () => {
     localStorage.clear();
     const view = schedule.mount(root, withSections());
-    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    const box = root.querySelector("label.section input") as HTMLInputElement;
     view.destroy();
 
     // The node is detached; clicking it must not throw or resurrect anything.

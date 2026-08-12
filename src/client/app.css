@@ -293,7 +293,7 @@ td {
 /* ---- schedule ---- */
 
 .week {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 
 .clash {
@@ -304,25 +304,50 @@ td {
   color: var(--red);
 }
 
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--subtext);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+/* ---- the week grid ---- */
+
 .grid {
   display: flex;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 12px;
+  padding-bottom: 4px;
   overflow-x: auto;
+}
+
+.gutter {
+  position: relative;
+  flex: 0 0 52px;
+}
+
+.hour {
+  position: absolute;
+  right: 6px;
+  color: var(--overlay);
+  font-size: 10px;
+  transform: translateY(20px);
 }
 
 .day {
   position: relative;
-  flex: 1 0 130px;
-  padding-top: 26px;
+  flex: 1 0 132px;
   border-left: 1px solid var(--surface);
 }
 
 .day h3 {
-  position: absolute;
-  top: 0;
   margin: 0;
-  padding-left: 6px;
+  padding: 4px 0 0 8px;
   color: var(--subtext);
   font-size: 11px;
   font-weight: 500;
@@ -336,9 +361,9 @@ td {
   padding: 3px 6px;
   border-radius: 3px;
   border-left: 2px solid var(--lavender);
-  background: var(--mantle);
+  background: color-mix(in oklch, var(--lavender) 14%, var(--mantle));
   font-size: 11px;
-  line-height: 1.35;
+  line-height: 1.3;
 }
 
 .block b {
@@ -348,77 +373,169 @@ td {
 }
 
 .block span {
-  color: var(--overlay);
+  color: var(--subtext);
 }
 
+/* ---- course cards ---- */
+
 details.req {
-  margin-bottom: 2px;
+  margin-bottom: 18px;
+  border-left: 1px solid var(--surface);
 }
+
+details.req > summary {
+  padding: 5px 0;
+  color: var(--subtext);
+}
+
+details.course {
+  margin: 3px 0 3px 12px;
+  padding-left: 0;
+  border-left: 2px solid var(--surface);
+}
+
+details.course > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 3px;
+}
+
+details.course > summary:hover {
+  background: var(--mantle);
+}
+
+details.course[data-state="open"] {
+  border-left-color: var(--green);
+}
+
+details.course[data-state="blocked"] {
+  border-left-color: var(--surface);
+}
+
+details.course[data-state="blocked"] > summary {
+  opacity: 0.62;
+}
+
+details.course[data-state="unknown"] {
+  border-left-color: var(--yellow);
+}
+
+.code {
+  min-width: 88px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.title {
+  flex: 1;
+  min-width: 140px;
+  color: var(--subtext);
+}
+
+.cr,
+.count {
+  color: var(--overlay);
+  font-size: 11px;
+}
+
+.gate {
+  padding: 1px 7px;
+  border-radius: 3px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gate.open {
+  color: var(--green);
+  background: color-mix(in oklch, var(--green) 14%, transparent);
+}
+
+.gate.blocked {
+  color: var(--overlay);
+  background: var(--mantle);
+}
+
+.gate.unknown {
+  color: var(--yellow);
+  background: color-mix(in oklch, var(--yellow) 12%, transparent);
+}
+
+.tag.unlocks {
+  color: var(--sky);
+  cursor: help;
+}
+
+.gate-why {
+  margin: 0 0 4px 10px;
+  color: var(--peach);
+  font-size: 11px;
+}
+
+/* ---- section rows ---- */
 
 label.section {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  padding: 3px 0 3px 16px;
+  gap: 10px;
+  margin-left: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
   cursor: pointer;
+  transition: background 0.1s ease;
 }
 
 label.section:hover {
   background: var(--mantle);
 }
 
-label.section.clashes .when {
+label.section:has(input:checked) {
+  background: color-mix(in oklch, var(--lavender) 14%, transparent);
+}
+
+label.section:has(input:checked) .when {
+  color: var(--lavender);
+}
+
+label.section.clashes:not(:has(input:checked)) .when {
   color: var(--overlay);
   text-decoration: line-through;
 }
 
 .when {
-  min-width: 340px;
+  min-width: 210px;
+  font-variant-numeric: tabular-nums;
+}
+
+.room,
+.who {
+  color: var(--overlay);
+  font-size: 11px;
+}
+
+.who {
+  flex: 1;
+  min-width: 120px;
+}
+
+.tag.seats {
+  font-variant-numeric: tabular-nums;
+}
+
+.tag.live {
+  border-bottom: 1px dotted currentColor;
 }
 
 .tag.open {
   color: var(--green);
 }
+
 .tag.full {
   color: var(--red);
-}
-
-#progress-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--surface);
-}
-
-progress {
-  flex: 1;
-  height: 6px;
-  border: 0;
-  border-radius: 3px;
-  background: var(--mantle);
-  appearance: none;
-}
-
-progress::-webkit-progress-bar {
-  border-radius: 3px;
-  background: var(--mantle);
-}
-
-progress::-webkit-progress-value {
-  border-radius: 3px;
-  background: var(--lavender);
-  transition: width 0.15s ease-out;
-}
-
-#progress-text {
-  min-width: 260px;
-  color: var(--subtext);
-  font-size: 11px;
-}
-
-.tag.live {
-  border-bottom: 1px dotted currentColor;
 }
 
 .seats-note {
@@ -426,69 +543,18 @@ progress::-webkit-progress-value {
   font-size: 11px;
 }
 
-/* Rows are dense; give the eye a rhythm and a hit target. */
-label.section {
-  border-radius: 3px;
-  transition: background 0.1s ease;
-}
-
-label.section:has(input:checked) {
-  background: color-mix(in oklch, var(--lavender) 12%, transparent);
-}
-
-label.section:has(input:checked) .when {
-  color: var(--lavender);
-}
-
-/* A picked section outranks a clash warning: you chose it deliberately. */
-label.section.clashes:not(:has(input:checked)) .when {
-  color: var(--overlay);
-  text-decoration: line-through;
-}
-
-details.req > summary {
-  padding: 5px 0;
-}
-
-details.req[open] > summary {
-  color: var(--lavender);
-}
-
 @media (max-width: 720px) {
-  body {
-    padding: 20px 16px 48px;
-  }
-
-  #controls {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .actions {
-    margin-left: 0;
-  }
-
-  select {
-    max-width: none;
-  }
-
   .when {
     min-width: 0;
   }
 
-  label.section {
-    flex-wrap: wrap;
+  .title {
+    min-width: 0;
   }
 
-  .pool .sides {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-}
-
-/* Respect a system preference rather than animating regardless. */
-@media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
+  .grid {
+    margin-left: -16px;
+    margin-right: -16px;
+    padding-left: 16px;
   }
 }

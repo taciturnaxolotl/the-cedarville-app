@@ -1,17 +1,34 @@
 /*
- * Schedule builder. The week you are assembling above, open requirements below.
+ * Schedule builder, organised around courses rather than sections.
  *
- * The organising idea is that you never browse a course catalogue in the
- * abstract — you browse it to close a specific requirement. So every section
- * here is reachable only underneath the requirement it would satisfy.
+ * The old layout listed every section flat under its requirement, which
+ * answered "when does this meet" and nothing else. The two questions that
+ * actually decide a term are "can I take this yet" and "what does taking it
+ * unlock", so those lead: each course carries its eligibility and the size of
+ * its downstream, and sections are the detail you open once you have chosen.
  *
- * Every visible thing is a subscription to a slice of state. Nothing pokes
- * the DOM from an event handler: ticking a section sets `picked`, and the
- * grid, the credit count, and only the affected rows repaint themselves.
- * That keeps hundreds of rows responsive with no diffing machinery.
+ * Ordering follows the same logic. A course that gates eleven others is worth
+ * taking before one that gates none, so open courses sort first and, within
+ * those, the ones with the longest tail behind them.
+ *
+ * Every visible thing is a subscription to a slice of state. Nothing pokes the
+ * DOM from an event handler.
  */
 
-import { enumeratedCourseIds, openGroups } from "../../requirements";
+import {
+  buildGraph,
+  type CourseNode,
+  depth,
+  downstream,
+  eligibility,
+  parseRequisite,
+} from "../../prereqs";
+import {
+  completedCourses,
+  enumeratedCourseIds,
+  inProgressCourses,
+  openGroups,
+} from "../../requirements";
 import {
   conflictsBetween,
   DAY_NAMES,
@@ -27,8 +44,10 @@ import { el, tag } from "../dom";
 import { createStore, Subscriptions } from "../store";
 
 const PICKED = "cedarville:picked-sections";
+/** Half-hour rows, in pixels. The grid is legible and not enormous. */
+const ROW = 20;
 
-interface LiveSeats {
+interface Seats {
   available: number;
   capacity: number;
   status: string;
@@ -36,9 +55,10 @@ interface LiveSeats {
 
 interface State {
   picked: ReadonlySet<string>;
-  /** Live availability by section id, overriding the cached crawl. */
-  seats: Readonly<Record<string, LiveSeats>>;
+  seats: Readonly<Record<string, Seats>>;
   loadingSeats: boolean;
+  /** Hide courses whose prerequisites are not met. */
+  hideBlocked: boolean;
 }
 
 const restore = (): Set<string> => {
@@ -65,13 +85,39 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     byCourse.set(offering.courseId, [...(byCourse.get(offering.courseId) ?? []), offering]);
   }
 
-  const store = createStore<State>({ picked: restore(), seats: {}, loadingSeats: true });
+  // ---- what blocks what ------------------------------------------------
+
+  const nodes: CourseNode[] = (catalog.courses ?? []).map((c) => ({
+    code: `${c.SubjectCode}-${c.Number}`,
+    title: c.Title,
+    requisites: (c.CourseRequisites ?? []).map(parseRequisite),
+  }));
+  const graph = buildGraph(nodes);
+  const nodeFor = (offering: Offering) => graph.courses.get(offering.courseName);
+
+  const completed = new Set<string>();
+  const enrolled = new Set<string>();
+  for (const tree of trees) {
+    for (const code of completedCourses(tree)) completed.add(code);
+    for (const code of inProgressCourses(tree)) enrolled.add(code);
+  }
+
+  const store = createStore<State>({
+    picked: restore(),
+    seats: {},
+    loadingSeats: true,
+    hideBlocked: false,
+  });
+
   const chosen = (picked: ReadonlySet<string>) =>
     [...picked].map((id) => byId.get(id)).filter(Boolean) as Offering[];
 
+  /** Courses picked this term also satisfy a corequisite. */
+  const alsoTaking = (picked: ReadonlySet<string>) =>
+    new Set([...enrolled, ...chosen(picked).map((o) => o.courseName)]);
+
   function toggle(id: string) {
     store.set((s) => {
-      // A fresh Set every time, so Object.is sees the change.
       const picked = new Set(s.picked);
       if (picked.has(id)) picked.delete(id);
       else picked.add(id);
@@ -116,23 +162,21 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       },
     ),
     store.watch(
-      (s) => (s.loadingSeats ? "loading" : Object.keys(s.seats).length),
-      (state) => {
+      (s) => (s.loadingSeats ? -1 : Object.keys(s.seats).length),
+      (count) => {
         freshness.textContent =
-          state === "loading"
+          count < 0
             ? "checking current seat counts…"
-            : state === 0
+            : count === 0
               ? "seat counts are from the cached catalog"
-              : `${state} seat counts live as of ${new Date().toLocaleTimeString()}`;
+              : `${count} seat counts live as of ${new Date().toLocaleTimeString()}`;
       },
     ),
   );
 
-  /** "clash" when this section collides with anything already picked. */
-  const clashKey = (picked: ReadonlySet<string>, offering: Offering) =>
-    chosen(picked).some((other) => conflictsBetween(offering, other).length > 0) ? "clash" : "free";
+  // ---- a section row ---------------------------------------------------
 
-  function row(offering: Offering): HTMLElement {
+  function sectionRow(offering: Offering): HTMLElement {
     const label = el("label", "section");
     label.dataset.section = offering.id;
 
@@ -151,13 +195,13 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       : "no set meeting time";
 
     const seatTag = tag("");
-    label.append(box, el("span", "when", `${offering.courseName}-${offering.number}  ${when}`));
-    if (offering.instructors.length) label.append(tag(offering.instructors.join(", ")));
+    label.append(box, el("span", "when", `${offering.number}  ${when}`));
+    if (offering.meetings[0]?.room) label.append(el("span", "room", offering.meetings[0].room));
+    if (offering.instructors.length)
+      label.append(el("span", "who", offering.instructors.join(", ")));
     label.append(seatTag);
     if (offering.nonStandardDates) label.append(tag("partial term", "rule"));
 
-    // One subscription per row, so picking a section repaints the rows it
-    // actually affects rather than the whole list.
     subs.add(
       store.watch(
         (s) => (s.picked.has(offering.id) ? "picked" : clashKey(s.picked, offering)),
@@ -170,13 +214,95 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         (s) => s.seats[offering.id] ?? null,
         (live) => {
           const seats = live ?? offering.seats;
-          seatTag.textContent = `${seats.available} of ${seats.capacity} open`;
-          seatTag.className = `tag ${seats.available > 0 ? "open" : "full"}${live ? " live" : ""}`;
-          seatTag.title = live ? "live from Self-Service" : "from the cached catalog";
+          seatTag.textContent = `${seats.available}/${seats.capacity}`;
+          seatTag.className = `tag seats ${seats.available > 0 ? "open" : "full"}${live ? " live" : ""}`;
+          seatTag.title = `${seats.available} of ${seats.capacity} seats open, ${
+            live ? "live from Self-Service" : "from the cached catalog"
+          }`;
         },
       ),
     );
     return label;
+  }
+
+  const clashKey = (picked: ReadonlySet<string>, offering: Offering) =>
+    chosen(picked).some((other) => conflictsBetween(offering, other).length > 0) ? "clash" : "free";
+
+  // ---- a course card ---------------------------------------------------
+
+  function courseCard(offerings: Offering[]): HTMLElement {
+    const first = offerings[0]!;
+    const node = nodeFor(first);
+    const unlocks = node ? downstream(graph, node.code).size : 0;
+    const chain = node ? depth(graph, node.code) : 0;
+
+    const card = el("details", "course");
+    const head = el("summary");
+
+    head.append(el("b", "code", first.courseName));
+    head.append(el("span", "title", first.title));
+    head.append(el("span", "cr", `${first.credits.min} cr`));
+
+    const status = el("span", "gate");
+    head.append(status);
+    if (unlocks > 0) {
+      const t = tag(`unlocks ${unlocks}`, "unlocks");
+      t.title =
+        `${unlocks} later course${unlocks === 1 ? "" : "s"} depend on this one` +
+        (chain ? `, and it sits ${chain} deep in its own chain` : "");
+      head.append(t);
+    }
+    head.append(
+      el("span", "count", `${offerings.length} section${offerings.length === 1 ? "" : "s"}`),
+    );
+    card.append(head);
+
+    // Why it is blocked, spelled out rather than implied by a colour.
+    const reason = el("p", "gate-why");
+    card.append(reason);
+    for (const offering of offerings) card.append(sectionRow(offering));
+
+    subs.add(
+      store.watch(
+        (s) => {
+          if (!node) return "open";
+          const verdict = eligibility(node, completed, alsoTaking(s.picked));
+          return verdict.state === "open"
+            ? "open"
+            : `${verdict.state}:${verdict.blockedBy.join(",")}`;
+        },
+        (key) => {
+          const [state, blocked] = key.split(":");
+          card.dataset.state = state;
+          status.textContent =
+            state === "open" ? "ready" : state === "blocked" ? "blocked" : "check";
+          status.className = `gate ${state}`;
+
+          if (state === "open") {
+            reason.textContent = "";
+            reason.hidden = true;
+            return;
+          }
+          reason.hidden = false;
+          if (state === "blocked") {
+            reason.textContent = `needs ${blocked?.split(",").filter(Boolean).join(", ")}`;
+          } else {
+            const verdict = node && eligibility(node, completed, alsoTaking(store.get().picked));
+            reason.textContent =
+              verdict && verdict.state === "unknown"
+                ? verdict.why.join(" ")
+                : "has a condition we cannot check";
+          }
+        },
+      ),
+      store.watch(
+        (s) => s.hideBlocked && card.dataset.state === "blocked",
+        (hide) => {
+          card.hidden = hide;
+        },
+      ),
+    );
+    return card;
   }
 
   // ---- the requirement list --------------------------------------------
@@ -189,17 +315,33 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       const ids = enumeratedCourseIds(group);
       if (!ids) continue;
 
-      const offerings = [...ids].flatMap((id) => byCourse.get(id) ?? []);
-      if (offerings.length === 0) continue;
-      for (const o of offerings) onScreen.add(o.courseId);
+      const courses = [...ids].map((id) => byCourse.get(id)).filter(Boolean) as Offering[][];
+      if (courses.length === 0) continue;
+      for (const offerings of courses) onScreen.add(offerings[0]!.courseId);
+
+      // Ready first, then whatever gates the most.
+      courses.sort((a, b) => {
+        const rank = (o: Offering[]) => {
+          const node = nodeFor(o[0]!);
+          return node && eligibility(node, completed, enrolled).state !== "open" ? 1 : 0;
+        };
+        const byReady = rank(a) - rank(b);
+        if (byReady !== 0) return byReady;
+        const tail = (o: Offering[]) => {
+          const node = nodeFor(o[0]!);
+          return node ? downstream(graph, node.code).size : 0;
+        };
+        return tail(b) - tail(a) || a[0]!.courseName.localeCompare(b[0]!.courseName);
+      });
 
       const box = el("details", "req");
+      box.open = true;
       const sum = el("summary");
       sum.append(el("span", `dot ${group.status.completion}`));
       sum.append(document.createTextNode(group.text || requirement.text));
-      sum.append(tag(`${offerings.length} sections`));
+      sum.append(tag(`${courses.length} courses`));
       box.append(sum);
-      for (const offering of offerings) box.append(row(offering));
+      for (const offerings of courses) box.append(courseCard(offerings));
       list.append(box);
     }
   }
@@ -215,11 +357,18 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     );
   }
 
+  // ---- chrome ----------------------------------------------------------
+
+  const filter = el("label", "toggle");
+  const hide = el("input");
+  hide.type = "checkbox";
+  hide.addEventListener("change", () => store.set({ hideBlocked: hide.checked }));
+  filter.append(hide, el("span", undefined, "hide courses I cannot take yet"));
+
   const weekBox = el("div", "week");
-  weekBox.append(summary, freshness, clashes, gridBox);
+  weekBox.append(summary, freshness, clashes, gridBox, filter);
   root.replaceChildren(weekBox, list);
 
-  // Only the courses actually on screen, which is a handful, not the term.
   void liveSeats(catalog.term, [...onScreen])
     .then((seats) => store.set({ seats, loadingSeats: false }))
     .catch(() => store.set({ loadingSeats: false }));
@@ -232,26 +381,40 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   };
 }
 
+/** A weekday grid with an hour gutter, positioned straight off the clock. */
 function renderGrid(schedule: Offering[]): HTMLElement {
   const bounds = span(schedule);
   const table = el("div", "grid");
   if (!bounds) return table;
+
+  const from = Math.floor(bounds.start / 60) * 60;
+  const to = Math.ceil(bounds.end / 60) * 60;
+  const height = ((to - from) / 30) * ROW;
+  const place = (minutes: number) => ((minutes - from) / 30) * ROW;
+
+  const gutter = el("div", "gutter");
+  for (let minute = from; minute <= to; minute += 60) {
+    const mark = el("span", "hour", formatTime(minute));
+    mark.style.top = `${place(minute)}px`;
+    gutter.append(mark);
+  }
+  gutter.style.height = `${height + 26}px`;
+  table.append(gutter);
 
   for (const column of week(schedule)) {
     const col = el("div", "day");
     col.append(el("h3", undefined, DAY_NAMES[column.day]));
     for (const item of column.items) {
       const block = el("div", "block");
-      // Position and height read straight off the clock.
-      block.style.top = `${((item.meeting.start - bounds.start) / 30) * 18}px`;
-      block.style.height = `${Math.max(((item.meeting.end - item.meeting.start) / 30) * 18, 20)}px`;
+      block.style.top = `${place(item.meeting.start) + 26}px`;
+      block.style.height = `${Math.max(place(item.meeting.end) - place(item.meeting.start), 18)}px`;
       block.append(el("b", undefined, item.offering.courseName));
       block.append(
         el("span", undefined, `${formatTime(item.meeting.start)} ${item.meeting.room}`.trim()),
       );
       col.append(block);
     }
-    col.style.height = `${((bounds.end - bounds.start) / 30) * 18 + 30}px`;
+    col.style.height = `${height + 26}px`;
     table.append(col);
   }
   return table;

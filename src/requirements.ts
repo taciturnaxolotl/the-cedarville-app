@@ -365,3 +365,32 @@ export function accepts(group: Group, course: CatalogCourse): Acceptance {
   }
   return group.unverifiable ? "unknown" : "yes";
 }
+
+/**
+ * Course names the student has actually finished, e.g. "CS-1220".
+ *
+ * Colleague reports these per group rather than as a transcript, so the same
+ * course appears under every requirement it counts toward; the Set collapses
+ * that. In-progress credit is excluded on purpose: a prerequisite is not met
+ * until it is passed.
+ */
+export function completedCourses(tree: ProgramTree): Set<string> {
+  const done = new Set<string>();
+  for (const { group } of walkGroups(tree)) {
+    for (const credit of group.applied) {
+      if (credit.IsCompletedCredit && !credit.IsWithdrawn) done.add(credit.CourseName);
+    }
+  }
+  return done;
+}
+
+/** Courses the student is enrolled in now, which satisfy a corequisite. */
+export function inProgressCourses(tree: ProgramTree): Set<string> {
+  const now = new Set<string>();
+  for (const { group } of walkGroups(tree)) {
+    for (const credit of group.applied) {
+      if (!credit.IsCompletedCredit && !credit.IsWithdrawn) now.add(credit.CourseName);
+    }
+  }
+  return now;
+}

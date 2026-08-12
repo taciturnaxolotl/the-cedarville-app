@@ -25,6 +25,7 @@ another tab, and click capture.
     src/requirements.ts  Ellucian's 40-field Group as a tagged union
     src/merge.ts         which course satisfies a requirement in both majors
     src/schedule.ts      meeting times, seat counts, and date-aware conflicts
+    src/prereqs.ts       what a course needs, and what needs it
     src/catalog.ts        the one shape that is public rather than personal
     src/server/colleague.ts  guest client: the catalog needs no session
     src/server/crawler.ts    one term per crawl, ~60 pages
@@ -50,6 +51,24 @@ filters that no evaluation endpoint resolves. Those are reported as
 is worse than a shorter honest one. Schools also cap credits shared between
 two majors, and that policy lives in the academic catalog, not the API: pass
 `sharedCreditCap` to `merge` to have it checked.
+
+### what blocks what
+
+Colleague states requisites as a rule id it never expands, but it also ships
+the registrar's own wording: "Take CS-1220", plus a line saying whether that
+must come before, alongside, or is merely recommended. That text is the only
+machine-readable prerequisite data there is, so `src/prereqs.ts` parses it.
+
+Of 373 courses with requisites in Fall 2026, 325 parse cleanly. The other 48
+say things like "junior status", "permission of instructor", or "acceptance
+into the PA program". Those gate a course just as hard, so they report as
+`unknown` rather than `open` — telling a student they are eligible when they
+are not is the one failure worth engineering against.
+
+The graph gives three things worth planning around: whether you can take a
+course now, which courses it would unlock, and how deep its chain runs. A
+course gating eleven others belongs earlier in a degree than one gating none,
+and the schedule view sorts on exactly that.
 
 ### two traps in the timetable
 

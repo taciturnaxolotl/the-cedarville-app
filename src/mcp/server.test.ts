@@ -232,6 +232,26 @@ describe("catalog tools", () => {
     expect(replies.get(8)?.result?.content?.[0]?.text ?? "").toContain("MonWedFri 12:00pm-12:50pm");
   }, 20_000);
 
+  // A prerequisite that is not taught this term is exactly the bottleneck a
+  // student needs to see, so it must not read as "no such course".
+  test("a course known only as a prerequisite reports what it gates", async () => {
+    const replies = await session(
+      [],
+      [
+        {
+          jsonrpc: "2.0",
+          id: 10,
+          method: "tools/call",
+          params: { name: "course_details", arguments: { term: "2026FA", code: "CS-1220" } },
+        },
+      ],
+    );
+    const reply = replies.get(10)?.result;
+    expect(reply?.isError).toBeUndefined();
+    expect(reply?.content?.[0]?.text ?? "").toContain("not offered in 2026FA");
+    expect(reply?.content?.[0]?.text ?? "").toContain("CS-2210");
+  }, 20_000);
+
   test("an unknown course says so rather than returning nothing", async () => {
     const replies = await session(
       [],

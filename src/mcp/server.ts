@@ -144,7 +144,25 @@ function registerCatalog(server: McpServer) {
       const record = (catalog.courses ?? []).find(
         (c) => `${c.SubjectCode}-${c.Number}`.toUpperCase() === wanted,
       );
-      if (!record) return fail(`${wanted} is not in the ${term} catalog.`);
+
+      // A course can be absent from a term's catalog and still matter: it is
+      // named as a prerequisite by courses that *are* offered. Reporting only
+      // "not found" would hide exactly the bottlenecks worth knowing about.
+      if (!record) {
+        const gated = downstream(graph, wanted);
+        if (gated.size === 0) return fail(`${wanted} is not in the ${term} catalog.`);
+        const direct = [...(graph.unlocks.get(wanted) ?? [])].sort();
+        return text(
+          [
+            `${wanted} is not offered in ${term}, but ${gated.size} course${gated.size === 1 ? "" : "s"} depend on it.`,
+            "",
+            `directly gates: ${direct.join(" ")}`,
+            `transitively:   ${[...gated].sort().join(" ")}`,
+            "",
+            "Check another term for when it is taught.",
+          ].join("\n"),
+        );
+      }
 
       const node = graph.courses.get(wanted);
       const unlocks = downstream(graph, wanted);

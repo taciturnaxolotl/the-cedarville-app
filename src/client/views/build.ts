@@ -29,6 +29,12 @@ interface State {
   wanted: string[];
   /** Courses chosen from a pool, which the solver then treats as bought. */
   pinned: string[];
+  /**
+   * Tracks and concentrations the student has settled on, keyed by branch.
+   * A key absent means "whichever is cheapest", which is the right default
+   * and a wrong thing to decide without saying so.
+   */
+  tracks: Record<string, string>;
   available: ProgramSummary[];
   /** Rule pools once the server has asked Colleague what qualifies. */
   resolved: Map<string, string[]>;
@@ -36,6 +42,7 @@ interface State {
 }
 
 const PINS = "cedarville:pins";
+const TRACKS = "cedarville:tracks";
 
 /**
  * What a program is, in the student's words.
@@ -97,6 +104,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const store = createStore<State>({
     wanted: added,
     pinned: JSON.parse(localStorage.getItem(PINS) ?? "[]"),
+    tracks: JSON.parse(localStorage.getItem(TRACKS) ?? "{}"),
     available: [],
     resolved: new Map(),
     busy: "",
@@ -185,6 +193,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       have,
       resolved,
       pinned: new Set(store.get().pinned),
+      tracks: new Map(Object.entries(store.get().tracks).map(([k, v]) => [k, [v]])),
       graph,
       offeredIn,
       slots: termsFrom({ year: 2027, season: "spring" }, 12, { capacity: 15 }),
@@ -320,9 +329,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   subs.add(
     store.watch(
-      (s) => `${s.pinned.join(",")}:${s.resolved.size}:${trees.map((t) => t.code).join(",")}`,
+      (s) =>
+        `${s.pinned.join(",")}:${JSON.stringify(s.tracks)}:${s.resolved.size}:${trees.map((t) => t.code).join(",")}`,
       () => {
         localStorage.setItem(PINS, JSON.stringify(store.get().pinned));
+        localStorage.setItem(TRACKS, JSON.stringify(store.get().tracks));
         const ranking = rank(trees, store.get().resolved);
 
         summary.replaceChildren();
@@ -343,6 +354,60 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         }
 
         body.replaceChildren();
+
+        // Tracks first. Choosing the AI track over technical electives moves
+        // more than any single elective inside either of them.
+        const open = ranking.branches.filter((b) =>
+          b.options.some((o) => o.status.completion !== "Completed"),
+        );
+        for (const branch of open) {
+          const box = el("div", "choice branch");
+          const head = el("h3");
+          head.append(document.createTextNode(branch.text));
+          head.append(tag(branch.program, "prog"));
+          box.append(head);
+
+          for (const option of branch.options) {
+            const row = el("div", `candidate${option.taken ? " picked" : ""}`);
+            const pick = el("button", "pick");
+            pick.type = "button";
+            pick.textContent = option.taken ? "●" : "○";
+            pick.title = option.taken ? "currently chosen" : `choose ${option.label}`;
+            pick.addEventListener("click", () =>
+              store.set({ tracks: { ...store.get().tracks, [branch.key]: option.id } }),
+            );
+            row.append(pick);
+            row.append(el("span", "title", option.label));
+
+            if (option.status.completion === "Completed") {
+              row.append(tag("already met", "free"));
+            } else if (option.addedTerms === null) {
+              row.append(tag("won't schedule", "bad"));
+            } else if (option.addedTerms === 0 && option.addedCredits === 0) {
+              row.append(tag("cheapest", "free"));
+            } else {
+              const terms = option.addedTerms
+                ? `+${option.addedTerms} term${option.addedTerms === 1 ? "" : "s"}, `
+                : "";
+              row.append(
+                tag(`${terms}+${option.addedCredits} cr`, option.addedTerms ? "bad" : "cheap"),
+              );
+            }
+            box.append(row);
+          }
+
+          if (store.get().tracks[branch.key]) {
+            const reset = el("button", "reset", "use the cheapest instead");
+            reset.type = "button";
+            reset.addEventListener("click", () => {
+              const { [branch.key]: _dropped, ...rest } = store.get().tracks;
+              store.set({ tracks: rest });
+            });
+            box.append(reset);
+          }
+          body.append(box);
+        }
+
         if (!ranking.choices.length) {
           body.append(el("p", "muted", "nothing left to choose — every requirement is decided."));
         }

@@ -539,6 +539,12 @@ export interface NeedOptions {
    */
   resolved?: ReadonlyMap<string, readonly string[]>;
   /**
+   * Tracks and concentrations the student has decided on, keyed by
+   * `branchKey`. Absent means the solver picks the cheapest, which is a
+   * sensible default and a poor decision to make silently.
+   */
+  tracks?: ReadonlyMap<string, readonly string[]>;
+  /**
    * Courses the student has decided to take, entering the cover as if already
    * bought. Everything they satisfy then comes free, which is what lets the
    * cost of a choice be measured: solve without the pin, solve with it, and
@@ -651,6 +657,61 @@ function committed(tree: ProgramTree, options: NeedOptions): Set<string> {
   return core;
 }
 
+/**
+ * A track, concentration or specialization: pick some of these, not all.
+ *
+ * Colleague states it as a count — `MinSubrequirements` on a requirement, or
+ * `MinGroups` on a subrequirement — and the solver has always honoured it by
+ * quietly taking the cheapest branch. Quietly is the problem. "Artificial
+ * Intelligence Track or six credits of technical electives" is the most
+ * consequential decision in a degree, and a planner that answers it on the
+ * student's behalf without saying so has hidden the interesting part.
+ */
+export interface BranchOption {
+  id: string;
+  /** Colleague's own wording, falling back to its code when it has none. */
+  label: string;
+  status: Progress;
+}
+
+export interface OpenBranch {
+  program: string;
+  /** Addresses the decision, so a caller can force one: see `NeedOptions.tracks`. */
+  key: string;
+  text: string;
+  /** How many of the options are required. Nearly always one. */
+  pick: number;
+  options: BranchOption[];
+  /** Option ids this solve actually took. */
+  chosen: string[];
+}
+
+/** Addresses a branch: a requirement's subrequirements, or a subrequirement's groups. */
+export const branchKey = (requirement: string, subrequirement?: string) =>
+  subrequirement ? `${requirement}/${subrequirement}` : requirement;
+
+/**
+ * Picks `want` items, honouring a forced choice before falling back to cost.
+ *
+ * Finished branches come first regardless: a global-awareness requirement
+ * already met by two years of high-school language is met, and offering to
+ * "choose" one of the other five would be inventing work.
+ */
+function pickBranch<T>(
+  items: readonly T[],
+  want: number,
+  id: (item: T) => string,
+  done: (item: T) => boolean,
+  cost: (item: T) => number,
+  forced?: readonly string[],
+): T[] {
+  const wanted = forced?.length ? items.filter((item) => forced.includes(id(item))) : [];
+  const rest = [...items]
+    .filter((item) => !wanted.includes(item))
+    .sort((a, b) => Number(done(b)) - Number(done(a)) || cost(a) - cost(b));
+  return [...wanted, ...rest].slice(0, Math.max(want, 0));
+}
+
 /** A group that offers a choice, carried until the cover can solve them together. */
 export interface OpenChoice {
   /** Program this came from, so a combined solve can say who wants it. */
@@ -673,10 +734,16 @@ export interface OpenChoice {
 function walkProgram(
   tree: ProgramTree,
   options: NeedOptions,
-): { courses: Set<string>; choices: OpenChoice[]; unenumerable: Unenumerable[] } {
+): {
+  courses: Set<string>;
+  choices: OpenChoice[];
+  branches: OpenBranch[];
+  unenumerable: Unenumerable[];
+} {
   const courses = new Set<string>();
   const unenumerable: Unenumerable[] = [];
   const choices: OpenChoice[] = [];
+  const branches: OpenBranch[] = [];
   // Priced against what the plan already owes, so a branch whose courses are
   // required anyway is recognised as free rather than merely tied.
   const free = committed(tree, options);
@@ -685,27 +752,55 @@ function walkProgram(
     const subs = [...requirement.subrequirements];
     // "Any one of these six" — take the cheapest, not all six.
     const wantSubs = requirement.minSubrequirements ?? subs.length;
-    const chosenSubs = subs
-      .map((sub) => ({
-        sub,
-        cost: sub.groups.reduce((n, g) => n + groupCost(g, options, free), 0),
-        done: sub.status.completion === "Completed",
-      }))
-      .sort((a, b) => Number(b.done) - Number(a.done) || a.cost - b.cost)
-      .slice(0, Math.max(wantSubs, 0))
-      .map((x) => x.sub);
+    const subKey = branchKey(requirement.code);
+    const takenSubs = pickBranch(
+      subs,
+      wantSubs,
+      (s) => s.id,
+      (s) => s.status.completion === "Completed",
+      (s) => s.groups.reduce((n, g) => n + groupCost(g, options, free), 0),
+      options.tracks?.get(subKey),
+    );
+    if (wantSubs < subs.length) {
+      branches.push({
+        program: tree.code,
+        key: subKey,
+        text: requirement.text || requirement.code,
+        pick: wantSubs,
+        options: subs.map((s) => ({
+          id: s.id,
+          label: s.text || s.code,
+          status: s.status,
+        })),
+        chosen: takenSubs.map((s) => s.id),
+      });
+    }
 
-    for (const sub of chosenSubs) {
+    for (const sub of takenSubs) {
       const wantGroups = sub.minGroups ?? sub.groups.length;
-      const chosenGroups = [...sub.groups]
-        .map((group) => ({
-          group,
-          cost: groupCost(group, options, free),
-          done: group.status.completion === "Completed",
-        }))
-        .sort((a, b) => Number(b.done) - Number(a.done) || a.cost - b.cost)
-        .slice(0, Math.max(wantGroups, 0))
-        .map((x) => x.group);
+      const groupBranchKey = branchKey(requirement.code, sub.id);
+      const chosenGroups = pickBranch(
+        sub.groups,
+        wantGroups,
+        (g) => g.id,
+        (g) => g.status.completion === "Completed",
+        (g) => groupCost(g, options, free),
+        options.tracks?.get(groupBranchKey),
+      );
+      if (wantGroups < sub.groups.length) {
+        branches.push({
+          program: tree.code,
+          key: groupBranchKey,
+          text: sub.text || requirement.text || sub.code,
+          pick: wantGroups,
+          options: sub.groups.map((g) => ({
+            id: g.id,
+            label: g.text || g.code,
+            status: g.status,
+          })),
+          chosen: chosenGroups.map((g) => g.id),
+        });
+      }
 
       for (const group of chosenGroups) {
         if (group.status.completion === "Completed") continue;
@@ -766,7 +861,7 @@ function walkProgram(
     }
   }
 
-  return { courses, choices, unenumerable };
+  return { courses, choices, branches, unenumerable };
 }
 
 /**
@@ -794,20 +889,22 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
 export function coursesNeededAcross(
   trees: readonly ProgramTree[],
   options: NeedOptions,
-): Needed & { choices: OpenChoice[] } {
+): Needed & { choices: OpenChoice[]; branches: OpenBranch[] } {
   const courses = new Set<string>(options.pinned ?? []);
   const choices: OpenChoice[] = [];
+  const branches: OpenBranch[] = [];
   const unenumerable: Unenumerable[] = [];
 
   for (const tree of trees) {
     const walked = walkProgram(tree, options);
     for (const code of walked.courses) courses.add(code);
     choices.push(...walked.choices);
+    branches.push(...walked.branches);
     unenumerable.push(...walked.unenumerable);
   }
 
   cover(courses, choices, options);
-  return { courses, choices, unenumerable };
+  return { courses, choices, branches, unenumerable };
 }
 
 /**

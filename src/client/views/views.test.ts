@@ -618,3 +618,85 @@ describe("build view", () => {
     expect(root.children).toHaveLength(0);
   });
 });
+
+describe("build view — specializations", () => {
+  const track = (over: Partial<RawGroup>) => group(over);
+  const withTrack = normalize({
+    StudentId: "1",
+    Program: {
+      Code: "BS.CYOPR",
+      Title: "cyber",
+      Catalog: "2026",
+      Degree: "BS",
+      MinimumCredits: 128,
+      CompletedCredits: 0,
+      InProgressCredits: 0,
+      PlannedCredits: 0,
+      RequiredRequirementCount: 1,
+      CompletedRequirementCount: 0,
+      Majors: ["Cyber Operations"],
+      Requirements: [
+        {
+          Id: "r",
+          Code: "r",
+          Description: "core",
+          CompletionStatus: "NotStarted",
+          PlanningStatus: "NotPlanned",
+          MinSubrequirements: null,
+          MinGpa: null,
+          Subrequirements: [
+            {
+              Id: "s",
+              Code: "s",
+              DisplayText: "Technical electives or the AI track",
+              CompletionStatus: "NotStarted",
+              PlanningStatus: "NotPlanned",
+              MinGroups: 1,
+              MinGpa: null,
+              MinInstitutionalCredits: null,
+              Groups: [
+                track({
+                  Id: "tech",
+                  DisplayText: "Technical electives",
+                  FromCourses: [course("1", "CS", "3220")],
+                  MinCredits: 3,
+                }),
+                track({
+                  Id: "ai",
+                  DisplayText: "Artificial Intelligence Track",
+                  FromCourses: [course("2", "DSAI", "2110"), course("3", "DSAI", "3110")],
+                  MinCredits: 6,
+                }),
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  } as EvaluationResponse);
+
+  test("shows the track decision rather than deciding it silently", () => {
+    build.mount(root, { trees: [withTrack], enrolled: ["BS.CYOPR"] });
+    const branch = root.querySelector(".choice.branch") as unknown as HTMLElement;
+    expect(branch.textContent).toContain("Technical electives or the AI track");
+    expect(branch.textContent).toContain("Artificial Intelligence Track");
+    expect(branch.querySelector(".candidate.picked")?.textContent).toContain("Technical electives");
+  });
+
+  test("choosing the other track switches to it and offers a way back", () => {
+    build.mount(root, { trees: [withTrack], enrolled: ["BS.CYOPR"] });
+    const rows = Array.from(root.querySelectorAll(".choice.branch .candidate"));
+    const ai = rows.find((r) => r.textContent?.includes("Artificial Intelligence"))!;
+    (ai.querySelector(".pick") as unknown as HTMLElement).click();
+
+    const picked = root.querySelector(".choice.branch .candidate.picked");
+    expect(picked?.textContent).toContain("Artificial Intelligence");
+    expect(root.querySelector(".choice.branch .reset")).toBeTruthy();
+
+    (root.querySelector(".choice.branch .reset") as unknown as HTMLElement).click();
+    expect(root.querySelector(".choice.branch .candidate.picked")?.textContent).toContain(
+      "Technical electives",
+    );
+    localStorage.removeItem("cedarville:tracks");
+  });
+});

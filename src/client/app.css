@@ -792,3 +792,15 @@ label.section.clashes:not(:has(input:checked)) .when {
 .tag .drop:hover:not(:disabled) {
   color: var(--red);
 }
+
+/* A track is a bigger decision than a course, and reads as one. */
+.choice.branch {
+  border-left: 2px solid var(--lavender);
+}
+
+.reset {
+  margin-top: 8px;
+  padding: 3px 8px;
+  color: var(--overlay);
+  font-size: 11px;
+}

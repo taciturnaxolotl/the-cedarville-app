@@ -17,6 +17,7 @@
 import { type Plan, type PlanRequest, projectPlan, type TermSlot } from "./planner";
 import { type Graph, prerequisitesOf } from "./prereqs";
 import {
+  type BranchOption,
   coursesNeededAcross,
   groupKey,
   type NeedOptions,
@@ -57,7 +58,29 @@ export interface RankedChoice {
   candidates: Candidate[];
 }
 
+/** One way of satisfying a track or concentration, priced like a course. */
+export interface RankedBranchOption extends BranchOption {
+  addedTerms: number | null;
+  addedCredits: number;
+  /** Whether this is the option the current solve took. */
+  taken: boolean;
+}
+
+export interface RankedBranch {
+  program: string;
+  key: string;
+  text: string;
+  pick: number;
+  options: RankedBranchOption[];
+}
+
 export interface Ranking {
+  /**
+   * Tracks and concentrations, priced. These come first in the interface for
+   * the same reason they come first here: choosing the AI track over technical
+   * electives moves more than any single elective inside it.
+   */
+  branches: RankedBranch[];
   choices: RankedChoice[];
   /** The plan with nothing pinned beyond what the caller already pinned. */
   baseline: Plan;
@@ -182,6 +205,36 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     return result;
   };
 
+  // Price each way of satisfying a track by forcing it and re-solving, the
+  // same trick used for courses one level down. Deduped first: the general
+  // education requirements arrive once per program, and the student decides
+  // their global-awareness route once, not once per major.
+  const branches: RankedBranch[] = dedupeBy(solved.branches, (b) => b.key).map((branch) => ({
+    program: branch.program,
+    key: branch.key,
+    text: branch.text,
+    pick: branch.pick,
+    options: branch.options.map((option) => {
+      const taken = branch.chosen.includes(option.id);
+      if (taken) {
+        return { ...option, taken, addedTerms: 0, addedCredits: 0 };
+      }
+      const tracks = new Map(options.tracks ?? []);
+      tracks.set(branch.key, [option.id]);
+      const withIt = coursesNeededAcross(trees, { ...options, tracks });
+      const plan = planFor(withIt.courses, options);
+      return {
+        ...option,
+        taken,
+        addedTerms:
+          plan.unscheduled.length > baseUnplaced
+            ? null
+            : Math.max(0, finishIndex(plan, options.slots) - baseAt),
+        addedCredits: Math.max(0, plan.totalCredits - baseCredits),
+      };
+    }),
+  }));
+
   const choices: RankedChoice[] = [];
   for (const choice of solved.choices) {
     // Anything the baseline already buys is free by construction, so it is
@@ -239,6 +292,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
   }
 
   return {
+    branches,
     choices: dedupe(choices),
     baseline,
     unenumerable: solved.unenumerable,
@@ -253,6 +307,30 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
  * literature slot, with the same id and the same pool. Showing it twice asks
  * the student to make one decision two times.
  */
+/**
+ * Keeps the first of each key, folding later programs into its label.
+ *
+ * Two majors in the same school carry the identical requirement, and the
+ * student makes that decision once.
+ */
+function dedupeBy<T extends { key: string; program: string }>(
+  items: readonly T[],
+  key: (item: T) => string,
+): T[] {
+  const seen = new Map<string, T>();
+  for (const item of items) {
+    const already = seen.get(key(item));
+    if (!already) {
+      seen.set(key(item), { ...item });
+      continue;
+    }
+    if (!already.program.includes(item.program)) {
+      already.program = `${already.program} + ${item.program}`;
+    }
+  }
+  return [...seen.values()];
+}
+
 function dedupe(choices: RankedChoice[]): RankedChoice[] {
   const seen = new Map<string, RankedChoice>();
   for (const choice of choices) {

@@ -289,3 +289,101 @@ describe("presenting the choices", () => {
     expect(ranking.baseline.totalCredits).toBe(3);
   });
 });
+
+describe("tracks and concentrations", () => {
+  /** "Take the AI track, or six credits of technical electives." */
+  const withTrack = () =>
+    normalize({
+      StudentId: "1",
+      Program: {
+        Code: "A",
+        Title: "A",
+        Catalog: "2026",
+        Degree: "BS",
+        MinimumCredits: 120,
+        CompletedCredits: 0,
+        InProgressCredits: 0,
+        PlannedCredits: 0,
+        RequiredRequirementCount: 1,
+        CompletedRequirementCount: 0,
+        Requirements: [
+          {
+            Id: "r",
+            Code: "r",
+            Description: "core",
+            CompletionStatus: "NotStarted",
+            PlanningStatus: "NotPlanned",
+            MinSubrequirements: null,
+            MinGpa: null,
+            Subrequirements: [
+              {
+                Id: "s",
+                Code: "s",
+                DisplayText: "Technical electives or the AI track",
+                CompletionStatus: "NotStarted",
+                PlanningStatus: "NotPlanned",
+                MinGroups: 1,
+                MinGpa: null,
+                MinInstitutionalCredits: null,
+                Groups: [
+                  group({
+                    Id: "tech",
+                    DisplayText: "Technical electives (3 credit hours)",
+                    FromCourses: [course("1", "CS", "3220")],
+                    MinCredits: 3,
+                  }),
+                  group({
+                    Id: "ai",
+                    DisplayText: "Artificial Intelligence Track (9 credit hours)",
+                    FromCourses: [
+                      course("2", "DSAI", "2110"),
+                      course("3", "DSAI", "3110"),
+                      course("4", "DSAI", "3510"),
+                    ],
+                    MinCredits: 9,
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as EvaluationResponse);
+
+  const graph = [node("CS-3220"), node("DSAI-2110"), node("DSAI-3110"), node("DSAI-3510")];
+
+  test("surfaces the decision instead of making it silently", () => {
+    const ranking = rankChoices([withTrack()], base(graph));
+    expect(ranking.branches).toHaveLength(1);
+    const [branch] = ranking.branches;
+    expect(branch!.text).toBe("Technical electives or the AI track");
+    expect(branch!.pick).toBe(1);
+    expect(branch!.options.map((o) => o.id)).toEqual(["tech", "ai"]);
+  });
+
+  test("prices the road not taken", () => {
+    const [branch] = rankChoices([withTrack()], base(graph)).branches;
+    const tech = branch!.options.find((o) => o.id === "tech")!;
+    const ai = branch!.options.find((o) => o.id === "ai")!;
+    expect(tech).toMatchObject({ taken: true, addedTerms: 0, addedCredits: 0 });
+    // Nine credits of AI against three of electives, so six more.
+    expect(ai.taken).toBe(false);
+    expect(ai.addedCredits).toBe(6);
+  });
+
+  test("honours a track the student has chosen over the cheapest", () => {
+    const ranking = rankChoices([withTrack()], {
+      ...base(graph),
+      tracks: new Map([["r/s", ["ai"]]]),
+    });
+    expect(ranking.branches[0]!.options.find((o) => o.id === "ai")?.taken).toBe(true);
+    expect([...ranking.baseline.terms.flatMap((t) => t.courses.map((c) => c.code))].sort()).toEqual(
+      ["DSAI-2110", "DSAI-3110", "DSAI-3510"],
+    );
+  });
+
+  test("a requirement with no alternatives is not a decision", () => {
+    const tree = normalize(program("A", [group({ Courses: [course("1", "CS", "1210")] })]));
+    expect(rankChoices([tree], base([node("CS-1210")])).branches).toEqual([]);
+  });
+});

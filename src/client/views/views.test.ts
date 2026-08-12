@@ -726,3 +726,146 @@ describe("build view — a pool that cannot close its requirement", () => {
     expect(warn?.textContent).toContain("taken twice");
   });
 });
+
+describe("build view — reading the requirement text", () => {
+  const wordy = group({
+    Id: "tech",
+    DisplayText: "Technical electives selected from the following (6 credit hours):",
+    FromCourses: [course("1", "CS", "3220"), course("2", "CS", "3510")],
+    MinCredits: 6,
+  });
+
+  test("drops the trailing colon and the credits shown beside it", () => {
+    build.mount(root, { trees: [treeOf("BS.CYOPR", [wordy])], enrolled: ["BS.CYOPR"] });
+    const head = root.querySelector(".choice h3") as unknown as HTMLElement;
+    expect(head.firstChild?.textContent).toBe("Technical electives");
+    // The count still appears, once, as its own badge.
+    expect(head.querySelector(".cr")?.textContent).toBe("6 cr");
+  });
+
+  test("drops a credit count buried in a longer aside", () => {
+    const buried = group({
+      Id: "hum",
+      DisplayText:
+        "Humanities Elective (3 credit hours selected from the list of courses identified in the catalog)",
+      FromCourses: [course("1", "ART", "1100"), course("2", "LIT", "2090")],
+      MinCredits: 3,
+    });
+    build.mount(root, { trees: [treeOf("BS.CYOPR", [buried])], enrolled: ["BS.CYOPR"] });
+    const head = root.querySelector(".choice h3") as unknown as HTMLElement;
+    expect(head.firstChild?.textContent).toBe("Humanities Elective");
+  });
+
+  test("a long branch option wraps rather than being clipped", () => {
+    // Colleague's AI-track text runs to two sentences; `.title` is nowrap and
+    // ellipsised, which silently ate the advice about MATH-3610.
+    const long =
+      "Replace 9 hours of technical electives with the Artificial Intelligence Track. " +
+      "*Students taking the Artificial Intelligence Track should take MATH-3610 Linear " +
+      "Algebra as their MATH elective.";
+    const tree = normalize({
+      StudentId: "1",
+      Program: {
+        Code: "BS.CYOPR",
+        Title: "cyber",
+        Catalog: "2026",
+        Degree: "BS",
+        MinimumCredits: 128,
+        CompletedCredits: 0,
+        InProgressCredits: 0,
+        PlannedCredits: 0,
+        RequiredRequirementCount: 1,
+        CompletedRequirementCount: 0,
+        Requirements: [
+          {
+            Id: "r",
+            Code: "r",
+            Description: "core",
+            CompletionStatus: "NotStarted",
+            PlanningStatus: "NotPlanned",
+            MinSubrequirements: null,
+            MinGpa: null,
+            Subrequirements: [
+              {
+                Id: "s",
+                Code: "s",
+                DisplayText: "Electives or the AI track",
+                CompletionStatus: "NotStarted",
+                PlanningStatus: "NotPlanned",
+                MinGroups: 1,
+                MinGpa: null,
+                MinInstitutionalCredits: null,
+                Groups: [
+                  group({
+                    Id: "t",
+                    DisplayText: "Technical electives",
+                    FromCourses: [course("1", "CS", "3220")],
+                    MinCredits: 3,
+                  }),
+                  group({
+                    Id: "ai",
+                    DisplayText: long,
+                    FromCourses: [course("2", "DSAI", "3110")],
+                    MinCredits: 9,
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as EvaluationResponse);
+
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+    const option = Array.from(root.querySelectorAll(".choice.branch .candidate .label")).find((n) =>
+      n.textContent?.includes("Artificial Intelligence"),
+    );
+    // Kept whole, and not wearing the class that clips.
+    expect(option?.textContent).toContain("MATH-3610");
+    expect(option?.className).toBe("label");
+  });
+});
+
+describe("build view — a requirement already answered", () => {
+  test("shows the required course as the answer and offers no alternative", () => {
+    // The major requires CS-1210 outright, and it covers the minor's elective.
+    const major = normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
+    const minor = normalize(
+      program("MIN", [
+        group({
+          Id: "e",
+          DisplayText: "One computing elective",
+          FromCourses: [course("1", "CS", "1210"), course("9", "ART", "1100")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+
+    build.mount(root, { trees: [major, minor], enrolled: ["MAJ"] });
+    const box = root.querySelector(".choice.settled") as unknown as HTMLElement;
+    expect(box).toBeTruthy();
+    expect(box.textContent).toContain("CS-1210 covers this");
+
+    // The forced course reads as chosen, and nothing here is clickable.
+    expect(box.querySelector(".candidate.picked")?.textContent).toContain("CS-1210");
+    const buttons = Array.from(box.querySelectorAll(".pick")) as unknown as HTMLButtonElement[];
+    expect(buttons.every((b) => b.disabled)).toBe(true);
+  });
+
+  test("a requirement only partly covered still offers the rest", () => {
+    // Six credits wanted, three of them forced: there is still a decision.
+    const major = normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
+    const minor = normalize(
+      program("MIN", [
+        group({
+          Id: "e",
+          DisplayText: "Two computing electives",
+          FromCourses: [course("1", "CS", "1210"), course("9", "ART", "1100")],
+          MinCredits: 6,
+        }),
+      ]),
+    );
+    build.mount(root, { trees: [major, minor], enrolled: ["MAJ"] });
+    expect(root.querySelector(".choice.settled")).toBeNull();
+  });
+});

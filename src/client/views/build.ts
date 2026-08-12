@@ -62,13 +62,41 @@ function namesOf(tree: ProgramTree): string[] {
   return named.length ? named : [tree.title || tree.code];
 }
 
+/**
+ * Colleague's requirement text, minus what the interface already shows.
+ *
+ * "Technical electives selected from the following (6 credit hours):" is
+ * written to sit above a printed list, so it ends in a colon that leads
+ * nowhere here, and states a credit count shown beside it anyway.
+ */
+function tidy(text: string): string {
+  return (
+    text
+      // The count is often buried in a longer aside — "(3 credit hours
+      // selected from the list of courses identified in the catalog)" — so the
+      // whole parenthetical goes once it opens with a credit count.
+      .replace(/\s*\(\s*\d+(?:\.\d+)?\s*credit hours?\b[^)]*\)\s*/gi, " ")
+      .replace(/\s*selected from the following\b/gi, "")
+      .replace(/\s+/g, " ")
+      .replace(/[\s:.]+$/, "")
+      .trim()
+  );
+}
+
 /** "+2 terms" reads better than a bare number, and null is not a number. */
 function priceOf(candidate: Candidate): { text: string; kind: string; why: string } {
   if (candidate.forced) {
     return {
       text: "already required",
       kind: "free",
-      why: "another requirement buys this course anyway, so it costs nothing here",
+      why: "another part of your degree requires this outright, so it costs nothing here",
+    };
+  }
+  if (candidate.chosen) {
+    return {
+      text: "cheapest",
+      kind: "free",
+      why: "nothing forces this, but it is the cheapest way to close this requirement",
     };
   }
   if (candidate.addedTerms === null) {
@@ -299,20 +327,45 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   const label = (code: string) => titles.get(code) ?? "";
 
-  function candidateRow(candidate: Candidate) {
+  /**
+   * A choice already answered by coursework the plan requires anyway.
+   *
+   * When the courses another requirement forces on you already meet this
+   * group's credits, there is no decision left. Offering the rest of the pool
+   * invites a student to buy a second course for a requirement that is
+   * finished, which is exactly the mistake the whole cover exists to avoid.
+   */
+  const settledBy = (choice: RankedChoice) => {
+    const forced = choice.candidates.filter((c) => c.forced);
+    const covered = forced.reduce((n, c) => n + c.credits, 0);
+    return covered >= choice.credits ? forced : [];
+  };
+
+  function candidateRow(candidate: Candidate, settled: boolean) {
     const { pinned } = store.get();
-    const isPinned = pinned.includes(candidate.code);
-    const row = el("div", `candidate${isPinned ? " picked" : ""}`);
+    // A settled group shows its forced courses as the answer, and offers no
+    // way to pick around them.
+    const isPinned = settled ? candidate.forced : pinned.includes(candidate.code);
+    const row = el("div", `candidate${isPinned ? " picked" : ""}${settled ? " settled" : ""}`);
 
     const pick = el("button", "pick");
     pick.type = "button";
     pick.textContent = isPinned ? "✓" : "+";
-    pick.title = isPinned ? "unpick" : "pick this course";
-    pick.addEventListener("click", () =>
-      store.set({
-        pinned: isPinned ? pinned.filter((c) => c !== candidate.code) : [...pinned, candidate.code],
-      }),
-    );
+    if (settled) {
+      pick.disabled = true;
+      pick.title = candidate.forced
+        ? "required by another part of your degree, so it settles this one"
+        : "this requirement is already met";
+    } else {
+      pick.title = isPinned ? "unpick" : "pick this course";
+      pick.addEventListener("click", () =>
+        store.set({
+          pinned: isPinned
+            ? pinned.filter((c) => c !== candidate.code)
+            : [...pinned, candidate.code],
+        }),
+      );
+    }
     row.append(pick);
 
     row.append(el("b", undefined, candidate.code));
@@ -368,7 +421,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         for (const branch of open) {
           const box = el("div", "choice branch");
           const head = el("h3");
-          head.append(document.createTextNode(branch.text));
+          head.append(document.createTextNode(tidy(branch.text)));
           head.append(tag(branch.program, "prog"));
           box.append(head);
 
@@ -382,7 +435,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
               store.set({ tracks: { ...store.get().tracks, [branch.key]: option.id } }),
             );
             row.append(pick);
-            row.append(el("span", "title", option.label));
+            row.append(el("span", "label", option.label));
 
             if (option.status.completion === "Completed") {
               row.append(tag("already met", "free"));
@@ -418,12 +471,25 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         }
 
         for (const choice of ranking.choices) {
-          const box = el("div", "choice");
+          const settled = settledBy(choice);
+          const box = el("div", `choice${settled.length ? " settled" : ""}`);
           const head = el("h3");
-          head.append(document.createTextNode(choice.text));
+          head.append(document.createTextNode(tidy(choice.text)));
           head.append(el("span", "cr", `${choice.credits} cr`));
           head.append(tag(choice.program, "prog"));
+          if (settled.length) head.append(tag("settled", "free"));
           box.append(head);
+
+          if (settled.length) {
+            box.append(
+              el(
+                "p",
+                "muted",
+                `${settled.map((c) => c.code).join(" and ")} covers this, and your degree ` +
+                  "requires it anyway — nothing to decide here.",
+              ),
+            );
+          }
 
           // A pool that cannot close its own requirement is almost always a
           // course meant to be taken twice, which a set of codes cannot say.
@@ -438,7 +504,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             box.append(warn);
           }
 
-          for (const candidate of choice.candidates) box.append(candidateRow(candidate));
+          for (const candidate of choice.candidates)
+            box.append(candidateRow(candidate, settled.length > 0));
           if (!choice.candidates.length) {
             box.append(el("p", "muted", "no course in this pool is still available to you."));
           }

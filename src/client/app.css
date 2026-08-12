@@ -810,3 +810,14 @@ label.section.clashes:not(:has(input:checked)) .when {
   color: var(--yellow);
   font-size: 11px;
 }
+
+/* Branch option text is a sentence, not a course title, so it wraps. */
+.candidate .label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A settled requirement stays legible but stops inviting a decision. */
+.choice.settled .candidate:not(.picked) {
+  opacity: 0.45;
+}

@@ -45,8 +45,15 @@ export interface Candidate {
   requires: string[];
   /** Requirements it would satisfy, across every program selected. */
   satisfies: { program: string; text: string }[];
-  /** Already required outright, so there is nothing here to decide. */
+  /**
+   * Required outright by some other part of the degree, so choosing it here
+   * costs nothing and settles this requirement. Not the same as "the cheapest
+   * solution happens to buy it": a course the cover picked *for this group*
+   * cannot then be said to have settled it.
+   */
   forced: boolean;
+  /** The cheapest solution picks this, though nothing forces it. */
+  chosen: boolean;
 }
 
 export interface RankedChoice {
@@ -257,7 +264,8 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
         addedCredits: 0,
         requires: [],
         satisfies: wanted.get(code) ?? [],
-        forced: true,
+        forced: solved.required.has(code),
+        chosen: true,
       });
     }
 
@@ -268,6 +276,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
       ...price(code),
       satisfies: wanted.get(code) ?? [],
       forced: false,
+      chosen: false,
     }));
 
     choices.push({

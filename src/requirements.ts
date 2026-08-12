@@ -908,7 +908,19 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
 export function coursesNeededAcross(
   trees: readonly ProgramTree[],
   options: NeedOptions,
-): Needed & { choices: OpenChoice[]; branches: OpenBranch[]; shortfalls: Shortfall[] } {
+): Needed & {
+  choices: OpenChoice[];
+  branches: OpenBranch[];
+  shortfalls: Shortfall[];
+  /**
+   * Courses owed before any choice was resolved: the take-all requirements and
+   * whatever the student pinned. Distinct from the finished `courses` set,
+   * which also holds everything the cover bought to close a choice — and the
+   * difference matters, because only an outright requirement can settle a
+   * choice on another requirement's behalf.
+   */
+  required: Set<string>;
+} {
   const courses = new Set<string>(options.pinned ?? []);
   const choices: OpenChoice[] = [];
   const branches: OpenBranch[] = [];
@@ -921,6 +933,8 @@ export function coursesNeededAcross(
     branches.push(...walked.branches);
     unenumerable.push(...walked.unenumerable);
   }
+
+  const required = new Set(courses);
 
   // A choice its own pool cannot close is worth naming. Colleague states
   // "two sections of the Honors Seminar" as a four-credit group over a pool
@@ -939,7 +953,7 @@ export function coursesNeededAcross(
       pool: choice.pool,
     }));
 
-  return { courses, choices, branches, shortfalls, unenumerable };
+  return { courses, required, choices, branches, shortfalls, unenumerable };
 }
 
 /**

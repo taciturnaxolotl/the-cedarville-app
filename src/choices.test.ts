@@ -279,7 +279,7 @@ describe("presenting the choices", () => {
     const ranking = rankChoices([tree], { ...base(pool.map((c) => node(c.CourseName))), limit: 5 });
     expect(ranking.choices[0]!.candidates.length).toBeLessThanOrEqual(6);
     // Whatever the cover already bought is present regardless of the limit.
-    expect(ranking.choices[0]!.candidates.some((c) => c.forced)).toBe(true);
+    expect(ranking.choices[0]!.candidates.some((c) => c.chosen)).toBe(true);
   });
 
   test("keeps a baseline plan alongside the choices", () => {
@@ -385,5 +385,34 @@ describe("tracks and concentrations", () => {
   test("a requirement with no alternatives is not a decision", () => {
     const tree = normalize(program("A", [group({ Courses: [course("1", "CS", "1210")] })]));
     expect(rankChoices([tree], base([node("CS-1210")])).branches).toEqual([]);
+  });
+});
+
+describe("required outright versus merely chosen", () => {
+  const pool = [course("1", "CS", "1210"), course("9", "ART", "1100")];
+
+  test("a course another requirement forces is marked forced", () => {
+    const major = normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
+    const minor = normalize(
+      program("MIN", [
+        group({ Id: "e", DisplayText: "elective", FromCourses: pool, MinCredits: 3 }),
+      ]),
+    );
+    const ranking = rankChoices([major, minor], base([node("CS-1210"), node("ART-1100")]));
+    const cs = ranking.choices[0]!.candidates.find((c) => c.code === "CS-1210")!;
+    expect(cs).toMatchObject({ forced: true, chosen: true });
+  });
+
+  test("a course the cover bought for this very group is chosen, not forced", () => {
+    // Nothing else in the degree wants either course. The cover picks one to
+    // close the group — which must not then read as though the group were
+    // settled by some other requirement.
+    const tree = normalize(
+      program("A", [group({ DisplayText: "elective", FromCourses: pool, MinCredits: 3 })]),
+    );
+    const ranking = rankChoices([tree], base([node("CS-1210"), node("ART-1100")]));
+    const picked = ranking.choices[0]!.candidates.filter((c) => c.chosen);
+    expect(picked).toHaveLength(1);
+    expect(picked[0]!.forced).toBe(false);
   });
 });

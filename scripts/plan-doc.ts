@@ -11,9 +11,9 @@
 import { criticalPath, projectPlan, type Season, termsFrom } from "../src/planner";
 import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
 import {
-  absorbInto,
   completedCourses,
   coursesNeeded,
+  groupKey,
   inProgressCourses,
   normalize,
 } from "../src/requirements";
@@ -102,19 +102,30 @@ w();
 for (const tree of trees) {
   const cap = 15;
   const name = `${tree.code} — ${tree.title}`;
-  const { courses: need, unenumerable } = coursesNeeded(tree, { credits: price, have });
+  // First pass: find the groups the evaluation will not enumerate.
+  const first = coursesNeeded(tree, { credits: price, have });
 
-  // Expand what the evaluation would not: Colleague resolves its own rules.
-  for (const u of unenumerable) {
+  const resolved = new Map<string, string[]>();
+  for (const u of first.unenumerable) {
     if (u.bucket) continue; // satisfied by other coursework, not shopped for
     try {
       const options = (await resolveGroup(u.ids)).filter((c) => !have.has(c));
-      if (options.length === 0) continue;
-      u.resolved = options;
-      absorbInto(need, options, u.credits ?? 3, price);
+      if (options.length) resolved.set(groupKey(u.ids), options);
     } catch {
       // Leave it listed as unresolved rather than guessing.
     }
+  }
+
+  // Second pass: with the rules expanded, every requirement enters the same
+  // cover, so a course bought for one can pay for a rule-based one too.
+  const { courses: need, unenumerable } = coursesNeeded(tree, {
+    credits: price,
+    have,
+    resolved,
+  });
+  for (const u of first.unenumerable) {
+    const pool = resolved.get(groupKey(u.ids));
+    if (pool) u.resolved = pool;
   }
   const plan = projectPlan({
     need,
@@ -151,9 +162,9 @@ for (const tree of trees) {
     }
     w();
   }
-  const expanded = unenumerable.filter((u) => u.resolved?.length);
+  const expanded = first.unenumerable.filter((u) => u.resolved?.length);
   const buckets = unenumerable.filter((u) => u.bucket);
-  const stuck = unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
+  const stuck = unenumerable.filter((u) => !u.bucket && !resolved.has(groupKey(u.ids)));
 
   if (buckets.length) {
     w("Satisfied incidentally by other coursework, not scheduled separately:");

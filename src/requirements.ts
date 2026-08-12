@@ -421,7 +421,21 @@ export interface NeedOptions {
   credits: (code: string) => number;
   /** Courses already passed or under way. */
   have: ReadonlySet<string>;
+  /**
+   * Course lists for groups the evaluation would not enumerate, keyed
+   * `requirement/subrequirement/group`.
+   *
+   * Colleague will expand its own rules on request, so a second pass can hand
+   * them back here. That matters beyond filling the group in: once a rule's
+   * pool is known it joins the same cover as everything else, and a course
+   * bought for one requirement can pay for a rule-based one too.
+   */
+  resolved?: ReadonlyMap<string, readonly string[]>;
 }
+
+/** How a resolved group is addressed in `NeedOptions.resolved`. */
+export const groupKey = (ids: Unenumerable["ids"]) =>
+  `${ids.requirement}/${ids.subrequirement}/${ids.group}`;
 
 export interface Unenumerable {
   requirement: string;
@@ -537,6 +551,21 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
         if (c.kind === "rule-based" || c.kind === "filter") {
           const bucket =
             c.kind === "filter" && c.subjects.length === 0 && c.departments.length === 0;
+          const ids = {
+            requirement: group.requirementCode,
+            subrequirement: group.subrequirementId,
+            group: group.id,
+          };
+
+          // Once Colleague has told us what qualifies, the group is just
+          // another choice — and joins the cover rather than being filled on
+          // its own afterwards.
+          const pool = !bucket ? options.resolved?.get(groupKey(ids)) : undefined;
+          if (pool?.length) {
+            choices.push({ pool: [...pool], credits: group.min.credits ?? 3 });
+            continue;
+          }
+
           unenumerable.push({
             requirement: requirement.text,
             // Colleague leaves DisplayText empty on some groups, and "Group 1"
@@ -544,11 +573,7 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
             text: group.text || requirement.text || group.code,
             bucket,
             ...(group.min.credits !== undefined ? { credits: group.min.credits } : {}),
-            ids: {
-              requirement: group.requirementCode,
-              subrequirement: group.subrequirementId,
-              group: group.id,
-            },
+            ids,
           });
           continue;
         }

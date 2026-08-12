@@ -6,6 +6,7 @@ import {
   coursesNeeded,
   enumeratedCourseIds,
   gaps,
+  groupKey,
   levelOf,
   normalize,
   openGroups,
@@ -772,5 +773,71 @@ describe("covering several choices at once", () => {
       ],
     ]);
     expect([...coursesNeeded(tree, { credits, have: new Set() }).courses]).toEqual(["BB-1000"]);
+  });
+});
+
+describe("rule groups joining the cover", () => {
+  const credits = () => 3;
+  const ruleGroup = (id: string) =>
+    group({
+      Id: id,
+      RequirementCode: "R",
+      SubrequirementId: "S",
+      DisplayText: "One approved course",
+      MinCredits: 3,
+      HasRules: true,
+    });
+
+  test("an unresolved rule group is reported, not scheduled", () => {
+    const tree = normalize(program("A", [ruleGroup("g1")]));
+    const { courses, unenumerable } = coursesNeeded(tree, { credits, have: new Set() });
+    expect(courses.size).toBe(0);
+    expect(unenumerable).toHaveLength(1);
+    expect(groupKey(unenumerable[0]!.ids)).toBe("R/S/g1");
+  });
+
+  /**
+   * Once Colleague says what qualifies, the group is just another choice —
+   * and a course already required for something else can pay for it.
+   */
+  test("a resolved rule group is covered by a course already required", () => {
+    const tree = normalize(
+      program("A", [group({ Courses: [course("1", "HON", "1020")] }), ruleGroup("g1")]),
+    );
+    const resolved = new Map([["R/S/g1", ["GEO-3040", "HON-1020"]]]);
+    const { courses, unenumerable } = coursesNeeded(tree, {
+      credits,
+      have: new Set(),
+      resolved,
+    });
+
+    expect([...courses]).toEqual(["HON-1020"]);
+    expect(unenumerable).toHaveLength(0);
+  });
+
+  test("and buys a course when nothing required fits", () => {
+    const tree = normalize(program("A", [ruleGroup("g1")]));
+    const resolved = new Map([["R/S/g1", ["GEO-3040", "HIST-1110"]]]);
+    const { courses } = coursesNeeded(tree, { credits, have: new Set(), resolved });
+    expect(courses.size).toBe(1);
+  });
+
+  test("a bucket is never resolved into the cover", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          Id: "g2",
+          RequirementCode: "R",
+          SubrequirementId: "S",
+          FromLevels: ["300"],
+          MinCredits: 32,
+        }),
+      ]),
+    );
+    // Even handed a pool, a catch-all stays out: it is satisfied incidentally.
+    const resolved = new Map([["R/S/g2", ["AA-3000", "BB-3000"]]]);
+    const { courses, unenumerable } = coursesNeeded(tree, { credits, have: new Set(), resolved });
+    expect(courses.size).toBe(0);
+    expect(unenumerable[0]!.bucket).toBe(true);
   });
 });

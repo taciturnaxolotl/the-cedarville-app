@@ -15,9 +15,9 @@
 import { criticalPath, projectPlan, type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
 import {
-  absorbInto,
   completedCourses,
   coursesNeeded,
+  groupKey,
   inProgressCourses,
   type ProgramTree,
 } from "../../requirements";
@@ -77,31 +77,32 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
   const price = (c: string) => credits.get(c) ?? 3;
 
-  const { courses: need, unenumerable } = coursesNeeded(tree, { credits: price, have });
+  // First pass names the groups the evaluation will not enumerate; the server
+  // asks Colleague what qualifies; the second pass runs one cover over
+  // everything, so a course bought for one requirement can pay for a
+  // rule-based one too.
+  const first = coursesNeeded(tree, { credits: price, have });
+  let need = first.courses;
+  let unenumerable = first.unenumerable;
 
-  // Ask the server to expand the groups the evaluation would not enumerate.
-  // Until it answers they stay listed as unplannable, which is honest; once it
-  // does, their courses join the projection like any other requirement.
-  void resolveRules(unenumerable.filter((u) => !u.bucket).map((u) => u.ids)).then((resolved) => {
-    let added = 0;
-    for (const u of unenumerable) {
-      if (u.bucket) continue; // a catch-all, satisfied by other coursework
-      const key = `${u.ids.requirement}/${u.ids.subrequirement}/${u.ids.group}`;
-      const options = resolved[key];
-      if (!options?.length) continue;
+  void resolveRules(first.unenumerable.filter((u) => !u.bucket).map((u) => u.ids)).then(
+    (answers) => {
+      const resolved = new Map<string, string[]>();
+      for (const u of first.unenumerable) {
+        const pool = answers[groupKey(u.ids)]?.filter((c) => !have.has(c));
+        if (pool?.length) {
+          resolved.set(groupKey(u.ids), pool);
+          u.resolved = pool;
+        }
+      }
+      if (resolved.size === 0) return;
 
-      const before = need.size;
-      absorbInto(
-        need,
-        options.filter((c) => !have.has(c)),
-        u.credits ?? 3,
-        price,
-      );
-      added += need.size - before;
-      u.resolved = options;
-    }
-    if (added) store.set({ resolvedAt: Date.now() });
-  });
+      const second = coursesNeeded(tree, { credits: price, have, resolved });
+      need = second.courses;
+      unenumerable = second.unenumerable;
+      store.set({ resolvedAt: Date.now() });
+    },
+  );
 
   const store = createStore<State>({ perTerm: 15, summers: true, resolvedAt: 0 });
 
@@ -211,9 +212,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           body.append(box);
         }
 
-        if (unenumerable.length) {
+        if (first.unenumerable.length) {
           const box = el("div", "term unenumerable");
-          const pending = unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
+          const pending = first.unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
           if (pending.length) {
             box.append(el("h3", undefined, "not plannable"));
             box.append(

@@ -159,7 +159,10 @@ hardcoded list of the CS major's track names.
 
 Groups it cannot enumerate — a Colleague rule, or a filter over attributes the
 evaluation does not carry — come back separately as `unenumerable`, each
-carrying the ids needed to expand it.
+carrying the ids needed to expand it. Hand the expansions back through
+`NeedOptions.resolved` and they join the same cover as everything else, which
+is how a course bought for one requirement ends up paying for a rule-based one
+too. Two passes: name the groups, resolve them, solve once.
 
 ### what exists vs what is offered
 

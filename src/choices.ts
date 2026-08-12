@@ -23,6 +23,7 @@ import {
   type NeedOptions,
   type OpenChoice,
   type ProgramTree,
+  type Shortfall,
   type Unenumerable,
 } from "./requirements";
 
@@ -88,6 +89,8 @@ export interface Ranking {
   unenumerable: Unenumerable[];
   /** Courses counting toward more than one selected program. */
   shared: { code: string; programs: string[] }[];
+  /** Requirements the courses on offer cannot close, usually a repeated course. */
+  shortfalls: Shortfall[];
 }
 
 export interface RankOptions extends NeedOptions {
@@ -296,6 +299,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     choices: dedupe(choices),
     baseline,
     unenumerable: solved.unenumerable,
+    shortfalls: solved.shortfalls,
     shared: shared.sort((a, b) => a.code.localeCompare(b.code)),
   };
 }

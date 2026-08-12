@@ -16,7 +16,12 @@
 import { type Candidate, type RankedChoice, rankChoices } from "../../choices";
 import { type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
-import { completedCourses, inProgressCourses, type ProgramTree } from "../../requirements";
+import {
+  completedCourses,
+  groupKey,
+  inProgressCourses,
+  type ProgramTree,
+} from "../../requirements";
 import { offeringsFromListing } from "../../schedule";
 import type { ProgramSummary } from "../../types";
 import { capture, installed, programs, resolveRules } from "../bridge";
@@ -419,6 +424,19 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           head.append(el("span", "cr", `${choice.credits} cr`));
           head.append(tag(choice.program, "prog"));
           box.append(head);
+
+          // A pool that cannot close its own requirement is almost always a
+          // course meant to be taken twice, which a set of codes cannot say.
+          const short = ranking.shortfalls.find((s) => groupKey(s.ids) === groupKey(choice.ids));
+          if (short) {
+            const warn = el(
+              "p",
+              "shortfall",
+              `these add up to ${short.wanted - short.short} of the ${short.wanted} credits needed — ` +
+                "the remainder is likely a course taken twice; check with your advisor",
+            );
+            box.append(warn);
+          }
 
           for (const candidate of choice.candidates) box.append(candidateRow(candidate));
           if (!choice.candidates.length) {

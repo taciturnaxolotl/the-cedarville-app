@@ -700,3 +700,29 @@ describe("build view — specializations", () => {
     localStorage.removeItem("cedarville:tracks");
   });
 });
+
+describe("build view — a pool that cannot close its requirement", () => {
+  test("warns instead of quietly showing a short list", () => {
+    const short = normalize(
+      program("BS.CYOPR", [
+        group({
+          Id: "sem",
+          DisplayText: "Honors Integrative Seminars (4 credit hours)",
+          FromCourses: [course("1", "HON", "3020"), course("2", "HON", "4900")],
+          MinCredits: 4,
+        }),
+      ]),
+    );
+    // Credits have to come from a catalog: at the default of three apiece the
+    // two courses would cover four and there would be no shortfall to show.
+    const allCourses = [
+      { SubjectCode: "HON", Number: "3020", Title: "Honors Seminar", MinimumCredits: 2 },
+      { SubjectCode: "HON", Number: "4900", Title: "Ind Study", MinimumCredits: 1 },
+    ] as unknown as NonNullable<Ctx["allCourses"]>;
+
+    build.mount(root, { trees: [short], enrolled: ["BS.CYOPR"], allCourses });
+    const warn = root.querySelector(".shortfall");
+    expect(warn?.textContent).toContain("of the 4 credits needed");
+    expect(warn?.textContent).toContain("taken twice");
+  });
+});

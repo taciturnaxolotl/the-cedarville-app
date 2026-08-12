@@ -804,3 +804,9 @@ label.section.clashes:not(:has(input:checked)) .when {
   color: var(--overlay);
   font-size: 11px;
 }
+
+.shortfall {
+  margin: 0 0 8px;
+  color: var(--yellow);
+  font-size: 11px;
+}

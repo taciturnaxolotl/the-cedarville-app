@@ -1146,3 +1146,43 @@ describe("pinning a course", () => {
     expect([...courses].sort()).toEqual(["ART-1100", "CS-1210"]);
   });
 });
+
+describe("a requirement its own pool cannot close", () => {
+  test("reports the shortfall rather than quietly under-buying", () => {
+    // "Two sections of the Honors Seminar (HON-3020)" is four credits over a
+    // pool holding one two-credit course and a one-credit study.
+    const tree = normalize(
+      program("A", [
+        group({
+          DisplayText: "Honors Integrative Seminars (4 credit hours)",
+          FromCourses: [course("1", "HON", "3020"), course("2", "HON", "4900")],
+          MinCredits: 4,
+        }),
+      ]),
+    );
+    const credits = (c: string) => (c === "HON-3020" ? 2 : 1);
+    const { courses, shortfalls } = coursesNeededAcross(tree ? [tree] : [], {
+      credits,
+      have: new Set(),
+    });
+
+    // Everything available is still bought; the gap is named, not hidden.
+    expect([...courses].sort()).toEqual(["HON-3020", "HON-4900"]);
+    expect(shortfalls).toHaveLength(1);
+    expect(shortfalls[0]).toMatchObject({ wanted: 4, short: 1 });
+  });
+
+  test("a pool that closes its requirement reports nothing", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          FromCourses: [course("1", "HON", "3020"), course("2", "HON", "4900")],
+          MinCredits: 2,
+        }),
+      ]),
+    );
+    expect(coursesNeededAcross([tree], { credits: () => 2, have: new Set() }).shortfalls).toEqual(
+      [],
+    );
+  });
+});

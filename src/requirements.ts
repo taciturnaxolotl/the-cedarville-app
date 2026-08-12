@@ -712,6 +712,25 @@ function pickBranch<T>(
   return [...wanted, ...rest].slice(0, Math.max(want, 0));
 }
 
+/**
+ * A requirement whose own pool cannot satisfy it.
+ *
+ * Nearly always a repeated course: "two sections of the Honors Seminar
+ * (HON-3020)" is four credits drawn from a pool containing one two-credit
+ * course. The solver holds courses in a set, so it cannot take one twice, and
+ * quietly buying whatever else the pool offers understates the degree.
+ */
+export interface Shortfall {
+  program: string;
+  text: string;
+  ids: Unenumerable["ids"];
+  /** Credits the group asks for. */
+  wanted: number;
+  /** Credits still missing after everything available was bought. */
+  short: number;
+  pool: string[];
+}
+
 /** A group that offers a choice, carried until the cover can solve them together. */
 export interface OpenChoice {
   /** Program this came from, so a combined solve can say who wants it. */
@@ -889,7 +908,7 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
 export function coursesNeededAcross(
   trees: readonly ProgramTree[],
   options: NeedOptions,
-): Needed & { choices: OpenChoice[]; branches: OpenBranch[] } {
+): Needed & { choices: OpenChoice[]; branches: OpenBranch[]; shortfalls: Shortfall[] } {
   const courses = new Set<string>(options.pinned ?? []);
   const choices: OpenChoice[] = [];
   const branches: OpenBranch[] = [];
@@ -903,8 +922,24 @@ export function coursesNeededAcross(
     unenumerable.push(...walked.unenumerable);
   }
 
-  cover(courses, choices, options);
-  return { courses, choices, branches, unenumerable };
+  // A choice its own pool cannot close is worth naming. Colleague states
+  // "two sections of the Honors Seminar" as a four-credit group over a pool
+  // holding one two-credit course, because a repeated course is a thing a
+  // registrar can express and a set of course codes cannot.
+  const short = cover(courses, choices, options);
+  const shortfalls = choices
+    .map((choice, i) => ({ choice, short: short[i] ?? 0 }))
+    .filter(({ short: s }) => s > 0)
+    .map(({ choice, short: s }) => ({
+      program: choice.program,
+      text: choice.text,
+      ids: choice.ids,
+      wanted: choice.credits,
+      short: s,
+      pool: choice.pool,
+    }));
+
+  return { courses, choices, branches, shortfalls, unenumerable };
 }
 
 /**
@@ -925,7 +960,7 @@ function cover(
   courses: Set<string>,
   choices: { pool: string[]; credits: number }[],
   options: NeedOptions,
-): void {
+): number[] {
   const owed = choices.map((choice) => {
     let left = choice.credits;
     // Anything already passed, or already required outright, counts first.
@@ -935,14 +970,17 @@ function cover(
     return { pool: choice.pool, left };
   });
 
+  /** What each choice still wants once nothing more can be bought for it. */
+  const shortfall = () => owed.map((o) => Math.max(0, o.left));
+
   for (;;) {
     const open = owed.filter((o) => o.left > 0);
-    if (open.length === 0) return;
+    if (open.length === 0) return shortfall();
 
     const candidates = new Set(
       open.flatMap((o) => o.pool).filter((c) => !courses.has(c) && !options.have.has(c)),
     );
-    if (candidates.size === 0) return;
+    if (candidates.size === 0) return shortfall();
 
     let best: { code: string; value: number } | null = null;
     for (const code of candidates) {
@@ -957,7 +995,7 @@ function cover(
         best = { code, value };
       }
     }
-    if (!best || best.value <= 0) return;
+    if (!best || best.value <= 0) return shortfall();
 
     courses.add(best.code);
     for (const o of open) {

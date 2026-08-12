@@ -198,7 +198,21 @@ export function eligibility(
         : requisite.courses.every(satisfies);
     if (met) continue;
 
-    for (const code of requisite.courses) if (!satisfies(code)) blocked.add(code);
+    // Only name options a student could actually enrol in. Cedarville's
+    // calculus transition leaves requisites like "MATH-2705 or MATH-2710"
+    // where the second no longer exists; listing it as a blocker is noise.
+    const reachable = requisite.courses.filter((c) => !phantom.includes(c));
+    for (const code of reachable.length ? reachable : requisite.courses) {
+      if (!satisfies(code)) blocked.add(code);
+    }
+    // Only raise the phantom once nothing reachable is standing in the way.
+    // While a real prerequisite is still outstanding, "blocked on CS-1210" is
+    // the more actionable truth than "there is something we cannot check".
+    if (phantom.length && reachable.every(satisfies)) {
+      unclear.push(
+        `${requisite.text} — ${phantom.join(", ")} no longer ${phantom.length === 1 ? "exists" : "exist"}; an earlier catalog's course`,
+      );
+    }
   }
 
   if (unclear.length) return { state: "unknown", blockedBy: [...blocked], why: unclear };

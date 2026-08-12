@@ -177,11 +177,27 @@ the catalog view. Harvesting it yields 323 linked codes, so a transcript
 carrying an older catalog's codes still matches modern requirements.
 
 It resolves only 3 of the 27 phantoms, and the reason is worth stating.
-`MATH-1720` and `MATH-1715` are both Calculus II and one replaced the other,
-but they carry 5 and 4 credits and Colleague equates neither to the other.
-They are different courses, not a renumbering. Inferring equivalence from
-adjacent numbers would tell a student a requirement is met when it is not, so
-`buildEquivalences` only ever reads what the registrar declared.
+Cedarville reworked its calculus sequence: Calculus I and II went from 5
+credits to 4 and were renumbered, and Calculus III was split in two.
+
+    retired                    current
+    MATH-1710  Calc I    5cr   MATH-1705  Calculus I     4cr
+    MATH-1720  Calc II   5cr   MATH-1715  Calculus II    4cr
+    MATH-2710  Calc III  5cr   MATH-2705  Calculus IIIA  3cr
+                               MATH-2715  Calculus IIIB  3cr
+
+Different credit hours mean different courses, and Colleague equates none of
+them. Inferring equivalence from adjacent numbers would tell a student a
+requirement is met when it is not, so `buildEquivalences` only ever reads what
+the registrar declared.
+
+The transition is half-finished in the data. Six requisites were updated to
+accept either ("Take MATH-2705 or MATH-2710"); nine still name only the
+retired course, including `MATH-2210 Logic & Methods of Proof`, which is a
+mathematics core requirement gated on a course nobody can enrol in. Those
+report `unknown` with an explanation rather than blocking forever — and while
+a *reachable* prerequisite is still outstanding, "blocked on MATH-2705" stays
+the answer, because it is the one a student can act on.
 
 The same drift shows up a second way: about 1% of course codes carry two
 records, a course being retired beside its replacement, both live during the

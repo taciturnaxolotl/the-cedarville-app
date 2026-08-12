@@ -317,3 +317,48 @@ describe("requisites met by an equivalent course", () => {
     expect(verdict.state).toBe("open");
   });
 });
+
+describe("a requisite spanning a curriculum change", () => {
+  /**
+   * Cedarville cut Calculus I and II from 5 credits to 4 and split Calculus
+   * III into IIIA and IIIB. Some requisites were updated to accept either
+   * ("MATH-2705 or MATH-2710"); others still name only the retired course.
+   */
+  const exists = (c: string) => ["MATH-2705", "MATH-1715", "MATH-1990"].includes(c);
+
+  test("an either/or naming one retired option blocks only on the live one", () => {
+    const node: CourseNode = {
+      code: "EGME-2050",
+      title: "Computational Methods",
+      requisites: [req("Take MATH-2705 or MATH-2710")],
+    };
+    const verdict = eligibility(node, new Set(), new Set(), { exists });
+    // MATH-2710 cannot be enrolled in, so naming it as a blocker is noise.
+    expect(verdict.blockedBy).toEqual(["MATH-2705"]);
+    // And while MATH-2705 is genuinely outstanding, that is the useful answer.
+    expect(verdict.state).toBe("blocked");
+  });
+
+  test("and the live option satisfies it outright", () => {
+    const node: CourseNode = {
+      code: "EGME-2050",
+      title: "x",
+      requisites: [req("Take MATH-2705 or MATH-2710")],
+    };
+    expect(eligibility(node, new Set(["MATH-2705"]), new Set(), { exists }).blockedBy).toEqual([]);
+  });
+
+  test("a requisite naming only the retired course does not block forever", () => {
+    // MATH-2210 still reads "Take MATH-1720 MATH-1990" — a math-major core
+    // course gated on calculus that no longer exists.
+    const node: CourseNode = {
+      code: "MATH-2210",
+      title: "Logic & Meth of Proof",
+      requisites: [req("Take MATH-1720 MATH-1990")],
+    };
+    const verdict = eligibility(node, new Set(["MATH-1990"]), new Set(), { exists });
+    expect(verdict.state).toBe("unknown");
+    expect(verdict.blockedBy).toEqual([]);
+    if (verdict.state === "unknown") expect(verdict.why[0]).toContain("MATH-1720");
+  });
+});

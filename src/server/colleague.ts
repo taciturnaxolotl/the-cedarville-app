@@ -21,6 +21,7 @@ const JSON_CT = "application/json, charset=UTF-8";
 export interface SearchCriteria {
   terms?: string[];
   subjects?: string[];
+  courseIds?: string[];
   keyword?: string;
   pageNumber?: number;
   quantityPerPage?: number;

@@ -78,3 +78,50 @@ export async function refreshTerm(
 
 /** Every term Colleague currently lists as searchable. */
 export const availableTerms = (client = new GuestColleague()) => client.terms();
+
+/**
+ * Current availability for a handful of courses.
+ *
+ * Seat counts are the one field that moves by the minute during registration,
+ * so serving them from a six-hour-old crawl makes the number decorative at
+ * exactly the moment it matters. This asks Colleague directly, scoped to the
+ * courses a student is actually looking at: one request, under a second.
+ */
+export async function liveSeats(
+  term: string,
+  courseIds: string[],
+  client = new GuestColleague(),
+): Promise<Record<string, Seats>> {
+  if (courseIds.length === 0) return {};
+
+  const seats: Record<string, Seats> = {};
+  let page = 1;
+  let pages = 1;
+
+  while (page <= pages) {
+    const result = await client.search({ terms: [term], courseIds, pageNumber: page });
+    pages = Math.max(result.TotalPages ?? 1, 1);
+
+    for (const raw of result.Sections ?? []) {
+      const s = raw as ListingSection;
+      if (!s?.Id) continue;
+      seats[s.Id] = {
+        available: s.Available,
+        capacity: s.Capacity,
+        enrolled: s.Enrolled,
+        waitlisted: s.Waitlisted,
+        status: s.AvailabilityStatus,
+      };
+    }
+    page++;
+  }
+  return seats;
+}
+
+export interface Seats {
+  available: number;
+  capacity: number;
+  enrolled: number;
+  waitlisted: number;
+  status: string;
+}

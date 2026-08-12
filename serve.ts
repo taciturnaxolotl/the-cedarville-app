@@ -14,7 +14,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { isStale } from "./src/catalog";
-import { availableTerms, refreshTerm } from "./src/server/crawler";
+import { availableTerms, liveSeats, refreshTerm } from "./src/server/crawler";
 import { CatalogStore } from "./src/server/store";
 
 const PORT = 5173;
@@ -77,6 +77,18 @@ async function api(request: Request, pathname: string): Promise<Response | null>
     const term = decodeURIComponent(refreshTermCode);
     void refresh(term);
     return json({ refreshing: term }, 202);
+  }
+
+  const seatsTerm = /^\/catalog\/([^/]+)\/seats$/.exec(pathname)?.[1];
+  if (seatsTerm && request.method === "GET") {
+    const courses = new URL(request.url).searchParams.get("courses");
+    if (!courses) return json({});
+    try {
+      // Deliberately uncached: a stale seat count is worse than a slow one.
+      return json(await liveSeats(decodeURIComponent(seatsTerm), courses.split(",")));
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
   }
 
   const term = /^\/catalog\/([^/]+)$/.exec(pathname)?.[1];

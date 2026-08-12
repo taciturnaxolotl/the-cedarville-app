@@ -22,6 +22,10 @@ export interface SearchCriteria {
   terms?: string[];
   subjects?: string[];
   courseIds?: string[];
+  /** Degree-audit coordinates: asks Colleague to evaluate that group's rule. */
+  requirement?: string;
+  subrequirement?: string;
+  group?: string;
   keyword?: string;
   pageNumber?: number;
   quantityPerPage?: number;
@@ -128,3 +132,43 @@ export class GuestColleague {
 }
 
 const USER_AGENT = "the-cedarville-app (student course planner; github.com/taciturnaxolotl)";
+
+/**
+ * The courses that satisfy one requirement group, as Colleague itself decides.
+ *
+ * This is the escape hatch for everything the evaluation refuses to enumerate.
+ * A group whose eligible courses live in an opaque rule (`DABIOL25`) or behind
+ * a department filter still has an identity — requirement, subrequirement and
+ * group id — and the course search accepts exactly that triple. The server
+ * evaluates the rule and hands back the list, which is the same answer the
+ * "Search for courses" button in the degree audit produces.
+ *
+ * No session is needed. The triple names a place in the catalog, not a
+ * student, so one lookup serves everybody.
+ */
+export async function resolveGroup(
+  ids: { requirement: string; subrequirement: string; group: string },
+  client = new GuestColleague(),
+): Promise<string[]> {
+  const names = new Set<string>();
+  let page = 1;
+  let pages = 1;
+
+  while (page <= pages) {
+    const result = await client.search({
+      requirement: ids.requirement,
+      subrequirement: ids.subrequirement,
+      group: ids.group,
+      pageNumber: page,
+      searchResultsView: "CatalogListing",
+    });
+    pages = Math.max(result.TotalPages ?? 1, 1);
+
+    for (const raw of result.Courses ?? []) {
+      const course = raw as { SubjectCode?: string; Number?: string };
+      if (course.SubjectCode && course.Number) names.add(`${course.SubjectCode}-${course.Number}`);
+    }
+    page++;
+  }
+  return [...names].sort();
+}

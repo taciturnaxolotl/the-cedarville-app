@@ -12,6 +12,7 @@ import { criticalPath, projectPlan, type Season, termsFrom } from "../src/planne
 import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
 import { completedCourses, coursesNeeded, inProgressCourses, normalize } from "../src/requirements";
 import { offeringsFromListing } from "../src/schedule";
+import { resolveGroup } from "../src/server/colleague";
 import { CatalogStore } from "../src/server/store";
 
 const store = new CatalogStore();
@@ -91,6 +92,24 @@ for (const tree of trees) {
   const cap = 15;
   const name = `${tree.code} — ${tree.title}`;
   const { courses: need, unenumerable } = coursesNeeded(tree, { credits: price, have });
+
+  // Expand what the evaluation would not: Colleague resolves its own rules.
+  for (const u of unenumerable) {
+    if (u.bucket) continue; // satisfied by other coursework, not shopped for
+    try {
+      const options = (await resolveGroup(u.ids)).filter((c) => !have.has(c));
+      if (options.length === 0) continue;
+      u.resolved = options;
+      let want = u.credits ?? 3;
+      for (const code of options.sort((a, b) => price(a) - price(b))) {
+        if (want <= 0) break;
+        need.add(code);
+        want -= price(code);
+      }
+    } catch {
+      // Leave it listed as unresolved rather than guessing.
+    }
+  }
   const plan = projectPlan({
     need,
     completed: have,
@@ -116,10 +135,32 @@ for (const tree of trees) {
     }
     w();
   }
-  if (unenumerable.length) {
-    w("Not plannable — Colleague evaluates these but never publishes the courses:");
+  const expanded = unenumerable.filter((u) => u.resolved?.length);
+  const buckets = unenumerable.filter((u) => u.bucket);
+  const stuck = unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
+
+  if (buckets.length) {
+    w("Satisfied incidentally by other coursework, not scheduled separately:");
     w();
-    for (const u of unenumerable) w(`- ${u.credits ? `**${u.credits}cr** ` : ""}${u.text}`);
+    for (const u of buckets)
+      w(`- ${u.credits ? `**${u.credits}cr** ` : ""}${u.text || u.requirement}`);
+    w();
+  }
+  if (expanded.length) {
+    w("Rule-based requirements, expanded by asking Colleague what qualifies:");
+    w();
+    for (const u of expanded) {
+      w(`- ${u.credits ? `**${u.credits}cr** ` : ""}${u.text}`);
+      w(
+        `  <br>_${u.resolved!.length} options: ${u.resolved!.slice(0, 12).join(", ")}${u.resolved!.length > 12 ? " …" : ""}_`,
+      );
+    }
+    w();
+  }
+  if (stuck.length) {
+    w("Still unresolved — ask your advisor what qualifies:");
+    w();
+    for (const u of stuck) w(`- ${u.credits ? `**${u.credits}cr** ` : ""}${u.text}`);
     w();
   }
   if (plan.unscheduled.length) {

@@ -65,6 +65,9 @@ export interface AppliedCredit {
 export interface RawGroup {
   Id: string;
   Code: string;
+  /** Catalog coordinates; the course search accepts these to expand a rule. */
+  RequirementCode?: string;
+  SubrequirementId?: string;
   DisplayText: string;
   CompletionStatus: string;
   PlanningStatus: string;

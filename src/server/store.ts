@@ -31,6 +31,15 @@ CREATE TABLE IF NOT EXISTS sections (
 
 CREATE INDEX IF NOT EXISTS sections_course ON sections (term, course_id);
 
+CREATE TABLE IF NOT EXISTS rule_groups (
+  requirement    TEXT NOT NULL,
+  subrequirement TEXT NOT NULL,
+  grp            TEXT NOT NULL,
+  courses        TEXT NOT NULL,
+  fetched_at     TEXT NOT NULL,
+  PRIMARY KEY (requirement, subrequirement, grp)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS courses (
   term       TEXT NOT NULL,
   course_id  TEXT NOT NULL,
@@ -140,6 +149,46 @@ export class CatalogStore {
     return run();
   }
 
+  /**
+   * Course lists for requirement groups Colleague will not enumerate in an
+   * evaluation. Keyed by catalog coordinates rather than by student, because
+   * that is what they are: the same rule resolves the same way for everyone.
+   */
+  readRules(triples: RuleKey[]): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    if (triples.length === 0) return out;
+
+    const query = this.#db.query<RuleRow, [string, string, string]>(
+      `SELECT courses FROM rule_groups WHERE requirement = ? AND subrequirement = ? AND grp = ?`,
+    );
+    for (const t of triples) {
+      const row = query.get(t.requirement, t.subrequirement, t.group);
+      if (row) out.set(ruleKey(t), JSON.parse(row.courses) as string[]);
+    }
+    return out;
+  }
+
+  writeRule(key: RuleKey, courses: string[]): void {
+    this.#db
+      .query(
+        `INSERT INTO rule_groups (requirement, subrequirement, grp, courses, fetched_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(requirement, subrequirement, grp) DO UPDATE SET
+           courses = excluded.courses, fetched_at = excluded.fetched_at`,
+      )
+      .run(
+        key.requirement,
+        key.subrequirement,
+        key.group,
+        JSON.stringify(courses),
+        new Date().toISOString(),
+      );
+  }
+
+  ruleCount(): number {
+    return this.#db.query<{ n: number }, []>(`SELECT COUNT(*) AS n FROM rule_groups`).get()?.n ?? 0;
+  }
+
   stats(): TermStats[] {
     return this.#db
       .query<TermStats, []>(
@@ -155,6 +204,18 @@ export class CatalogStore {
   close() {
     this.#db.close();
   }
+}
+
+export interface RuleKey {
+  requirement: string;
+  subrequirement: string;
+  group: string;
+}
+
+export const ruleKey = (k: RuleKey) => `${k.requirement}/${k.subrequirement}/${k.group}`;
+
+interface RuleRow {
+  courses: string;
 }
 
 export interface TermStats {

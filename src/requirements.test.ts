@@ -563,3 +563,61 @@ describe("what a student still owes", () => {
     expect([...need(normalize(raw)).courses]).toEqual([]);
   });
 });
+
+describe("expandable requirements", () => {
+  const credits = () => 3;
+  const need = (tree: ReturnType<typeof normalize>) =>
+    coursesNeeded(tree, { credits, have: new Set<string>() });
+
+  test("a rule-based group carries the ids needed to resolve it", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          Id: "33964",
+          RequirementCode: "UG.GENED.BS.2026",
+          SubrequirementId: "33963",
+          DisplayText: "One laboratory course from the biological sciences",
+          MinCredits: 3.5,
+          HasRules: true,
+        }),
+      ]),
+    );
+    const [u] = need(tree).unenumerable;
+    expect(u!.ids).toEqual({
+      requirement: "UG.GENED.BS.2026",
+      subrequirement: "33963",
+      group: "33964",
+    });
+    expect(u!.bucket).toBe(false);
+  });
+
+  /**
+   * "32 hours of upper-division work" names no subject or department, so
+   * nearly the whole catalog qualifies. Expanding it and filling cheapest-
+   * first yields thirty-two 1-credit independent studies: arithmetically
+   * valid, obvious nonsense.
+   */
+  test("a filter with no subject or department is a bucket", () => {
+    const tree = normalize(
+      program("A", [group({ FromLevels: ["300", "400"], MinCredits: 32, DisplayText: "" })]),
+    );
+    const [u] = need(tree).unenumerable;
+    expect(u!.bucket).toBe(true);
+    // An empty DisplayText falls back to something a student can read.
+    expect(u!.text).not.toBe("G");
+  });
+
+  test("a filter naming a subject is a real requirement, not a bucket", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          FromSubjects: [{ Code: "LIT", Description: "Literature" }],
+          FromLevels: ["200"],
+          MinCredits: 3,
+          DisplayText: "2000-level Literature course",
+        }),
+      ]),
+    );
+    expect(need(tree).unenumerable[0]!.bucket).toBe(false);
+  });
+});

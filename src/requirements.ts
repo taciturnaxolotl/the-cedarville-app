@@ -61,6 +61,13 @@ export interface Thresholds {
 export interface Group {
   id: string;
   code: string;
+  /**
+   * Where this group sits in the catalog. Together these address it in the
+   * course search, which is the only way to learn what a rule-based or
+   * attribute-filtered group will actually accept.
+   */
+  requirementCode: string;
+  subrequirementId: string;
   /** Ellucian's own rendering. Always show this when `unverifiable`. */
   text: string;
   status: Progress;
@@ -196,6 +203,8 @@ function normalizeGroup(g: RawGroup): Group {
   return {
     id: g.Id,
     code: g.Code,
+    requirementCode: g.RequirementCode ?? "",
+    subrequirementId: g.SubrequirementId ?? "",
     text: g.DisplayText,
     status: progress(g.CompletionStatus, g.PlanningStatus),
     constraint: constraintOf(g, min),
@@ -414,14 +423,33 @@ export interface NeedOptions {
   have: ReadonlySet<string>;
 }
 
+export interface Unenumerable {
+  requirement: string;
+  text: string;
+  credits?: number;
+  /**
+   * A bucket rather than a shopping list: "32 hours of upper-division work"
+   * names no subject or department, so nearly the whole catalog qualifies and
+   * it is satisfied incidentally by the courses a degree already requires.
+   * Expanding one and filling it cheapest-first produces thirty-two 1-credit
+   * independent studies, which is arithmetically valid and obvious nonsense.
+   */
+  bucket: boolean;
+  /** Coordinates for `POST /rules/resolve`, which asks Colleague directly. */
+  ids: { requirement: string; subrequirement: string; group: string };
+  /** Filled in once the server expands the group. */
+  resolved?: string[];
+}
+
 export interface Needed {
   /** Courses to take, from the cheapest satisfying path through the tree. */
   courses: Set<string>;
   /**
-   * Requirements we cannot enumerate: a Colleague rule, or a filter over
-   * attributes the evaluation does not carry. Real work, still owed.
+   * Groups the evaluation will not enumerate: a Colleague rule, or a filter
+   * over attributes it does not carry. Real work, and resolvable — each one
+   * carries the ids the course search needs to expand it.
    */
-  unenumerable: { requirement: string; text: string; credits?: number }[];
+  unenumerable: Unenumerable[];
 }
 
 /** Remaining credits if this group were chosen. Cheaper is preferred. */
@@ -505,10 +533,21 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
         const kind = group.constraint.kind;
 
         if (kind === "rule-based" || kind === "filter") {
+          const c = group.constraint;
+          const bucket =
+            c.kind === "filter" && c.subjects.length === 0 && c.departments.length === 0;
           unenumerable.push({
             requirement: requirement.text,
-            text: group.text || group.code,
+            // Colleague leaves DisplayText empty on some groups, and "Group 1"
+            // tells a student nothing that the requirement's name does not.
+            text: group.text || requirement.text || group.code,
+            bucket,
             ...(group.min.credits !== undefined ? { credits: group.min.credits } : {}),
+            ids: {
+              requirement: group.requirementCode,
+              subrequirement: group.subrequirementId,
+              group: group.id,
+            },
           });
           continue;
         }

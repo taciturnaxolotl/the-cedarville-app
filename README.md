@@ -146,8 +146,31 @@ demand Greek *and* Spanish, and the only way to get sensible output was a
 hardcoded list of the CS major's track names.
 
 Groups it cannot enumerate — a Colleague rule, or a filter over attributes the
-evaluation does not carry — come back separately as `unenumerable` rather than
-being dropped or guessed at.
+evaluation does not carry — come back separately as `unenumerable`, each
+carrying the ids needed to expand it.
+
+### expanding a rule
+
+An evaluation never says which courses satisfy `DABIOL25`, but the course
+search does: `PostSearchCriteria` accepts a requirement / subrequirement /
+group triple and Colleague evaluates its own rule. That is what the "Search
+for courses" button in the degree audit calls.
+
+```
+POST /rules/resolve   [{requirement, subrequirement, group}, …]
+```
+
+No session is needed — the triple names a place in the catalog, not a student
+— so the server resolves it anonymously and caches the answer in SQLite,
+shared by everyone. `DABIOL25` is five biology labs; the history elective is
+forty-seven courses.
+
+One kind is deliberately not expanded. A filter naming no subject and no
+department ("32 hours of upper-division work") matches most of the catalog and
+is satisfied incidentally by the courses a degree already requires. Expanding
+one and filling it cheapest-first produces thirty-two 1-credit independent
+studies: arithmetically valid, obvious nonsense. Those are flagged `bucket`
+and reported rather than scheduled.
 
 ### planning
 

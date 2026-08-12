@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ListingSection, TermCatalog } from "../catalog";
-import { CatalogStore } from "./store";
+import { CatalogStore, ruleKey } from "./store";
 
 /** ":memory:" keeps each test's database to itself. */
 const store = () => new CatalogStore(":memory:");
@@ -134,6 +134,47 @@ describe("catalog store", () => {
     db.replace(catalog({ fetchedAt: "2026-08-13T00:00:00.000Z", courses: [] }));
 
     expect(db.read("2026FA").courses).toHaveLength(1);
+    db.close();
+  });
+
+  /**
+   * Requirement groups whose courses live in a Colleague rule are keyed by
+   * catalog coordinates, not by student: the same rule resolves the same way
+   * for everyone, so one lookup is shared.
+   */
+  test("caches resolved rule groups by their catalog coordinates", () => {
+    const db = store();
+    const key = { requirement: "UG.GENED.BS.2026", subrequirement: "33963", group: "33964" };
+    expect(db.readRules([key]).size).toBe(0);
+    expect(db.ruleCount()).toBe(0);
+
+    db.writeRule(key, ["GBIO-1000", "BIO-1115"]);
+    expect(db.readRules([key]).get(ruleKey(key))).toEqual(["GBIO-1000", "BIO-1115"]);
+    expect(db.ruleCount()).toBe(1);
+    db.close();
+  });
+
+  test("re-resolving a group replaces its list", () => {
+    const db = store();
+    const key = { requirement: "R", subrequirement: "S", group: "G" };
+    db.writeRule(key, ["OLD-1000"]);
+    db.writeRule(key, ["NEW-1000", "NEW-2000"]);
+
+    expect(db.readRules([key]).get(ruleKey(key))).toEqual(["NEW-1000", "NEW-2000"]);
+    expect(db.ruleCount()).toBe(1);
+    db.close();
+  });
+
+  test("unknown groups are absent rather than empty, so callers can tell", () => {
+    const db = store();
+    db.writeRule({ requirement: "R", subrequirement: "S", group: "G" }, []);
+    const known = db.readRules([
+      { requirement: "R", subrequirement: "S", group: "G" },
+      { requirement: "R", subrequirement: "S", group: "MISSING" },
+    ]);
+    // A group that genuinely resolves to nothing is still a known answer.
+    expect(known.get("R/S/G")).toEqual([]);
+    expect(known.has("R/S/MISSING")).toBe(false);
     db.close();
   });
 

@@ -21,6 +21,7 @@ import {
   type ProgramTree,
 } from "../../requirements";
 import { offeringsFromListing } from "../../schedule";
+import { resolveRules } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { createStore, Subscriptions } from "../store";
@@ -28,6 +29,8 @@ import { createStore, Subscriptions } from "../store";
 interface State {
   perTerm: number;
   summers: boolean;
+  /** Bumped when rule groups come back, to reproject with their courses. */
+  resolvedAt: number;
 }
 
 export function mount(root: HTMLElement, ctx: Ctx) {
@@ -74,7 +77,31 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   const { courses: need, unenumerable } = coursesNeeded(tree, { credits: price, have });
 
-  const store = createStore<State>({ perTerm: 15, summers: true });
+  // Ask the server to expand the groups the evaluation would not enumerate.
+  // Until it answers they stay listed as unplannable, which is honest; once it
+  // does, their courses join the projection like any other requirement.
+  void resolveRules(unenumerable.filter((u) => !u.bucket).map((u) => u.ids)).then((resolved) => {
+    let added = 0;
+    for (const u of unenumerable) {
+      if (u.bucket) continue; // a catch-all, satisfied by other coursework
+      const key = `${u.ids.requirement}/${u.ids.subrequirement}/${u.ids.group}`;
+      const options = resolved[key];
+      if (!options?.length) continue;
+
+      // Cheapest first, up to the credits the group asks for.
+      let want = u.credits ?? 3;
+      for (const code of options.filter((c) => !have.has(c)).sort((a, b) => price(a) - price(b))) {
+        if (want <= 0) break;
+        need.add(code);
+        want -= price(code);
+        added++;
+      }
+      u.resolved = options;
+    }
+    if (added) store.set({ resolvedAt: Date.now() });
+  });
+
+  const store = createStore<State>({ perTerm: 15, summers: true, resolvedAt: 0 });
 
   // ---- chrome ----------------------------------------------------------
 
@@ -119,7 +146,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   subs.add(
     store.watch(
-      (s) => `${s.perTerm}:${s.summers}`,
+      (s) => `${s.perTerm}:${s.summers}:${s.resolvedAt}`,
       () => {
         const { perTerm: cap, summers: useSummers } = store.get();
         perTermLabel.textContent = `${cap}`;
@@ -184,16 +211,19 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
         if (unenumerable.length) {
           const box = el("div", "term unenumerable");
-          box.append(el("h3", undefined, "not plannable"));
-          box.append(
-            el("p", "muted", "Colleague evaluates these but never publishes the eligible courses."),
-          );
-          for (const u of unenumerable) {
+          const pending = unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
+          if (pending.length) {
+            box.append(el("h3", undefined, "not plannable"));
             box.append(
-              el("div", "plan-course muted", `${u.credits ? `${u.credits}cr  ` : ""}${u.text}`),
+              el("p", "muted", "Colleague did not expand these; ask your advisor what qualifies."),
             );
+            for (const u of pending) {
+              box.append(
+                el("div", "plan-course muted", `${u.credits ? `${u.credits}cr  ` : ""}${u.text}`),
+              );
+            }
+            body.append(box);
           }
-          body.append(box);
         }
 
         body.append(

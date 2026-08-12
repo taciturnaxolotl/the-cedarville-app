@@ -14,8 +14,9 @@
 
 import { mkdir } from "node:fs/promises";
 import { isStale } from "./src/catalog";
+import { resolveGroup } from "./src/server/colleague";
 import { availableTerms, liveSeats, refreshTerm } from "./src/server/crawler";
-import { CatalogStore } from "./src/server/store";
+import { CatalogStore, type RuleKey, ruleKey } from "./src/server/store";
 
 const PORT = 5173;
 const ROOT = "public";
@@ -83,7 +84,11 @@ function json(body: unknown, status = 200, accept = ""): Response {
 async function api(request: Request, pathname: string): Promise<Response | null> {
   const accept = request.headers.get("accept-encoding") ?? "";
   if (pathname === "/catalog" && request.method === "GET") {
-    return json({ terms: store.stats(), refreshing: [...running.keys()] });
+    return json({
+      terms: store.stats(),
+      refreshing: [...running.keys()],
+      rules: store.ruleCount(),
+    });
   }
 
   const refreshTermCode = /^\/catalog\/([^/]+)\/refresh$/.exec(pathname)?.[1];
@@ -113,6 +118,33 @@ async function api(request: Request, pathname: string): Promise<Response | null>
       200,
       accept,
     );
+  }
+
+  /**
+   * Resolve requirement groups whose eligible courses Colleague keeps inside a
+   * rule. The client sends catalog coordinates, never a transcript; the answer
+   * is identical for every student, so it is cached and shared.
+   */
+  if (pathname === "/rules/resolve" && request.method === "POST") {
+    const keys = (await request.json()) as RuleKey[];
+    if (!Array.isArray(keys) || keys.length > 60) return json({ error: "send 1-60 groups" }, 400);
+
+    const known = store.readRules(keys);
+    const missing = keys.filter((k) => !known.has(ruleKey(k)));
+
+    for (const key of missing) {
+      try {
+        const courses = await resolveGroup(key);
+        store.writeRule(key, courses);
+        known.set(ruleKey(key), courses);
+      } catch (err) {
+        console.warn(`rule ${ruleKey(key)}: ${err instanceof Error ? err.message : err}`);
+      }
+      if (missing.length > 1) await new Promise((r) => setTimeout(r, 150));
+    }
+    if (missing.length)
+      console.log(`resolved ${missing.length} rule groups (${store.ruleCount()} cached)`);
+    return json(Object.fromEntries(known), 200, accept);
   }
 
   if (dev && pathname === "/dev/capture" && request.method === "POST") {

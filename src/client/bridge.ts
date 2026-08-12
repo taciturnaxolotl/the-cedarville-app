@@ -105,3 +105,25 @@ export async function liveSeats(
     Record<string, { available: number; capacity: number; status: string }>
   >;
 }
+
+/**
+ * Expands requirement groups whose eligible courses Colleague keeps inside a
+ * rule. Sends catalog coordinates only — never a transcript — and the server
+ * caches the answer, which is the same for every student.
+ */
+export async function resolveRules(
+  ids: { requirement: string; subrequirement: string; group: string }[],
+): Promise<Record<string, string[]>> {
+  if (ids.length === 0) return {};
+  try {
+    const res = await fetch("/rules/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(ids.slice(0, 60)),
+    });
+    return res.ok ? ((await res.json()) as Record<string, string[]>) : {};
+  } catch {
+    // An unexpanded requirement is still shown; it just stays unplanned.
+    return {};
+  }
+}

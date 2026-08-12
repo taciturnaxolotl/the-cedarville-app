@@ -26,7 +26,17 @@ function renderGroup(group: Group): HTMLElement {
   ].filter(Boolean) as string[];
   if (wants.length) head.append(tag(wants.join(", ")));
 
-  if (group.constraint.kind === "rule-based") head.append(tag("check with advisor", "rule"));
+  if (group.constraint.kind === "rule-based") {
+    // Not "ask someone": the school evaluates this correctly on its own. We
+    // simply cannot show the options, because Colleague keeps the eligible
+    // course list inside a server-side rule and never sends it.
+    const label = tag("no course list", "rule");
+    label.title =
+      `Colleague decides this with rule ${group.constraint.ruleIds.join(", ") || "(unnamed)"} ` +
+      `and does not publish which courses qualify. Self-Service still counts it correctly; ` +
+      `this planner just cannot list your choices.`;
+    head.append(label);
+  }
   if (group.status.planning !== "NotPlanned" && group.status.completion !== "Completed") {
     head.append(tag("on your plan", "planned"));
   }

@@ -170,7 +170,7 @@ describe("tree view", () => {
   test("shows a rule-based group as advisory rather than hiding it", () => {
     tree.mount(root, { trees: [treeOf("BS.CYOPR")] });
     expect(root.textContent).toContain("One lab from the biological sciences");
-    expect(root.textContent).toContain("check with advisor");
+    expect(root.textContent).toContain("no course list");
   });
 
   test("carries completion on the dot and planning on a tag", () => {

@@ -25,14 +25,20 @@ another tab, and click capture.
     src/requirements.ts  Ellucian's 40-field Group as a tagged union
     src/merge.ts         which course satisfies a requirement in both majors
     src/schedule.ts      meeting times, seat counts, and date-aware conflicts
+    src/catalog.ts       the one shape that is public rather than personal
+    src/server/store.ts  SQLite cache of the section catalog
+    src/client/crawl.ts  the fetch loop: cache-aware, paced, cancellable
     src/client/          the planner: no framework, one CSS file, mount/destroy views
 
 The split is by change rate. Auth bridging is stable and security-sensitive;
 the planner changes every time we learn something new about Colleague. The two
 halves share only `types.ts`.
 
-Nothing is uploaded. There is no API and no database; a capture lives in the
-student's own `localStorage`.
+Two kinds of data, and only one of them is yours. Section times, seats and
+instructors are identical for every student, so they are cached in SQLite on
+the server and one student's crawl spares everyone else's. An evaluation is a
+student record and never leaves their browser. There is no account system
+because there is nothing here to attach to a person.
 
 ### what it refuses to guess
 
@@ -52,8 +58,12 @@ range and every comparison uses it; a day-and-time check alone invents clashes
 and makes half the catalog look unschedulable.
 
 Loading sections fetches only courses that could still close an open
-requirement, one call per course with a small delay. It is someone's registrar,
-not a load test.
+requirement, skips anything the shared cache already answers, paces itself, and
+can be cancelled. It is someone's registrar, not a load test.
+
+Tests run with `test/setup.ts` preloaded, which pins `CATALOG_DB` to
+`:memory:`. Without it a stray import of `serve.ts` would open the real
+catalog database from a test.
 
 The canonical repo for this is hosted on tangled over at [`https://tangled.org/dunkirk.sh/the-cedarville-app`](https://tangled.org/dunkirk.sh/the-cedarville-app)
 

@@ -340,3 +340,37 @@ label.section.clashes .when {
 .tag.full {
   color: var(--red);
 }
+
+#progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--surface);
+}
+
+progress {
+  flex: 1;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: var(--mantle);
+  appearance: none;
+}
+
+progress::-webkit-progress-bar {
+  border-radius: 3px;
+  background: var(--mantle);
+}
+
+progress::-webkit-progress-value {
+  border-radius: 3px;
+  background: var(--lavender);
+  transition: width 0.15s ease-out;
+}
+
+#progress-text {
+  min-width: 260px;
+  color: var(--subtext);
+  font-size: 11px;
+}

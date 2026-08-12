@@ -193,7 +193,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         "p",
         "muted",
         `no sections offered in ${capture.term} for any open requirement. ` +
-          `${capture.notOffered.length} of ${capture.requested} courses are not taught this term.`,
+          `${capture.notOffered.length} courses are not taught this term.`,
       ),
     );
   }

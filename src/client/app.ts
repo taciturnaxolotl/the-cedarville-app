@@ -7,9 +7,19 @@
  * to send anything to, which is what keeps an academic record out of scope.
  */
 
-import type { Capture, SectionsCapture } from "../content";
+import type { TermCatalog } from "../catalog";
+import type { Capture } from "../content";
 import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
-import { capture, dumpForDev, installed, programs, sections, terms } from "./bridge";
+import {
+  capture,
+  dumpForDev,
+  fetchCached,
+  installed,
+  programs,
+  publishCached,
+  terms,
+} from "./bridge";
+import { Cancelled, crawl, type Progress } from "./crawl";
 import { $ } from "./dom";
 import * as overlap from "./views/overlap";
 import * as schedule from "./views/schedule";
@@ -22,7 +32,7 @@ type ViewName = keyof typeof VIEWS;
 
 let mounted: { destroy(): void } | null = null;
 let trees: ProgramTree[] = [];
-let sectionData: SectionsCapture | undefined;
+let sectionData: TermCatalog | undefined;
 
 const status = $("#status");
 function say(text: string, bad = false) {
@@ -59,7 +69,7 @@ $("#capture").addEventListener("click", async () => {
   try {
     const snapshot = await capture(select.value ? [select.value] : []);
     localStorage.setItem(STORE, JSON.stringify(snapshot));
-    void dumpForDev(snapshot);
+    void dumpForDev("evaluations", snapshot);
     show(snapshot);
     say(`captured ${Object.keys(snapshot.evaluations).length} programs`);
   } catch (err) {
@@ -83,6 +93,24 @@ function candidateCourseIds(): string[] {
   return [...ids];
 }
 
+let crawling: AbortController | null = null;
+
+function showProgress(p: Progress | null) {
+  const box = $("#progress-bar");
+  box.hidden = p === null;
+  $("#cancel").hidden = p === null;
+  if (!p) return;
+
+  const bar = $<HTMLProgressElement>("#bar");
+  bar.value = p.done;
+  bar.max = Math.max(p.total, 1);
+  $("#progress-text").textContent =
+    `${p.done}/${p.total}${p.current ? `  ${p.current}` : ""}` +
+    (p.cached ? `  ·  ${p.cached} already cached` : "");
+}
+
+$("#cancel").addEventListener("click", () => crawling?.abort());
+
 $("#load-sections").addEventListener("click", async () => {
   const button = $<HTMLButtonElement>("#load-sections");
   const term = $<HTMLSelectElement>("#term").value;
@@ -92,18 +120,36 @@ $("#load-sections").addEventListener("click", async () => {
   if (courseIds.length === 0) return say("capture your requirements first", true);
 
   button.disabled = true;
-  say(`fetching sections for ${courseIds.length} courses… this takes a minute`);
+  crawling = new AbortController();
+  say("checking the shared cache…");
+
   try {
-    const data = await sections(courseIds, term);
-    sectionData = data;
-    localStorage.setItem(SECTIONS, JSON.stringify(data));
-    void dumpForDev({ kind: "sections", ...data });
+    // Anything another student already fetched costs this one nothing.
+    const have = (await fetchCached(term, courseIds)) ?? undefined;
+    const catalog = await crawl({
+      courseIds,
+      term,
+      have,
+      signal: crawling.signal,
+      onProgress: showProgress,
+    });
+
+    sectionData = catalog;
+    localStorage.setItem(SECTIONS, JSON.stringify(catalog));
+    void publishCached(catalog);
+    void dumpForDev("catalog", catalog);
     showView("schedule");
-    const count = Object.keys(data.sections).length;
-    say(`${count} courses offered in ${term}, ${data.notOffered.length} not taught`);
+
+    const offered = Object.keys(catalog.sections).length;
+    say(`${offered} courses offered in ${term}, ${catalog.notOffered.length} not taught`);
   } catch (err) {
-    say(err instanceof Error ? err.message : String(err), true);
+    say(
+      err instanceof Cancelled ? "cancelled" : String(err instanceof Error ? err.message : err),
+      err instanceof Cancelled ? false : true,
+    );
   } finally {
+    showProgress(null);
+    crawling = null;
     button.disabled = false;
   }
 });
@@ -114,7 +160,7 @@ async function init() {
   const cachedSections = localStorage.getItem(SECTIONS);
   if (cachedSections) {
     try {
-      sectionData = JSON.parse(cachedSections) as SectionsCapture;
+      sectionData = JSON.parse(cachedSections) as TermCatalog;
     } catch {
       localStorage.removeItem(SECTIONS);
     }

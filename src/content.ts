@@ -64,52 +64,32 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
 }
 
 /**
- * Sections for a set of courses, in one term.
+ * Which sections each course has in a term. One request, no crawl.
  *
- * Crawling the whole catalog would be hundreds of requests against the
- * school's SIS for data we mostly do not want. The caller passes the courses
- * that could actually satisfy an open requirement, which is a couple of
- * hundred at most and usually far fewer.
+ * The crawl loop itself lives in the app: pacing, ordering, cancellation and
+ * progress are decisions about user experience, not about fetching, and this
+ * side stays small enough to audit.
  */
-async function fetchSections(courseIds: string[], term: string): Promise<SectionsCapture> {
+async function sectionIdsFor(courseIds: string[], term: string): Promise<CourseSections[]> {
   const wanted = [...new Set(courseIds)];
-  const sections: Record<string, SectionsResponse> = {};
-  const missing: string[] = [];
-
-  // One search resolves every course's section ids; then one call per course.
   const search = await api.searchCourses({
     courseIds: wanted,
     terms: [term],
     quantityPerPage: Math.max(wanted.length, 1),
   });
 
-  for (const course of search.Courses ?? []) {
-    const ids = course.MatchingSectionIds ?? [];
-    if (ids.length === 0) {
-      missing.push(course.Id);
-      continue;
-    }
-    sections[course.Id] = await api.sections(course.Id, ids);
-    // Deliberately unhurried: this is someone's registrar, not a load test.
-    await new Promise((resolve) => setTimeout(resolve, 120));
-  }
-
-  return {
-    capturedAt: new Date().toISOString(),
-    term,
-    requested: wanted.length,
-    /** Courses with no section offered in this term. */
-    notOffered: missing,
-    sections,
-  };
+  return (search.Courses ?? []).map((course) => ({
+    courseId: course.Id,
+    courseName: `${course.SubjectCode}-${course.Number}`,
+    sectionIds: course.MatchingSectionIds ?? [],
+  }));
 }
 
-export interface SectionsCapture {
-  capturedAt: string;
-  term: string;
-  requested: number;
-  notOffered: string[];
-  sections: Record<string, SectionsResponse>;
+export interface CourseSections {
+  courseId: string;
+  courseName: string;
+  /** Empty when the course is not taught this term. */
+  sectionIds: string[];
 }
 
 export type Request =
@@ -117,7 +97,8 @@ export type Request =
   | { type: "programs" }
   | { type: "terms" }
   | { type: "capture"; whatIf?: string[] }
-  | { type: "sections"; courseIds: string[]; term: string };
+  | { type: "section-ids"; courseIds: string[]; term: string }
+  | { type: "sections"; courseId: string; sectionIds: string[] };
 
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string; signedOut?: boolean };
 
@@ -126,7 +107,8 @@ export interface ReplyMap {
   programs: ProgramSummary[];
   terms: { code: string; description: string }[];
   capture: Capture;
-  sections: SectionsCapture;
+  "section-ids": CourseSections[];
+  sections: SectionsResponse;
 }
 
 chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
@@ -149,8 +131,10 @@ chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
         }
         case "capture":
           return { ok: true, data: await capture(msg.whatIf) };
+        case "section-ids":
+          return { ok: true, data: await sectionIdsFor(msg.courseIds, msg.term) };
         case "sections":
-          return { ok: true, data: await fetchSections(msg.courseIds, msg.term) };
+          return { ok: true, data: await api.sections(msg.courseId, msg.sectionIds) };
       }
     } catch (err) {
       return {

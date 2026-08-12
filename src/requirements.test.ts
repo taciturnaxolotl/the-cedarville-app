@@ -6,6 +6,8 @@ import {
   coursesNeeded,
   coursesNeededAcross,
   creditOverflow,
+  directiveFor,
+  directivesIn,
   enumeratedCourseIds,
   expectedCredits,
   gaps,
@@ -1276,5 +1278,75 @@ describe("what a course really costs the cover", () => {
     );
     const { courses } = coursesNeededAcross([tree], { credits: () => 3, have: new Set() });
     expect(courses.size).toBe(1);
+  });
+});
+
+describe("a choice the prose has already made", () => {
+  // Both texts are verbatim from the BS.CMPSC evaluation.
+  const PHYS =
+    "Select one course (4 credit hours) - Students pursuing the Computer Science/Cyber Operations double major must take PHYS-2120.";
+  const CAPSTONE =
+    "Computer Science majors should complete CS-4810. Computer Science/Cyber Operations double majors should complete CY-4810. (3 credit hours)";
+
+  test("reads the programs and the course out of the text", () => {
+    expect(directivesIn(PHYS)).toEqual([
+      { programs: ["Computer Science", "Cyber Operations"], course: "PHYS-2120" },
+    ]);
+  });
+
+  test("applies only when every named program is being pursued", () => {
+    expect(directiveFor(PHYS, new Set(["Computer Science"]))).toBeUndefined();
+    expect(directiveFor(PHYS, new Set(["Cyber Operations"]))).toBeUndefined();
+    expect(directiveFor(PHYS, new Set(["Computer Science", "Cyber Operations"]))?.course).toBe(
+      "PHYS-2120",
+    );
+  });
+
+  test("the most specific rule wins, since the same group states both", () => {
+    expect(directiveFor(CAPSTONE, new Set(["Computer Science"]))?.course).toBe("CS-4810");
+    expect(directiveFor(CAPSTONE, new Set(["Computer Science", "Cyber Operations"]))?.course).toBe(
+      "CY-4810",
+    );
+  });
+
+  test("collapses the pool to the mandated course", () => {
+    const tree = normalize(
+      program("CS", [
+        group({
+          DisplayText: PHYS,
+          FromCourses: [course("1", "BIO", "1115"), course("2", "PHYS", "2120")],
+          MinCourses: 1,
+          MinCredits: 4,
+        }),
+      ]),
+    );
+    const both = new Set(["Computer Science", "Cyber Operations"]);
+    const solved = coursesNeededAcross([tree], {
+      credits: () => 4,
+      have: new Set(),
+      pursuing: both,
+    });
+    expect([...solved.courses]).toEqual(["PHYS-2120"]);
+    expect(solved.choices[0]?.mandated).toBe("PHYS-2120");
+  });
+
+  test("leaves a real choice alone for a single major", () => {
+    const tree = normalize(
+      program("CS", [
+        group({
+          DisplayText: PHYS,
+          FromCourses: [course("1", "BIO", "1115"), course("2", "PHYS", "2120")],
+          MinCourses: 1,
+          MinCredits: 4,
+        }),
+      ]),
+    );
+    const solved = coursesNeededAcross([tree], {
+      credits: () => 4,
+      have: new Set(),
+      pursuing: new Set(["Computer Science"]),
+    });
+    expect(solved.choices[0]?.mandated).toBeUndefined();
+    expect(solved.choices[0]?.pool).toHaveLength(2);
   });
 });

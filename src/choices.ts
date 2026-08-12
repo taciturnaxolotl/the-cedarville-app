@@ -82,6 +82,11 @@ export interface RankedChoice {
   credits: number;
   ids: Unenumerable["ids"];
   /**
+   * Set when the group's text names the course this combination of programs
+   * must take, so the pool below is one course by rule rather than by choice.
+   */
+  mandated?: string;
+  /**
    * Courses in this pool the student has already passed or is taking. They
    * never appear as candidates — there is nothing to decide about a course you
    * have done — but they are why a requirement can be met with an empty-looking
@@ -359,6 +364,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
       text: choice.text,
       credits: choice.credits,
       ids: choice.ids,
+      ...(choice.mandated ? { mandated: choice.mandated } : {}),
       satisfiedBy,
       // Cheapest in terms first; anything that does not finish at all sorts
       // last, however few credits it looks like.

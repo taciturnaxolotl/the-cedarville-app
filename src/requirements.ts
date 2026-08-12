@@ -554,6 +554,12 @@ export interface NeedOptions {
    */
   tracks?: ReadonlyMap<string, readonly string[]>;
   /**
+   * Majors and minors the student is pursuing, named as the catalog names
+   * them. Some groups state in prose that a particular combination must take
+   * a particular course, and without this that reads as a free choice.
+   */
+  pursuing?: ReadonlySet<string>;
+  /**
    * Courses the student has decided to take, entering the cover as if already
    * bought. Everything they satisfy then comes free, which is what lets the
    * cost of a choice be measured: solve without the pin, solve with it, and
@@ -780,10 +786,60 @@ export interface Shortfall {
   pool: string[];
 }
 
+/**
+ * A rule Colleague states in prose, naming who must take what.
+ *
+ * A handful of groups are only nominally a choice. "Select one course —
+ * students pursuing the Computer Science/Cyber Operations double major must
+ * take PHYS-2120" offers `BIO-1115` and `PHYS-2120`, and for a double major
+ * exactly one of those is allowed. Colleague encodes none of that; it is
+ * written in the display text and enforced by an advisor.
+ *
+ * The phrasing is regular enough to read, and symmetric — the same group tells
+ * a single-major student to take the other course — so the most specific rule
+ * that matches the programs on the table wins.
+ */
+export interface Directive {
+  /** Program names as the text gives them: "Computer Science", "Cyber Operations". */
+  programs: string[];
+  course: string;
+}
+
+const DIRECTIVE =
+  /(?:students pursuing the\s+)?([A-Za-z][A-Za-z ]*(?:\/[A-Za-z][A-Za-z ]*)*?)\s+(?:double\s+)?majors?\s+(?:must take|should complete|are required to take)\s+([A-Z]{2,5}-\d{4}[A-Z]?)/gi;
+
+export function directivesIn(text: string): Directive[] {
+  return [...text.matchAll(DIRECTIVE)].map((m) => ({
+    programs: (m[1] ?? "")
+      .split("/")
+      // The name runs greedily up to "majors", so "Cyber Operations double
+      // majors" leaves "double" clinging to the last program.
+      .map((p) => p.replace(/\s+double$/i, "").trim())
+      .filter(Boolean),
+    course: m[2] ?? "",
+  }));
+}
+
+/**
+ * The directive that applies, which is the most specific one whose programs
+ * the student is actually pursuing. None means the group is a real choice.
+ */
+export function directiveFor(text: string, programs: ReadonlySet<string>): Directive | undefined {
+  const lower = new Set([...programs].map((p) => p.toLowerCase()));
+  return directivesIn(text)
+    .filter((d) => d.programs.length && d.programs.every((p) => lower.has(p.toLowerCase())))
+    .sort((a, b) => b.programs.length - a.programs.length)[0];
+}
+
 /** A group that offers a choice, carried until the cover can solve them together. */
 export interface OpenChoice {
   /** Program this came from, so a combined solve can say who wants it. */
   program: string;
+  /**
+   * Set when the group's own text names the course a student on these
+   * programs must take, which reduces the pool to one.
+   */
+  mandated?: string;
   /** Colleague's own wording for the requirement. */
   text: string;
   pool: string[];
@@ -913,10 +969,15 @@ function walkProgram(
         if (c.kind === "take-all") {
           for (const x of c.courses) if (!options.have.has(x.CourseName)) courses.add(x.CourseName);
         } else if (c.kind === "choose-from") {
+          // A group whose text names the combination the student is pursuing
+          // is not a choice for them, whatever the pool says.
+          const mandate = options.pursuing && directiveFor(group.text, options.pursuing)?.course;
+          const pool = c.courses.map((x) => x.CourseName);
           choices.push({
             program: tree.code,
             text: group.text || requirement.text || group.code,
-            pool: c.courses.map((x) => x.CourseName),
+            ...(mandate && pool.includes(mandate) ? { mandated: mandate } : {}),
+            pool: mandate && pool.includes(mandate) ? [mandate] : pool,
             credits: group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? ""),
             ids: {
               requirement: group.requirementCode,

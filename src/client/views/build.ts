@@ -312,6 +312,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       have,
       resolved,
       pinned: new Set(store.get().pinned),
+      // Some groups state in prose which course a given combination must
+      // take, and only the set of programs on the table can decide that.
+      pursuing: new Set(current.flatMap(namesOf)),
       tracks: new Map(Object.entries(store.get().tracks).map(([k, v]) => [k, [v]])),
       graph,
       offeredIn,
@@ -620,6 +623,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           head.append(document.createTextNode(tidy(choice.text)));
           head.append(el("span", "cr", `${choice.credits} cr`));
           head.append(tag(choice.program, "prog"));
+          if (choice.mandated) {
+            const badge = tag("required for this combination", "prog");
+            badge.title = tidy(choice.text);
+            head.append(badge);
+          }
           if (met.length) {
             const badge = tag("met", "free");
             badge.title = `${met.map((c) => c.code).join(" and ")} already covers this`;

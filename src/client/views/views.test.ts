@@ -1342,3 +1342,44 @@ describe("build view — a row stays scannable", () => {
     expect((badge.title ?? "").length).toBeGreaterThan(badge.textContent!.length);
   });
 });
+
+describe("build view — a choice the prose has already made", () => {
+  const PHYS =
+    "Select one course (4 credit hours) - Students pursuing the Computer Science/Cyber Operations double major must take PHYS-2120.";
+  const cs = (majors: string[]) =>
+    normalize(
+      program(
+        "BS.CMPSC",
+        [
+          group({
+            Id: "sci",
+            DisplayText: PHYS,
+            FromCourses: [course("1", "BIO", "1115"), course("2", "PHYS", "2120")],
+            MinCourses: 1,
+            MinCredits: 4,
+          }),
+        ],
+        { Majors: majors },
+      ),
+    );
+
+  test("marks the group required and offers only the mandated course", () => {
+    build.mount(root, {
+      trees: [cs(["Computer Science", "Cyber Operations"])],
+      enrolled: ["BS.CMPSC"],
+    });
+    const box = root.querySelector(".choice") as unknown as HTMLElement;
+    expect(box.querySelector("h3")?.textContent).toContain("required for this combination");
+    const codes = Array.from(box.querySelectorAll(".candidate b")).map((n) => n.textContent);
+    expect(codes).toEqual(["PHYS-2120"]);
+  });
+
+  test("a single major still gets the full choice", () => {
+    build.mount(root, { trees: [cs(["Computer Science"])], enrolled: ["BS.CMPSC"] });
+    const codes = Array.from(root.querySelectorAll(".choice .candidate b")).map(
+      (n) => n.textContent,
+    );
+    expect(codes.sort()).toEqual(["BIO-1115", "PHYS-2120"]);
+    expect(root.textContent).not.toContain("required for this combination");
+  });
+});

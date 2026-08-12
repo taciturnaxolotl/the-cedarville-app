@@ -9,26 +9,34 @@
   <body>
     <header>
       <h1>the cedarville app</h1>
-      <p id="who">not connected</p>
+      <p id="who"></p>
     </header>
 
     <section id="controls">
-      <label for="whatif">evaluate a second major</label>
-      <select id="whatif" disabled>
-        <option value="">none</option>
-      </select>
-      <button id="capture" type="button" disabled>capture</button>
+      <div class="field">
+        <label for="term">term</label>
+        <select id="term" disabled>
+          <option value="">loading…</option>
+        </select>
+      </div>
 
-      <label for="term">term</label>
-      <select id="term" disabled>
-        <option value="">none</option>
-      </select>
-      <button id="load-sections" type="button" disabled>load catalog</button>
-      <span id="status"></span>
+      <div class="field">
+        <label for="whatif">second major</label>
+        <select id="whatif" disabled>
+          <option value="">none</option>
+        </select>
+      </div>
+
+      <div class="actions">
+        <button id="capture" type="button" disabled>capture requirements</button>
+        <button id="load-sections" type="button" disabled>load catalog</button>
+      </div>
     </section>
 
+    <p id="status" role="status" aria-live="polite"></p>
+
     <section id="progress-bar" hidden>
-      <progress id="bar" value="0" max="1"></progress>
+      <progress id="bar"></progress>
       <span id="progress-text"></span>
     </section>
 

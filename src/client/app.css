@@ -20,7 +20,8 @@
 }
 
 body {
-  margin: 0;
+  margin: 0 auto;
+  max-width: 1400px;
   padding: 28px 32px 64px;
   background: var(--base);
   color: var(--text);
@@ -58,15 +59,46 @@ h1 {
 
 #controls {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-bottom: 18px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--surface);
 }
 
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
 label {
+  color: var(--overlay);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#status {
+  margin: 10px 0 0;
+  min-height: 1.4em;
   color: var(--subtext);
   font-size: 12px;
+}
+
+#status.err {
+  color: var(--red);
+}
+
+#status.ok {
+  color: var(--green);
 }
 
 select,
@@ -80,11 +112,21 @@ button {
 }
 
 select {
-  max-width: 320px;
+  max-width: 300px;
+}
+
+select:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--lavender);
+  outline-offset: 2px;
 }
 
 button {
   cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    opacity 0.12s ease;
 }
 
 button:hover:not(:disabled) {
@@ -382,4 +424,71 @@ progress::-webkit-progress-value {
 .seats-note {
   margin: 2px 0 8px;
   font-size: 11px;
+}
+
+/* Rows are dense; give the eye a rhythm and a hit target. */
+label.section {
+  border-radius: 3px;
+  transition: background 0.1s ease;
+}
+
+label.section:has(input:checked) {
+  background: color-mix(in oklch, var(--lavender) 12%, transparent);
+}
+
+label.section:has(input:checked) .when {
+  color: var(--lavender);
+}
+
+/* A picked section outranks a clash warning: you chose it deliberately. */
+label.section.clashes:not(:has(input:checked)) .when {
+  color: var(--overlay);
+  text-decoration: line-through;
+}
+
+details.req > summary {
+  padding: 5px 0;
+}
+
+details.req[open] > summary {
+  color: var(--lavender);
+}
+
+@media (max-width: 720px) {
+  body {
+    padding: 20px 16px 48px;
+  }
+
+  #controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions {
+    margin-left: 0;
+  }
+
+  select {
+    max-width: none;
+  }
+
+  .when {
+    min-width: 0;
+  }
+
+  label.section {
+    flex-wrap: wrap;
+  }
+
+  .pool .sides {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
+/* Respect a system preference rather than animating regardless. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }

@@ -61,13 +61,27 @@ function refresh(term: string): Promise<number> {
   return job;
 }
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+/**
+ * A term of raw Colleague JSON is about ten megabytes, and it is extremely
+ * repetitive, so it gzips to a small fraction of that. Bun.serve does no
+ * compression of its own, and shipping ten megabytes to a page that then has
+ * to parse it is the single slowest thing this app could do.
+ */
+function json(body: unknown, status = 200, accept = ""): Response {
+  const text = JSON.stringify(body);
+  const headers: Record<string, string> = { "content-type": "application/json" };
+
+  if (accept.includes("gzip") && text.length > 4096) {
+    const zipped = Bun.gzipSync(text);
+    headers["content-encoding"] = "gzip";
+    headers.vary = "accept-encoding";
+    return new Response(zipped, { status, headers });
+  }
+  return new Response(text, { status, headers });
+}
 
 async function api(request: Request, pathname: string): Promise<Response | null> {
+  const accept = request.headers.get("accept-encoding") ?? "";
   if (pathname === "/catalog" && request.method === "GET") {
     return json({ terms: store.stats(), refreshing: [...running.keys()] });
   }
@@ -85,7 +99,7 @@ async function api(request: Request, pathname: string): Promise<Response | null>
     if (!courses) return json({});
     try {
       // Deliberately uncached: a stale seat count is worse than a slow one.
-      return json(await liveSeats(decodeURIComponent(seatsTerm), courses.split(",")));
+      return json(await liveSeats(decodeURIComponent(seatsTerm), courses.split(",")), 200, accept);
     } catch (err) {
       return json({ error: err instanceof Error ? err.message : String(err) }, 502);
     }
@@ -94,7 +108,11 @@ async function api(request: Request, pathname: string): Promise<Response | null>
   const term = /^\/catalog\/([^/]+)$/.exec(pathname)?.[1];
   if (term && request.method === "GET") {
     const wanted = new URL(request.url).searchParams.get("courses");
-    return json(store.read(decodeURIComponent(term), wanted ? wanted.split(",") : undefined));
+    return json(
+      store.read(decodeURIComponent(term), wanted ? wanted.split(",") : undefined),
+      200,
+      accept,
+    );
   }
 
   if (dev && pathname === "/dev/capture" && request.method === "POST") {

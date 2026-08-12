@@ -4,12 +4,14 @@ import {
   absorbInto,
   accepts,
   coursesNeeded,
+  creditOverflow,
   enumeratedCourseIds,
   gaps,
   groupKey,
   levelOf,
   normalize,
   openGroups,
+  sharedCredits,
 } from "./requirements";
 import type { CourseRef, EvaluationResponse, RawGroup } from "./types";
 
@@ -839,5 +841,146 @@ describe("rule groups joining the cover", () => {
     const { courses, unenumerable } = coursesNeeded(tree, { credits, have: new Set(), resolved });
     expect(courses.size).toBe(0);
     expect(unenumerable[0]!.bucket).toBe(true);
+  });
+});
+
+describe("credits earned past the size of the slot", () => {
+  const applied = (name: string, credit: number) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: credit,
+    VerifiedGrade: "A",
+    Term: "2025FA",
+    IsCompletedCredit: true,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+  });
+
+  test("counts the excess, not the course", () => {
+    // "One approved quantitative course (3 credit hours)" filled with a
+    // four-credit calculus course is one credit the catalog never budgeted.
+    const tree = normalize(
+      program("A", [
+        group({ MinCredits: 3, AppliedAcademicCredits: [applied("MATH-1705", 4)] }),
+        group({ MinCredits: 3, AppliedAcademicCredits: [applied("HON-1010", 5)] }),
+      ]),
+    );
+    expect(creditOverflow(tree)).toBe(3);
+  });
+
+  test("a slot filled exactly, or under, contributes nothing", () => {
+    const tree = normalize(
+      program("A", [
+        group({ MinCredits: 3, AppliedAcademicCredits: [applied("ENG-1400", 3)] }),
+        group({ MinCredits: 6, AppliedAcademicCredits: [applied("GMTH-1020", 3)] }),
+      ]),
+    );
+    expect(creditOverflow(tree)).toBe(0);
+  });
+
+  test("a withdrawn course never counts", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          MinCredits: 3,
+          AppliedAcademicCredits: [{ ...applied("CS-1210", 9), IsWithdrawn: true }],
+        }),
+      ]),
+    );
+    expect(creditOverflow(tree)).toBe(0);
+  });
+
+  test("a group stating no credit minimum cannot overflow", () => {
+    // Take-all groups size themselves by their course list, so there is no
+    // slot to exceed and no excess to claim.
+    const tree = normalize(
+      program("A", [
+        group({
+          Courses: [course("1", "CS", "1210")],
+          AppliedAcademicCredits: [applied("CS-1210", 4)],
+        }),
+      ]),
+    );
+    expect(creditOverflow(tree)).toBe(0);
+  });
+});
+
+describe("courses Colleague already counts twice", () => {
+  const applied = (name: string, credit: number) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: credit,
+    VerifiedGrade: "A",
+    Term: "2025FA",
+    IsCompletedCredit: true,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+  });
+
+  /** Two requirements, so the same course can appear under both. */
+  const twoRequirements = (groupsA: RawGroup[], groupsB: RawGroup[]): EvaluationResponse => {
+    const base = program("A", groupsA);
+    const [first] = base.Program.Requirements;
+    return {
+      ...base,
+      Program: {
+        ...base.Program,
+        Requirements: [
+          first!,
+          {
+            ...first!,
+            Id: "GENED",
+            Code: "GENED",
+            Subrequirements: [{ ...first!.Subrequirements[0]!, Groups: groupsB }],
+          },
+        ],
+      },
+    };
+  };
+
+  test("reports a course applied under two requirements", () => {
+    const tree = normalize(
+      twoRequirements(
+        [group({ AppliedAcademicCredits: [applied("PHYS-2110", 4)] })],
+        [group({ AppliedAcademicCredits: [applied("PHYS-2110", 4)] })],
+      ),
+    );
+    expect(sharedCredits(tree)).toEqual([
+      { course: "PHYS-2110", credits: 4, requirements: ["A-r", "GENED"] },
+    ]);
+  });
+
+  test("a course in one requirement twice is not shared", () => {
+    // The same requirement listing it under two groups is bookkeeping, not
+    // a credit counted toward two different things.
+    const tree = normalize(
+      program("A", [
+        group({ AppliedAcademicCredits: [applied("CS-1210", 3)] }),
+        group({ AppliedAcademicCredits: [applied("CS-1210", 3)] }),
+      ]),
+    );
+    expect(sharedCredits(tree)).toEqual([]);
+  });
+
+  test("a withdrawn course never counts as shared", () => {
+    const tree = normalize(
+      twoRequirements(
+        [group({ AppliedAcademicCredits: [applied("PHYS-2110", 4)] })],
+        [group({ AppliedAcademicCredits: [{ ...applied("PHYS-2110", 4), IsWithdrawn: true }] })],
+      ),
+    );
+    expect(sharedCredits(tree)).toEqual([]);
   });
 });

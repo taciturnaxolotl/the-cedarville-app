@@ -14,9 +14,12 @@ import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src
 import {
   completedCourses,
   coursesNeeded,
+  creditOverflow,
   groupKey,
   inProgressCourses,
   normalize,
+  sharedCredits,
+  walkGroups,
 } from "../src/requirements";
 import { offeringsFromListing } from "../src/schedule";
 import type { Book } from "../src/server/book";
@@ -162,11 +165,9 @@ for (const tree of trees) {
   const printed = book && matchProgram(book.programs, new Set([...need, ...have]));
 
   if (plan.totalCredits > toGo) {
-    w(`This schedules ${plan.totalCredits} credits against a ${toGo}-credit gap, so read the date`);
-    w("as an upper bound rather than a promise. A degree minimum is a floor, and the named");
-    w("requirements can sum past it: one course often satisfies a major requirement and a");
-    w("general-education slot at once. The planner counts each course once, but cannot tell");
-    w("which *other* slot it also fills, so it schedules for both.");
+    w(`This schedules ${plan.totalCredits} credits against a ${toGo}-credit gap. A degree minimum`);
+    w("is a floor rather than a budget, and the reconciliation below accounts for the gap");
+    w("in full, so treat the date as an upper bound but not a wild one.");
     w();
   }
 
@@ -176,11 +177,30 @@ for (const tree of trees) {
     const ceiling = creditCeiling(printed);
     const projected = tree.credits.completed + tree.credits.inProgress + plan.totalCredits;
     const overlap = impliedOverlap(printed) + absorbed(printed, price);
+    // Credits already earned above the size of the slot they fill. The
+    // catalog sums slot sizes; a transcript sums courses, and the two differ.
+    const over = creditOverflow(tree);
+    const allowance = overlap + over;
 
     w(
       `Checked against the ${book.year} catalog, page ${printed.page} (“${printed.title}”, ${totalCredits(printed)} credits).`,
     );
     w();
+    if (over) {
+      w(`You have earned **${over} credits more than the requirements they fill asked for**, so`);
+      w("the degree total is not a ceiling you can be held to exactly:");
+      w();
+      for (const { group, subrequirement } of walkGroups(tree)) {
+        const min = group.min.credits ?? 0;
+        const applied = group.applied.filter((c) => !c.IsWithdrawn);
+        const got = applied.reduce((n, c) => n + (c.Credit ?? 0), 0);
+        if (!min || got <= min) continue;
+        w(
+          `- ${applied.map((c) => `${c.CourseName} (${c.Credit})`).join(", ")} fills the ${min}-credit ${subrequirement.code} slot, ${(got - min).toFixed(1)} over`,
+        );
+      }
+      w();
+    }
     if (overlap) {
       w(`The catalog counts **${overlap} credits twice**, so a plan may legitimately exceed the`);
       w("degree total by that much:");
@@ -189,17 +209,36 @@ for (const tree of trees) {
         w(`- ${label(d.course)} also pays for the ${d.requirement} general education requirement`);
       w();
     } else {
-      w("The catalog's own arithmetic closes exactly: no course is declared as counting toward");
-      w("two requirements. Anything this plan schedules past the degree total is over-scheduling");
-      w("on our side rather than a requirement filling two slots.");
+      w("The catalog's own arithmetic closes exactly: it footnotes no course as counting toward");
+      w("two requirements.");
       w();
     }
-    if (ceiling !== undefined && projected > ceiling + overlap) {
+
+    // The catalog under-reports this badly; the evaluation does not.
+    const shared = sharedCredits(tree);
+    if (shared.length) {
+      w("Your evaluation, though, already applies these to two requirements each:");
+      w();
+      for (const s of shared)
+        w(`- ${label(s.course)} (${s.credits}) counts toward ${s.requirements.join(" and ")}`);
+      w();
+      w("Colleague states this only for coursework already done, so it explains the credits");
+      w("behind you rather than predicting which of the courses ahead will do the same.");
+      w();
+    }
+    if (ceiling !== undefined && projected > ceiling + allowance) {
       w(
-        `⚠️ This plan reaches **${projected} credits** against a stated ceiling of ${ceiling + overlap}.`,
+        `⚠️ This plan reaches **${projected} credits** against a stated ceiling of ${ceiling + allowance}.`,
       );
-      w(`That ${(projected - ceiling - overlap).toFixed(1)}-credit excess is a bug in this model,`);
+      w(
+        `That ${(projected - ceiling - allowance).toFixed(1)}-credit excess is a bug in this model,`,
+      );
       w("not a feature of the degree. Treat the finish date as pessimistic.");
+      w();
+    } else if (ceiling !== undefined) {
+      w(
+        `This plan reaches ${projected} credits, inside the ${ceiling + allowance} the catalog allows for.`,
+      );
       w();
     }
   }

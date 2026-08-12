@@ -393,6 +393,70 @@ export function completedCourses(tree: ProgramTree): Set<string> {
   return done;
 }
 
+/**
+ * Credits earned above what the requirements they fill actually asked for.
+ *
+ * A requirement states a size — "One approved quantitative course (3 credit
+ * hours)" — and a student fills it with whatever course qualifies. Those
+ * rarely match. `MATH-1705` is four credits into that three-credit slot, and
+ * `HON-1010` is five into a three-credit humanities slot.
+ *
+ * The extra credit is real, earned, and counts toward the degree total, but
+ * the catalog's arithmetic never sees it: the printed summary adds up slot
+ * sizes, not the transcript. So a plan can finish every requirement and still
+ * land above the stated total by exactly this much, without a single credit
+ * having been scheduled twice.
+ */
+export function creditOverflow(tree: ProgramTree): number {
+  let over = 0;
+  for (const { group } of walkGroups(tree)) {
+    const min = group.min.credits ?? 0;
+    if (!min) continue;
+    const applied = group.applied
+      .filter((c) => !c.IsWithdrawn)
+      .reduce((n, c) => n + (c.Credit ?? 0), 0);
+    if (applied > min) over += applied - min;
+  }
+  return over;
+}
+
+/** A course the evaluation applies to more than one requirement at once. */
+export interface SharedCourse {
+  course: string;
+  credits: number;
+  /** Requirement codes it counts toward, in the order Colleague listed them. */
+  requirements: string[];
+}
+
+/**
+ * Courses Colleague is already counting twice.
+ *
+ * The printed catalog footnotes this on only a handful of programs, and cyber
+ * operations is not one of them — but the evaluation gives it away for free.
+ * A course that pays for two requirements simply appears under both, so
+ * `PHYS-2110` shows up in general education and in the major, once each.
+ *
+ * The catch is that this only ever describes coursework already done. Nothing
+ * says which of the courses still ahead will land in two places, so this
+ * measures the past rather than predicting the future.
+ */
+export function sharedCredits(tree: ProgramTree): SharedCourse[] {
+  const seen = new Map<string, SharedCourse>();
+  for (const { requirement, group } of walkGroups(tree)) {
+    for (const credit of group.applied) {
+      if (credit.IsWithdrawn) continue;
+      const entry = seen.get(credit.CourseName) ?? {
+        course: credit.CourseName,
+        credits: credit.Credit ?? 0,
+        requirements: [],
+      };
+      if (!entry.requirements.includes(requirement.code)) entry.requirements.push(requirement.code);
+      seen.set(credit.CourseName, entry);
+    }
+  }
+  return [...seen.values()].filter((s) => s.requirements.length > 1);
+}
+
 /** Courses the student is enrolled in now, which satisfy a corequisite. */
 export function inProgressCourses(tree: ProgramTree): Set<string> {
   const now = new Set<string>();

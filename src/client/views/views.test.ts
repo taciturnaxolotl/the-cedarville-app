@@ -520,6 +520,16 @@ describe("build view", () => {
     expect(root.textContent).toContain("capture your requirements first");
   });
 
+  test("labels the enrolled programs once, not once each", () => {
+    build.mount(root, { trees: [treeOf("BS.CYOPR", required), treeOf("BS.CMPEG", required)] });
+    const chips = root.querySelector(".chips") as unknown as HTMLElement;
+    expect(Array.from(chips.querySelectorAll(".tag")).map((n) => n.textContent)).toEqual([
+      "BS.CYOPR",
+      "BS.CMPEG",
+    ]);
+    expect(chips.textContent?.match(/enrolled/g)).toHaveLength(1);
+  });
+
   test("puts the course another program already requires at the top", () => {
     build.mount(root, {
       trees: [treeOf("MAJ", required), treeOf("MIN", elective)],

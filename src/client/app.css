@@ -676,12 +676,18 @@ label.section.clashes:not(:has(input:checked)) .when {
   margin-bottom: 10px;
 }
 
+/* Spacing belongs to the row, not to each chip: a margin on the child leaves
+   the gap collapsed wherever two chips sit next to each other in the markup. */
 .chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
 .chips .tag {
-  margin: 0 6px 0 0;
+  margin: 0;
 }
 
 .tag.on {

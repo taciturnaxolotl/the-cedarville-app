@@ -163,8 +163,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         picker.append(el("h2", undefined, "majors and minors"));
 
         const enrolled = new Set(trees.map((t) => t.code));
+        // One label, then bare codes. Repeating "enrolled" on every chip says
+        // the same word as many times as you have programs.
         const chips = el("div", "chips");
-        for (const t of trees) chips.append(tag(`${t.code} — enrolled`, "on"));
+        chips.append(el("span", "muted", "enrolled"));
+        for (const t of trees) chips.append(tag(t.code, "on"));
         picker.append(chips);
 
         if (!available.length) {

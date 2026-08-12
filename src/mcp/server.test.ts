@@ -206,8 +206,11 @@ describe("planning tools", () => {
   test("planning reads the newest cached term, not a named one", async () => {
     const source = await Bun.file(new URL("./server.ts", import.meta.url).pathname).text();
     const planning = source.slice(source.indexOf("function planningContext"));
-    expect(planning.slice(0, 600)).not.toMatch(/store\.read\("\d{4}(FA|SP|SU)"\)/);
-    expect(planning).toContain("store.stats()");
+    // Whitespace-normalised, because the formatter is free to break the chain
+    // across lines and this should assert on code, not on layout.
+    const flat = planning.replace(/\s+/g, "");
+    expect(flat).not.toMatch(/store\.read\("\d{4}(FA|SP|SU)"\)/);
+    expect(flat).toContain("store.stats()");
   });
 
   test("critical_path is registered only with --personal", async () => {

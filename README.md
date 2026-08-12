@@ -139,6 +139,18 @@ Colleague encodes choice with two counts: a requirement may need only
 `MinGroups` of its groups. That is how tracks, concentrations and "satisfy the
 global-awareness rule any one of six ways" are all expressed.
 
+Choose-from groups are then solved *together* rather than one at a time,
+because Colleague lets a single course count toward several requirements at
+once: three of one student's completed courses are applied to two groups each,
+`MATH-1705` satisfying both the general-education quantitative slot and the
+major's cognates. Picking per group in isolation buys a second course for a
+requirement already met.
+
+That is weighted greedy set cover — take whichever course closes the most
+remaining credit per credit spent. Exact set cover is NP-hard, the greedy
+bound is comfortably good enough for a few dozen requirements, and unlike an
+exact solver its choices stay explainable.
+
 `coursesNeeded` reads those counts and returns the cheapest satisfying path,
 which is what makes the planner work for any major rather than the one it was
 written against. Before it, every alternative looked mandatory — a plan could

@@ -664,3 +664,113 @@ describe("covering a requirement with what is already planned", () => {
     expect(need.size).toBe(2);
   });
 });
+
+describe("covering several choices at once", () => {
+  const credits = (c: string) => (c.endsWith("-4000") ? 4 : 3);
+  const withGroups = (groups: RawGroup[][]) => {
+    const raw = program("A", []);
+    raw.Program.Requirements = [
+      {
+        Id: "r",
+        Code: "R",
+        Description: "R",
+        CompletionStatus: "NotStarted",
+        PlanningStatus: "NotPlanned",
+        MinSubrequirements: null,
+        MinGpa: null,
+        Subrequirements: groups.map((g, i) => sub(`s${i}`, g)),
+      },
+    ] as never;
+    return normalize(raw);
+  };
+
+  /**
+   * Colleague lets one course count toward several requirements at once —
+   * MATH-1705 satisfies the general-education quantitative slot and the
+   * major's cognates together. Solving each group alone buys a second course
+   * for a requirement that is already met.
+   */
+  test("one course satisfies two overlapping choices", () => {
+    const tree = withGroups([
+      [
+        group({
+          FromCourses: [course("1", "AA", "1000"), course("2", "BB", "1000")],
+          MinCredits: 3,
+        }),
+      ],
+      [
+        group({
+          FromCourses: [course("1", "AA", "1000"), course("3", "CC", "1000")],
+          MinCredits: 3,
+        }),
+      ],
+    ]);
+    const { courses } = coursesNeeded(tree, { credits, have: new Set() });
+    // AA-1000 is in both pools, so it should be the only pick.
+    expect([...courses]).toEqual(["AA-1000"]);
+  });
+
+  test("disjoint choices still need one course each", () => {
+    const tree = withGroups([
+      [group({ FromCourses: [course("1", "AA", "1000")], MinCredits: 3 })],
+      [group({ FromCourses: [course("2", "BB", "1000")], MinCredits: 3 })],
+    ]);
+    expect(coursesNeeded(tree, { credits, have: new Set() }).courses.size).toBe(2);
+  });
+
+  test("a required course already covers a choice that accepts it", () => {
+    const tree = withGroups([
+      [group({ Courses: [course("1", "AA", "1000")] })],
+      [
+        group({
+          FromCourses: [course("1", "AA", "1000"), course("2", "BB", "1000")],
+          MinCredits: 3,
+        }),
+      ],
+    ]);
+    // AA-1000 is mandatory anyway, so the choice costs nothing extra.
+    expect([...coursesNeeded(tree, { credits, have: new Set() }).courses]).toEqual(["AA-1000"]);
+  });
+
+  test("completed work satisfies a choice for free", () => {
+    const tree = withGroups([
+      [
+        group({
+          FromCourses: [course("1", "AA", "1000"), course("2", "BB", "1000")],
+          MinCredits: 3,
+        }),
+      ],
+    ]);
+    expect(coursesNeeded(tree, { credits, have: new Set(["BB-1000"]) }).courses.size).toBe(0);
+  });
+
+  test("a larger requirement takes more than one course", () => {
+    const tree = withGroups([
+      [
+        group({
+          FromCourses: [
+            course("1", "AA", "1000"),
+            course("2", "BB", "1000"),
+            course("3", "CC", "1000"),
+          ],
+          MinCredits: 6,
+        }),
+      ],
+    ]);
+    expect(coursesNeeded(tree, { credits, have: new Set() }).courses.size).toBe(2);
+  });
+
+  test("value is credit actually closed, not credit offered", () => {
+    // A 4-credit course against a 3-credit requirement closes three, so it
+    // must not out-rank a 3-credit course that closes the same three.
+    const tree = withGroups([
+      [
+        group({
+          FromCourses: [course("1", "AA", "4000"), course("2", "BB", "1000")],
+          MinCredits: 3,
+        }),
+      ],
+    ]);
+    expect([...coursesNeeded(tree, { credits, have: new Set() }).courses]).toEqual(["BB-1000"]);
+  });
+});

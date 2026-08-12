@@ -500,7 +500,9 @@ function coursesForGroup(group: Group, options: NeedOptions): string[] {
  */
 export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
   const courses = new Set<string>();
-  const unenumerable: Needed["unenumerable"] = [];
+  const unenumerable: Unenumerable[] = [];
+  /** Groups that offer a choice, resolved together rather than one at a time. */
+  const choices: { pool: string[]; credits: number }[] = [];
 
   for (const requirement of tree.requirements) {
     const subs = [...requirement.subrequirements];
@@ -530,10 +532,9 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
 
       for (const group of chosenGroups) {
         if (group.status.completion === "Completed") continue;
-        const kind = group.constraint.kind;
+        const c = group.constraint;
 
-        if (kind === "rule-based" || kind === "filter") {
-          const c = group.constraint;
+        if (c.kind === "rule-based" || c.kind === "filter") {
           const bucket =
             c.kind === "filter" && c.subjects.length === 0 && c.departments.length === 0;
           unenumerable.push({
@@ -551,13 +552,80 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
           });
           continue;
         }
-        for (const code of coursesForGroup(group, options)) {
-          if (!options.have.has(code)) courses.add(code);
+
+        if (c.kind === "take-all") {
+          for (const x of c.courses) if (!options.have.has(x.CourseName)) courses.add(x.CourseName);
+        } else if (c.kind === "choose-from") {
+          choices.push({
+            pool: c.courses.map((x) => x.CourseName),
+            credits: group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? ""),
+          });
         }
       }
     }
   }
+
+  cover(courses, choices, options);
   return { courses, unenumerable };
+}
+
+/**
+ * Satisfies every choose-from group with as few extra credits as possible.
+ *
+ * Solved together rather than one group at a time, because Colleague lets a
+ * single course count toward several requirements at once — MATH-1705 satisfies
+ * the general-education quantitative slot *and* the major's cognates. Picking
+ * per group in isolation buys a second course for a requirement that is already
+ * met, and enough of those push a graduation date out by a term.
+ *
+ * Weighted greedy: repeatedly take whichever course closes the most remaining
+ * credit per credit spent. Exact set cover is NP-hard and the greedy bound is
+ * comfortably good enough for a few dozen requirements — and unlike an exact
+ * solver, its choices stay explainable.
+ */
+function cover(
+  courses: Set<string>,
+  choices: { pool: string[]; credits: number }[],
+  options: NeedOptions,
+): void {
+  const owed = choices.map((choice) => {
+    let left = choice.credits;
+    // Anything already passed, or already required outright, counts first.
+    for (const code of choice.pool) {
+      if (options.have.has(code) || courses.has(code)) left -= options.credits(code);
+    }
+    return { pool: choice.pool, left };
+  });
+
+  for (;;) {
+    const open = owed.filter((o) => o.left > 0);
+    if (open.length === 0) return;
+
+    const candidates = new Set(
+      open.flatMap((o) => o.pool).filter((c) => !courses.has(c) && !options.have.has(c)),
+    );
+    if (candidates.size === 0) return;
+
+    let best: { code: string; value: number } | null = null;
+    for (const code of candidates) {
+      const price = options.credits(code) || 1;
+      // Credit actually closed, not credit offered: a 4-credit course against
+      // a 3-credit requirement closes three.
+      const closed = open
+        .filter((o) => o.pool.includes(code))
+        .reduce((n, o) => n + Math.min(options.credits(code), o.left), 0);
+      const value = closed / price;
+      if (!best || value > best.value || (value === best.value && code < best.code)) {
+        best = { code, value };
+      }
+    }
+    if (!best || best.value <= 0) return;
+
+    courses.add(best.code);
+    for (const o of open) {
+      if (o.pool.includes(best.code)) o.left -= options.credits(best.code);
+    }
+  }
 }
 
 /**

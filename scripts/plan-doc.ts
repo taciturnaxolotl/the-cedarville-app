@@ -15,6 +15,7 @@ import {
   completedCourses,
   coursesNeeded,
   creditOverflow,
+  groupCoverage,
   groupKey,
   inProgressCourses,
   normalize,
@@ -95,6 +96,26 @@ const inProgress = inProgressCourses(cy);
 const have = new Set([...done, ...inProgress]);
 
 const label = (code: string) => `${code}${titles.has(code) ? ` — ${titles.get(code)}` : ""}`;
+
+/** A course code as `accepts` wants it: subject, number and title. */
+const asCourse = (code: string) => {
+  const [subject = "", number = ""] = code.split("-");
+  return {
+    Id: code,
+    SubjectCode: subject,
+    Number: number,
+    Title: titles.get(code) ?? code,
+    CourseName: code,
+    EquatedCourseIds: null,
+    IsPseudoCourse: false,
+  };
+};
+
+/** The group an unenumerable entry came from, found by the ids it carries. */
+const groupAt = (tree: ReturnType<typeof normalize>, ids: { requirement: string; group: string }) =>
+  [...walkGroups(tree)].find(
+    ({ requirement, group }) => requirement.code === ids.requirement && group.id === ids.group,
+  )?.group;
 const out: string[] = [];
 const w = (line = "") => out.push(line);
 
@@ -259,8 +280,18 @@ for (const tree of trees) {
   if (buckets.length) {
     w("Satisfied incidentally by other coursework, not scheduled separately:");
     w();
-    for (const u of buckets)
+    for (const u of buckets) {
       w(`- ${u.credits ? `**${u.credits}cr** ` : ""}${u.text || u.requirement}`);
+      // Not an assertion if we can count it. These groups name a level rather
+      // than a course list, which is exactly what `accepts` can decide.
+      const group = groupAt(tree, u.ids);
+      if (!group) continue;
+      const cover = groupCoverage(group, [...have, ...need].map(asCourse), price);
+      const enough = u.credits === undefined || cover.credits >= u.credits;
+      w(
+        `  <br>_${enough ? "covered" : "**short**"}: ${cover.credits} credits of this plan qualify${cover.unsure ? `, plus ${cover.unsure} that may` : ""} — ${cover.courses.slice(0, 10).join(", ")}${cover.courses.length > 10 ? " …" : ""}_`,
+      );
+    }
     w();
   }
   if (expanded.length) {

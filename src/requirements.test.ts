@@ -7,11 +7,13 @@ import {
   creditOverflow,
   enumeratedCourseIds,
   gaps,
+  groupCoverage,
   groupKey,
   levelOf,
   normalize,
   openGroups,
   sharedCredits,
+  walkGroups,
 } from "./requirements";
 import type { CourseRef, EvaluationResponse, RawGroup } from "./types";
 
@@ -982,5 +984,92 @@ describe("courses Colleague already counts twice", () => {
       ),
     );
     expect(sharedCredits(tree)).toEqual([]);
+  });
+});
+
+describe("crediting a bucket with coursework taken anyway", () => {
+  const cat = (subject: string, num: string): CourseRef => course("x", subject, num);
+
+  test("counts what a level filter certainly accepts", () => {
+    const tree = normalize(program("A", [group({ FromLevels: ["300", "400"], MinCredits: 32 })]));
+    const [g] = [...walkGroups(tree)];
+    const cover = groupCoverage(
+      g!.group,
+      [cat("CS", "3410"), cat("EGCP", "4310"), cat("CS", "1210")],
+      () => 3,
+    );
+    // The 1000-level course is not upper division and must not be counted.
+    expect(cover).toEqual({ credits: 6, unsure: 0, courses: ["CS-3410", "EGCP-4310"] });
+  });
+
+  test("keeps maybes apart from certainties", () => {
+    // A rule attached to the group means Colleague narrows it in ways we
+    // cannot see, so nothing can be claimed outright.
+    const tree = normalize(
+      program("A", [group({ FromLevels: ["300"], MinCredits: 6, HasRules: true })]),
+    );
+    const [g] = [...walkGroups(tree)];
+    const cover = groupCoverage(g!.group, [cat("CS", "3410")], () => 3);
+    expect(cover).toEqual({ credits: 0, unsure: 3, courses: [] });
+  });
+});
+
+describe("choosing a branch by what it adds", () => {
+  const pick1 = (groups: RawGroup[]): EvaluationResponse => {
+    const base = program("A", groups);
+    const [first] = base.Program.Requirements;
+    return {
+      ...base,
+      Program: {
+        ...base.Program,
+        Requirements: [
+          {
+            ...first!,
+            Subrequirements: first!.Subrequirements.map((s) => ({ ...s, MinGroups: 1 })),
+          },
+          // An unconditional requirement, so its take-all courses are owed
+          // whichever branch above wins.
+          {
+            ...first!,
+            Id: "CORE",
+            Code: "CORE",
+            Subrequirements: [
+              {
+                ...first!.Subrequirements[0]!,
+                Id: "core-s",
+                Groups: [group({ Courses: [course("1", "EGCP", "3010")] })],
+              },
+            ],
+          },
+        ],
+      },
+    };
+  };
+
+  test("prefers the branch whose courses the plan already owes", () => {
+    // Two 3-credit branches. One is satisfied by EGCP-3010, which the core
+    // requires anyway; the other needs a course nothing else wants. Priced by
+    // their stated sizes these tie, and the tie breaks arbitrarily.
+    const tree = normalize(
+      pick1([
+        group({ FromCourses: [course("9", "DSAI", "3110")], MinCredits: 3 }),
+        group({ FromCourses: [course("1", "EGCP", "3010")], MinCredits: 3 }),
+      ]),
+    );
+    const { courses } = coursesNeeded(tree, { credits: () => 3, have: new Set() });
+    expect([...courses]).toEqual(["EGCP-3010"]);
+  });
+
+  test("a branch inside another choice is not treated as owed", () => {
+    // EGCP-3010 here sits behind its own MinGroups choice, so it is not
+    // certain, and must not make a rival branch look free.
+    const tree = normalize(
+      program("A", [
+        group({ FromCourses: [course("9", "DSAI", "3110")], MinCredits: 3 }),
+        group({ FromCourses: [course("1", "EGCP", "3010")], MinCredits: 3 }),
+      ]),
+    );
+    const { courses } = coursesNeeded(tree, { credits: () => 3, have: new Set() });
+    expect(courses.size).toBe(2);
   });
 });

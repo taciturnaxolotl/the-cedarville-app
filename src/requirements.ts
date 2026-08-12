@@ -376,6 +376,40 @@ export function accepts(group: Group, course: CatalogCourse): Acceptance {
 }
 
 /**
+ * How much of a group is already paid for by coursework taken for other reasons.
+ *
+ * The 32-credit upper-division requirement is the case worth naming. It names
+ * no subject and no department, so nearly the whole catalog qualifies and
+ * shopping for it would fill a plan with one-credit independent studies. It
+ * does not need shopping for: a degree's own 3000- and 4000-level courses
+ * cover it several times over. But "satisfied incidentally" is an assertion,
+ * and this turns it into a count.
+ *
+ * Courses the group merely *might* accept are reported apart from the ones it
+ * certainly accepts, so a claim of satisfaction never rests on a maybe.
+ */
+export function groupCoverage(
+  group: Group,
+  courses: Iterable<CatalogCourse>,
+  credits: (code: string) => number,
+): { credits: number; unsure: number; courses: string[] } {
+  let sure = 0;
+  let unsure = 0;
+  const named: string[] = [];
+  for (const course of courses) {
+    const verdict = accepts(group, course);
+    if (verdict === "no") continue;
+    if (verdict === "unknown") {
+      unsure += credits(course.CourseName);
+      continue;
+    }
+    sure += credits(course.CourseName);
+    named.push(course.CourseName);
+  }
+  return { credits: sure, unsure, courses: named };
+}
+
+/**
  * Course names the student has actually finished, e.g. "CS-1220".
  *
  * Colleague reports these per group rather than as a transcript, so the same
@@ -530,21 +564,75 @@ export interface Needed {
   unenumerable: Unenumerable[];
 }
 
-/** Remaining credits if this group were chosen. Cheaper is preferred. */
-function groupCost(group: Group, options: NeedOptions): number {
+/**
+ * Remaining credits if this group were chosen. Cheaper is preferred.
+ *
+ * `free` is everything the plan is already committed to buying, and it is what
+ * makes the comparison honest. Computer engineering offers a choice between a
+ * twelve-hour concentration and twelve hours of technical electives; priced by
+ * their stated sizes those tie at twelve apiece, and the tie breaks on
+ * whichever Colleague happened to list first. Priced against the plan, the
+ * technical electives cost nothing at all — every course that qualifies is one
+ * the major already requires — and the concentration costs a real twelve.
+ */
+function groupCost(group: Group, options: NeedOptions, free: ReadonlySet<string>): number {
   if (group.status.completion === "Completed") return 0;
   const c = group.constraint;
 
   if (c.kind === "take-all") {
     return c.courses
-      .filter((x) => !options.have.has(x.CourseName))
+      .filter((x) => !options.have.has(x.CourseName) && !free.has(x.CourseName))
       .reduce((n, x) => n + options.credits(x.CourseName), 0);
   }
-  if (c.kind === "choose-from")
-    return group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? "");
   if (c.kind === "print-only") return 0;
-  // A rule or filter: we know the credits it wants, not the courses.
-  return group.min.credits ?? 3;
+
+  const want =
+    c.kind === "choose-from"
+      ? (group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? ""))
+      : // A rule or filter: we know the credits it wants, not the courses.
+        (group.min.credits ?? 3);
+
+  const pool =
+    c.kind === "choose-from"
+      ? c.courses.map((x) => x.CourseName)
+      : (options.resolved?.get(
+          groupKey({
+            requirement: group.requirementCode,
+            subrequirement: group.subrequirementId,
+            group: group.id,
+          }),
+        ) ?? []);
+
+  // Credits this group can draw from courses the plan is buying anyway.
+  const covered = pool
+    .filter((code) => options.have.has(code) || free.has(code))
+    .reduce((n, code) => n + options.credits(code), 0);
+  return Math.max(0, want - covered);
+}
+
+/**
+ * Courses the plan owes no matter which branches are taken.
+ *
+ * Only unconditional groups count: a take-all sitting inside a requirement
+ * that picks one subrequirement of six is not owed until that branch wins, and
+ * treating it as free would make every rival branch look cheaper than it is.
+ */
+function committed(tree: ProgramTree, options: NeedOptions): Set<string> {
+  const core = new Set<string>();
+  for (const requirement of tree.requirements) {
+    if (requirement.minSubrequirements !== null) continue;
+    for (const sub of requirement.subrequirements) {
+      if (sub.minGroups !== null) continue;
+      for (const group of sub.groups) {
+        if (group.status.completion === "Completed") continue;
+        if (group.constraint.kind !== "take-all") continue;
+        for (const x of group.constraint.courses) {
+          if (!options.have.has(x.CourseName)) core.add(x.CourseName);
+        }
+      }
+    }
+  }
+  return core;
 }
 
 function coursesForGroup(group: Group, options: NeedOptions): string[] {
@@ -581,6 +669,9 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
   const unenumerable: Unenumerable[] = [];
   /** Groups that offer a choice, resolved together rather than one at a time. */
   const choices: { pool: string[]; credits: number }[] = [];
+  // Priced against what the plan already owes, so a branch whose courses are
+  // required anyway is recognised as free rather than merely tied.
+  const free = committed(tree, options);
 
   for (const requirement of tree.requirements) {
     const subs = [...requirement.subrequirements];
@@ -589,7 +680,7 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
     const chosenSubs = subs
       .map((sub) => ({
         sub,
-        cost: sub.groups.reduce((n, g) => n + groupCost(g, options), 0),
+        cost: sub.groups.reduce((n, g) => n + groupCost(g, options, free), 0),
         done: sub.status.completion === "Completed",
       }))
       .sort((a, b) => Number(b.done) - Number(a.done) || a.cost - b.cost)
@@ -601,7 +692,7 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
       const chosenGroups = [...sub.groups]
         .map((group) => ({
           group,
-          cost: groupCost(group, options),
+          cost: groupCost(group, options, free),
           done: group.status.completion === "Completed",
         }))
         .sort((a, b) => Number(b.done) - Number(a.done) || a.cost - b.cost)

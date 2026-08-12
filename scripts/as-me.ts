@@ -14,25 +14,53 @@ import { load } from "./session";
 
 const ORIGIN = "https://selfservice.cedarville.edu";
 
+const TOKEN_RE = /name="__RequestVerificationToken"[^>]*value="([^"]+)"/;
+
+/**
+ * A request token for POSTs, scraped from an authenticated page.
+ *
+ * Antiforgery is a *pair*: a cookie and a separately-valued request token,
+ * cryptographically bound to each other. The saved session carries the cookie
+ * half, so the matching request half has to come from a page rendered for that
+ * same cookie. GETs skip all of this, provided they do not announce themselves
+ * as AJAX — sending X-Requested-With on a GET makes Colleague demand a token
+ * and answer 400 in a way that reads like a dead session.
+ */
+async function requestToken(cookie: string): Promise<string> {
+  const res = await fetch(`${ORIGIN}/Student/Planning/DegreePlans`, {
+    headers: { cookie, accept: "text/html" },
+    redirect: "manual",
+  });
+  const token = TOKEN_RE.exec(await res.text())?.[1];
+  if (!token) throw new Error("could not scrape an antiforgery token; is the session still valid?");
+  return token;
+}
+
 async function api<T>(path: string, body?: unknown): Promise<T> {
   const session = await load();
   if (!session) throw new Error('no session; run "pbpaste | bun scripts/session.ts save"');
 
+  const post = body !== undefined;
   const res = await fetch(ORIGIN + path, {
-    method: body === undefined ? "GET" : "POST",
+    method: post ? "POST" : "GET",
     headers: {
       cookie: session.cookie,
       accept: "application/json",
-      "x-requested-with": "XMLHttpRequest",
-      ...(body === undefined ? {} : { "content-type": "application/json, charset=UTF-8" }),
+      ...(post
+        ? {
+            "content-type": "application/json, charset=UTF-8",
+            "x-requested-with": "XMLHttpRequest",
+            __RequestVerificationToken: await requestToken(session.cookie),
+          }
+        : {}),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: post ? JSON.stringify(body) : undefined,
     redirect: "manual",
   });
 
   const text = await res.text();
   if (!text.trimStart().startsWith("{") && !text.trimStart().startsWith("[")) {
-    throw new Error(`${path}: not signed in (${res.status})`);
+    throw new Error(`${path}: ${res.status} ${text.slice(0, 120) || "not signed in"}`);
   }
   return JSON.parse(text) as T;
 }

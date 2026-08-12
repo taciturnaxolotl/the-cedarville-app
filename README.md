@@ -149,6 +149,14 @@ bun scripts/as-me.ts evaluate BS.CMPEG
 `document.cookie` will not do: `.ASPXAUTH` is HttpOnly, so the cookie that
 matters is invisible to page scripts.
 
+Two things cost an hour to learn, so they are worth writing down. Cookies are
+kept by *prefix*, because ASP.NET splits an oversized cookie into a base plus
+numbered chunks and an exact-match filter keeps the chunks while dropping the
+base. And a GET must **not** send `X-Requested-With`: it makes Colleague treat
+the request as AJAX, demand an antiforgery token, and answer 400 with a message
+indistinguishable from a dead session. POSTs do need a token, scraped from an
+authenticated page so it pairs with the cookie already held.
+
 This is a development convenience and deliberately not part of the app. That
 cookie is the whole student account, including the ability to register and
 drop classes, so it is filtered down to the four cookies Self-Service actually

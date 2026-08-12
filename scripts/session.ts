@@ -64,14 +64,18 @@ export async function load(): Promise<Session | null> {
   return (await file.exists()) ? ((await file.json()) as Session) : null;
 }
 
-/** Does the session still work? The degree plan needs real authentication. */
+/**
+ * Does the session still work? The degree plan needs real authentication.
+ *
+ * Note the absence of X-Requested-With. Sending it makes Colleague treat even
+ * a GET as an AJAX call and demand an antiforgery token, answering 400 with a
+ * message that reads exactly like a broken session. The browser gets away with
+ * it because it holds a matching token; a plain cookie request must not send
+ * the header at all.
+ */
 export async function check(session: Session): Promise<string | null> {
   const res = await fetch(`${ORIGIN}/Student/Planning/DegreePlans/Current?studentId=`, {
-    headers: {
-      cookie: session.cookie,
-      accept: "application/json",
-      "x-requested-with": "XMLHttpRequest",
-    },
+    headers: { cookie: session.cookie, accept: "application/json" },
     redirect: "manual",
   });
   if (res.status !== 200) return null;

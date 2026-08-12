@@ -817,7 +817,13 @@ label.section.clashes:not(:has(input:checked)) .when {
   min-width: 0;
 }
 
-/* A settled requirement stays legible but stops inviting a decision. */
-.choice.settled .candidate:not(.picked) {
-  opacity: 0.45;
+/* A met requirement is signalled on its heading, and nowhere else: the pool
+   below it stays fully pickable, because wanting a second literature course is
+   a real thing to want. */
+.choice.met {
+  border-left: 2px solid var(--green);
+}
+
+.choice.met h3 {
+  color: var(--green);
 }

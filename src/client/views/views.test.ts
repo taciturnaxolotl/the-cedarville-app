@@ -826,46 +826,53 @@ describe("build view — reading the requirement text", () => {
   });
 });
 
-describe("build view — a requirement already answered", () => {
-  test("shows the required course as the answer and offers no alternative", () => {
-    // The major requires CS-1210 outright, and it covers the minor's elective.
-    const major = normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
-    const minor = normalize(
+describe("build view — a requirement already met", () => {
+  /** The major requires CS-1210 outright, and it covers the minor's elective. */
+  const major = () => normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
+  const minorNeeding = (credits: number) =>
+    normalize(
       program("MIN", [
         group({
           Id: "e",
           DisplayText: "One computing elective",
           FromCourses: [course("1", "CS", "1210"), course("9", "ART", "1100")],
-          MinCredits: 3,
+          MinCredits: credits,
         }),
       ]),
     );
 
-    build.mount(root, { trees: [major, minor], enrolled: ["MAJ"] });
-    const box = root.querySelector(".choice.settled") as unknown as HTMLElement;
+  test("marks the heading met and says what covers it", () => {
+    build.mount(root, { trees: [major(), minorNeeding(3)], enrolled: ["MAJ"] });
+    const box = root.querySelector(".choice.met") as unknown as HTMLElement;
     expect(box).toBeTruthy();
+    expect(box.querySelector("h3")?.textContent).toContain("met");
     expect(box.textContent).toContain("CS-1210 covers this");
-
-    // The forced course reads as chosen, and nothing here is clickable.
-    expect(box.querySelector(".candidate.picked")?.textContent).toContain("CS-1210");
-    const buttons = Array.from(box.querySelectorAll(".pick")) as unknown as HTMLButtonElement[];
-    expect(buttons.every((b) => b.disabled)).toBe(true);
   });
 
-  test("a requirement only partly covered still offers the rest", () => {
+  test("a met requirement still lets you pick more", () => {
+    // Wanting a second course in a subject you like is a real thing to want,
+    // and the planner has no business refusing it.
+    build.mount(root, { trees: [major(), minorNeeding(3)], enrolled: ["MAJ"] });
+    const box = root.querySelector(".choice.met") as unknown as HTMLElement;
+    const buttons = Array.from(box.querySelectorAll(".pick")) as unknown as HTMLButtonElement[];
+    expect(buttons.length).toBeGreaterThan(1);
+    expect(buttons.some((b) => b.disabled)).toBe(false);
+
+    const art = Array.from(box.querySelectorAll(".candidate")).find((r) =>
+      r.textContent?.includes("ART-1100"),
+    )!;
+    (art.querySelector(".pick") as unknown as HTMLElement).click();
+    expect(
+      Array.from(root.querySelectorAll(".candidate.picked")).some((r) =>
+        r.textContent?.includes("ART-1100"),
+      ),
+    ).toBe(true);
+    localStorage.removeItem("cedarville:pins");
+  });
+
+  test("a requirement only partly covered is not marked met", () => {
     // Six credits wanted, three of them forced: there is still a decision.
-    const major = normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
-    const minor = normalize(
-      program("MIN", [
-        group({
-          Id: "e",
-          DisplayText: "Two computing electives",
-          FromCourses: [course("1", "CS", "1210"), course("9", "ART", "1100")],
-          MinCredits: 6,
-        }),
-      ]),
-    );
-    build.mount(root, { trees: [major, minor], enrolled: ["MAJ"] });
-    expect(root.querySelector(".choice.settled")).toBeNull();
+    build.mount(root, { trees: [major(), minorNeeding(6)], enrolled: ["MAJ"] });
+    expect(root.querySelector(".choice.met")).toBeNull();
   });
 });

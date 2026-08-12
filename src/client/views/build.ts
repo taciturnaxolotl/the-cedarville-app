@@ -328,44 +328,34 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const label = (code: string) => titles.get(code) ?? "";
 
   /**
-   * A choice already answered by coursework the plan requires anyway.
+   * Courses that already meet this requirement because the degree requires
+   * them anyway.
    *
-   * When the courses another requirement forces on you already meet this
-   * group's credits, there is no decision left. Offering the rest of the pool
-   * invites a student to buy a second course for a requirement that is
-   * finished, which is exactly the mistake the whole cover exists to avoid.
+   * Worth saying on the heading, and worth saying no more than that. A met
+   * requirement is not a closed one: a student may still want a second
+   * literature course, and a planner that greys out the rest of the pool has
+   * decided on their behalf that they should not.
    */
-  const settledBy = (choice: RankedChoice) => {
+  const metBy = (choice: RankedChoice) => {
     const forced = choice.candidates.filter((c) => c.forced);
     const covered = forced.reduce((n, c) => n + c.credits, 0);
     return covered >= choice.credits ? forced : [];
   };
 
-  function candidateRow(candidate: Candidate, settled: boolean) {
+  function candidateRow(candidate: Candidate) {
     const { pinned } = store.get();
-    // A settled group shows its forced courses as the answer, and offers no
-    // way to pick around them.
-    const isPinned = settled ? candidate.forced : pinned.includes(candidate.code);
-    const row = el("div", `candidate${isPinned ? " picked" : ""}${settled ? " settled" : ""}`);
+    const isPinned = pinned.includes(candidate.code);
+    const row = el("div", `candidate${isPinned ? " picked" : ""}`);
 
     const pick = el("button", "pick");
     pick.type = "button";
     pick.textContent = isPinned ? "✓" : "+";
-    if (settled) {
-      pick.disabled = true;
-      pick.title = candidate.forced
-        ? "required by another part of your degree, so it settles this one"
-        : "this requirement is already met";
-    } else {
-      pick.title = isPinned ? "unpick" : "pick this course";
-      pick.addEventListener("click", () =>
-        store.set({
-          pinned: isPinned
-            ? pinned.filter((c) => c !== candidate.code)
-            : [...pinned, candidate.code],
-        }),
-      );
-    }
+    pick.title = isPinned ? "unpick" : "pick this course";
+    pick.addEventListener("click", () =>
+      store.set({
+        pinned: isPinned ? pinned.filter((c) => c !== candidate.code) : [...pinned, candidate.code],
+      }),
+    );
     row.append(pick);
 
     row.append(el("b", undefined, candidate.code));
@@ -471,22 +461,26 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         }
 
         for (const choice of ranking.choices) {
-          const settled = settledBy(choice);
-          const box = el("div", `choice${settled.length ? " settled" : ""}`);
+          const met = metBy(choice);
+          const box = el("div", `choice${met.length ? " met" : ""}`);
           const head = el("h3");
           head.append(document.createTextNode(tidy(choice.text)));
           head.append(el("span", "cr", `${choice.credits} cr`));
           head.append(tag(choice.program, "prog"));
-          if (settled.length) head.append(tag("settled", "free"));
+          if (met.length) {
+            const badge = tag("met", "free");
+            badge.title = `${met.map((c) => c.code).join(" and ")} already covers this`;
+            head.append(badge);
+          }
           box.append(head);
 
-          if (settled.length) {
+          if (met.length) {
             box.append(
               el(
                 "p",
                 "muted",
-                `${settled.map((c) => c.code).join(" and ")} covers this, and your degree ` +
-                  "requires it anyway — nothing to decide here.",
+                `${met.map((c) => c.code).join(" and ")} covers this, since your degree requires ` +
+                  "it anyway. Pick more if you want them; they will be priced like anything else.",
               ),
             );
           }
@@ -504,8 +498,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             box.append(warn);
           }
 
-          for (const candidate of choice.candidates)
-            box.append(candidateRow(candidate, settled.length > 0));
+          for (const candidate of choice.candidates) box.append(candidateRow(candidate));
           if (!choice.candidates.length) {
             box.append(el("p", "muted", "no course in this pool is still available to you."));
           }

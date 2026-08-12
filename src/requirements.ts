@@ -559,3 +559,37 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
   }
   return { courses, unenumerable };
 }
+
+/**
+ * Adds enough of `options` to `need` to cover `credits`, preferring courses
+ * already scheduled.
+ *
+ * A requirement is often satisfiable by something the plan already contains:
+ * the history elective accepts 46 courses, two of which are on the plan for
+ * other reasons. Picking a fresh one because it is cheaper in isolation adds
+ * a course that buys nothing, and enough of those push a graduation date out
+ * by a term.
+ *
+ * Returns the credits it could not cover.
+ */
+export function absorbInto(
+  need: Set<string>,
+  options: readonly string[],
+  credits: number,
+  price: (code: string) => number,
+): number {
+  let want = credits;
+
+  // Free first: anything already on the plan costs no additional credits.
+  for (const code of options) {
+    if (want <= 0) break;
+    if (need.has(code)) want -= price(code);
+  }
+  // Then cheapest, to cover whatever is left.
+  for (const code of [...options].filter((c) => !need.has(c)).sort((a, b) => price(a) - price(b))) {
+    if (want <= 0) break;
+    need.add(code);
+    want -= price(code);
+  }
+  return Math.max(want, 0);
+}

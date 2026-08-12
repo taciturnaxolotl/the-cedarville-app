@@ -15,6 +15,7 @@
 import { criticalPath, projectPlan, type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
 import {
+  absorbInto,
   completedCourses,
   coursesNeeded,
   inProgressCourses,
@@ -89,14 +90,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       const options = resolved[key];
       if (!options?.length) continue;
 
-      // Cheapest first, up to the credits the group asks for.
-      let want = u.credits ?? 3;
-      for (const code of options.filter((c) => !have.has(c)).sort((a, b) => price(a) - price(b))) {
-        if (want <= 0) break;
-        need.add(code);
-        want -= price(code);
-        added++;
-      }
+      const before = need.size;
+      absorbInto(
+        need,
+        options.filter((c) => !have.has(c)),
+        u.credits ?? 3,
+        price,
+      );
+      added += need.size - before;
       u.resolved = options;
     }
     if (added) store.set({ resolvedAt: Date.now() });

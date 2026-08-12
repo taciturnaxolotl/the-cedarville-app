@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { merge, type Significance } from "./merge";
 import {
+  absorbInto,
   accepts,
   coursesNeeded,
   enumeratedCourseIds,
@@ -619,5 +620,47 @@ describe("expandable requirements", () => {
       ]),
     );
     expect(need(tree).unenumerable[0]!.bucket).toBe(false);
+  });
+});
+
+describe("covering a requirement with what is already planned", () => {
+  const price = (c: string) => (c === "HON-1020" ? 5 : 3);
+
+  /**
+   * The history elective accepts 46 courses, two of which are already on the
+   * plan for other reasons. Picking a fresh one because it is cheaper in
+   * isolation buys nothing, and enough of those push a graduation date out.
+   */
+  test("prefers a course already on the plan over a cheaper new one", () => {
+    const need = new Set(["HIST-3080"]);
+    const left = absorbInto(need, ["GEO-3040", "HIST-3080", "HIST-1110"], 3, price);
+
+    expect(left).toBe(0);
+    expect([...need]).toEqual(["HIST-3080"]);
+  });
+
+  test("adds the cheapest new course when nothing planned fits", () => {
+    const need = new Set(["CS-1210"]);
+    absorbInto(need, ["HON-1020", "GEO-3040"], 3, price);
+    expect(need.has("GEO-3040")).toBe(true);
+    expect(need.has("HON-1020")).toBe(false);
+  });
+
+  test("keeps adding until the credit minimum is met", () => {
+    const need = new Set<string>();
+    expect(absorbInto(need, ["AA-1000", "BB-1000", "CC-1000"], 6, price)).toBe(0);
+    expect(need.size).toBe(2);
+  });
+
+  test("reports what it could not cover", () => {
+    const need = new Set<string>();
+    expect(absorbInto(need, ["AA-1000"], 9, price)).toBe(6);
+  });
+
+  test("an already-planned course counts toward a larger minimum", () => {
+    const need = new Set(["HON-1020"]);
+    absorbInto(need, ["HON-1020", "AA-1000", "BB-1000"], 6, price);
+    // HON-1020 covers 5 of the 6; one more 3-credit course finishes it.
+    expect(need.size).toBe(2);
   });
 });

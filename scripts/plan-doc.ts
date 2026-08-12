@@ -10,7 +10,13 @@
 
 import { criticalPath, projectPlan, type Season, termsFrom } from "../src/planner";
 import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
-import { completedCourses, coursesNeeded, inProgressCourses, normalize } from "../src/requirements";
+import {
+  absorbInto,
+  completedCourses,
+  coursesNeeded,
+  inProgressCourses,
+  normalize,
+} from "../src/requirements";
 import { offeringsFromListing } from "../src/schedule";
 import { resolveGroup } from "../src/server/colleague";
 import { CatalogStore } from "../src/server/store";
@@ -105,12 +111,7 @@ for (const tree of trees) {
       const options = (await resolveGroup(u.ids)).filter((c) => !have.has(c));
       if (options.length === 0) continue;
       u.resolved = options;
-      let want = u.credits ?? 3;
-      for (const code of options.sort((a, b) => price(a) - price(b))) {
-        if (want <= 0) break;
-        need.add(code);
-        want -= price(code);
-      }
+      absorbInto(need, options, u.credits ?? 3, price);
     } catch {
       // Leave it listed as unresolved rather than guessing.
     }
@@ -130,6 +131,16 @@ for (const tree of trees) {
     `At ${cap} credits a term with summers, named requirements finish **${plan.finishes ?? "—"}**.`,
   );
   w();
+
+  const toGo = tree.credits.minimum - tree.credits.completed - tree.credits.inProgress;
+  if (plan.totalCredits > toGo) {
+    w(`This schedules ${plan.totalCredits} credits against a ${toGo}-credit gap, so read the date`);
+    w("as an upper bound rather than a promise. A degree minimum is a floor, and the named");
+    w("requirements can sum past it: one course often satisfies a major requirement and a");
+    w("general-education slot at once. The planner counts each course once, but cannot tell");
+    w("which *other* slot it also fills, so it schedules for both.");
+    w();
+  }
   for (const term of plan.terms) {
     w(`### ${term.slot.name} · ${term.credits} credits`);
     w();

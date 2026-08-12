@@ -201,15 +201,39 @@ export async function crawlAllCourses(
 
     for (const raw of result.CourseFullModels ?? []) {
       const course = raw as CatalogCourseRecord;
-      // The same course appears once per catalog year; the first wins.
-      if (course?.Id && !byId.has(course.Id)) byId.set(course.Id, course);
+      if (course?.Id) byId.set(course.Id, course);
     }
 
     onProgress?.({ term: ALL_COURSES, page, pages, sections: byId.size, phase: "courses" });
     page++;
     if (page <= pages && delayMs > 0) await sleep(delayMs);
   }
-  return [...byId.values()];
+  return dedupeByCode([...byId.values()]);
+}
+
+/**
+ * One record per course code, chosen deliberately.
+ *
+ * About 1% of codes carry two records: a course being retired beside its
+ * replacement, both live during the transition ("Prin Accounting I" and
+ * "Financial Accounting" are both ACCT-2110 this term). Colleague tells them
+ * apart by id and picks per the student's catalog year; requisite text only
+ * ever names a code, so a graph keyed by code has to choose. Choosing by
+ * whichever the crawl happened to see last is not a choice at all — prefer the
+ * one being taught, then the one that states requisites.
+ */
+export function dedupeByCode(records: CatalogCourseRecord[]): CatalogCourseRecord[] {
+  const best = new Map<string, CatalogCourseRecord>();
+  const score = (c: CatalogCourseRecord) =>
+    ((c as { MatchingSectionIds?: string[] }).MatchingSectionIds?.length ?? 0) * 10 +
+    (c.CourseRequisites?.length ?? 0);
+
+  for (const course of records) {
+    const code = `${course.SubjectCode}-${course.Number}`;
+    const held = best.get(code);
+    if (!held || score(course) > score(held)) best.set(code, course);
+  }
+  return [...best.values()];
 }
 
 /** Crawls the full catalog and stores it under the ALL sentinel. */

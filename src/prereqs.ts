@@ -137,11 +137,14 @@ export interface EligibilityOptions {
   /**
    * Whether a course exists in the catalog at all.
    *
-   * Requisite text goes stale: Cedarville renumbered Calculus II from
-   * MATH-1720 to MATH-1715 and never updated the courses that name it, and a
-   * few entries carry transposed subject codes (CLUM for CLMU). Treating a
-   * course that cannot be taken as a hard blocker marks its dependents
-   * permanently unreachable, which is worse than admitting the doubt.
+   * Each entering class is locked to a catalog year, and courses are retired
+   * and renumbered between them. Requisite text written under an older
+   * catalog outlives it: MATH-1720 was Calculus II, is named by five courses,
+   * and no longer exists — today it is MATH-1715. A few entries also carry
+   * transposed subject codes (CLUM for CLMU).
+   *
+   * Treating a course nobody can enrol in as a hard blocker marks its
+   * dependents permanently unreachable, which is worse than admitting doubt.
    */
   exists?: (code: string) => boolean;
 }
@@ -172,7 +175,7 @@ export function eligibility(
       : [];
     if (phantom.length === requisite.courses.length) {
       unclear.push(
-        `${requisite.text} — ${phantom.join(", ")} ${phantom.length === 1 ? "is" : "are"} not in the catalog, likely renumbered`,
+        `${requisite.text} — ${phantom.join(", ")} ${phantom.length === 1 ? "is" : "are"} not in the current catalog, likely retired or renumbered under an earlier catalog year`,
       );
       continue;
     }

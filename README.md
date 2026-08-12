@@ -163,11 +163,19 @@ held 1010 nodes and was missing 99 of the 277 courses named as prerequisites
 
 With the full catalog: 2027 nodes, 27 missing, and the chains measure right.
 
-The 27 that remain are not gaps in the crawl — they are stale references in
-Colleague's own data. Cedarville renumbered Calculus II from `MATH-1720` to
-`MATH-1715` without updating the courses that name it; a few carry transposed
-subject codes (`CLUM` for `CLMU`, `EDMU` for `MUED`); a few name subjects that
-no longer exist.
+The 27 that remain are not gaps in the crawl. Each entering class is locked to
+a catalog year, and courses are retired and renumbered between them, so
+requisite text outlives the catalog it was written under. `MATH-1720` was
+Calculus II, is named by five courses, and no longer exists — today it is
+`MATH-1715`. A few entries also carry transposed subject codes (`CLUM` for
+`CLMU`, `EDMU` for `MUED`) or name subjects that are gone.
+
+The same drift shows up a second way: about 1% of course codes carry two
+records, a course being retired beside its replacement, both live during the
+transition. Colleague tells them apart by id and picks per the student's
+catalog year. Requisite text only ever names a code, so a graph keyed by code
+has to choose one — `dedupeByCode` prefers the record actually being taught
+rather than whichever the crawl saw last.
 
 That matters because a prerequisite naming a course nobody can take marks its
 dependents permanently unreachable — 17 courses were blocked forever on

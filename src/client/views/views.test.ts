@@ -306,6 +306,9 @@ describe("schedule view", () => {
   const withPrereq = (): Ctx => {
     const ctx = withSections() as any;
     ctx.sections.courses = [
+      // CS-1000 must exist in the catalog, or the requisite reads as a stale
+      // reference and the course is reported unknown rather than blocked.
+      { Id: "0", SubjectCode: "CS", Number: "1000", Title: "Prereq", MinimumCredits: 3 },
       {
         Id: "1",
         SubjectCode: "CS",
@@ -350,7 +353,8 @@ describe("schedule view", () => {
   test("an unparseable condition reads as check, not as ready", () => {
     localStorage.clear();
     const ctx = withPrereq() as any;
-    ctx.sections.courses[0].CourseRequisites = [
+    // Index 1 is CS-1210; index 0 is now the CS-1000 it depends on.
+    ctx.sections.courses[1].CourseRequisites = [
       {
         DisplayText: "Permission of the instructor.",
         DisplayTextExtension: "- Must be completed prior to taking this course.",

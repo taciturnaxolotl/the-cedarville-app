@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ListingSection, TermCatalog } from "../catalog";
+import { dedupeByCode } from "./crawler";
 import { CatalogStore, ruleKey } from "./store";
 
 /** ":memory:" keeps each test's database to itself. */
@@ -222,5 +223,55 @@ describe("the full course catalog", () => {
     expect(db.readCourses("ALL").map((c) => c.Id)).toEqual(["c9"]);
     expect(db.read("2026FA").sections).toHaveLength(2);
     db.close();
+  });
+});
+
+describe("courses that share a code", () => {
+  /**
+   * About 1% of codes carry two records: a course being retired beside its
+   * replacement, both live during the transition. Colleague tells them apart
+   * by id and picks per the student's catalog year, but requisite text only
+   * ever names a code — so a graph keyed by code must choose, and choosing by
+   * crawl order is not a choice.
+   */
+  test("prefers the record that is actually being taught", () => {
+    const retiring = {
+      Id: "953",
+      SubjectCode: "ACCT",
+      Number: "2110",
+      Title: "Prin Accounting I",
+      MatchingSectionIds: ["157986"],
+    };
+    const replacement = {
+      Id: "5163",
+      SubjectCode: "ACCT",
+      Number: "2110",
+      Title: "Financial Accounting",
+      MatchingSectionIds: ["158001", "158002", "158003"],
+    };
+
+    expect(dedupeByCode([retiring, replacement]).map((c) => c.Id)).toEqual(["5163"]);
+    // Order of arrival must not decide it.
+    expect(dedupeByCode([replacement, retiring]).map((c) => c.Id)).toEqual(["5163"]);
+  });
+
+  test("falls back to whichever states requisites", () => {
+    const bare = { Id: "1", SubjectCode: "XX", Number: "1000", Title: "x" };
+    const detailed = {
+      Id: "2",
+      SubjectCode: "XX",
+      Number: "1000",
+      Title: "x",
+      CourseRequisites: [{ DisplayText: "Take YY-1000" }],
+    };
+    expect(dedupeByCode([bare, detailed]).map((c) => c.Id)).toEqual(["2"]);
+  });
+
+  test("distinct codes are all kept", () => {
+    const records = [
+      { Id: "1", SubjectCode: "AA", Number: "1000", Title: "a" },
+      { Id: "2", SubjectCode: "BB", Number: "1000", Title: "b" },
+    ];
+    expect(dedupeByCode(records)).toHaveLength(2);
   });
 });

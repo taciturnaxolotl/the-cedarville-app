@@ -8,6 +8,7 @@ import {
   meetingsConflict,
   type Offering,
   offeringsFrom,
+  offeringsFromListing,
   parseDays,
   parseTime,
   span,
@@ -63,11 +64,25 @@ describe("parsing days", () => {
 });
 
 describe("parsing times", () => {
-  test("reads ISO, bare clock, and display forms alike", () => {
+  test("reads bare clock and display forms as local", () => {
     expect(parseTime("2026-08-24T08:00:00")).toBe(480);
     expect(parseTime("08:00:00")).toBe(480);
     expect(parseTime("8:00 AM")).toBe(480);
     expect(parseTime("1:30 PM")).toBe(13 * 60 + 30);
+  });
+
+  // Real Fall 2026 data: every meeting arrives as UTC pinned to an arbitrary
+  // reference date. Reading the hour out of the string put classes 4h late.
+  test("converts an offset-bearing instant back to campus time", () => {
+    expect(parseTime("2026-08-11T15:00:00+00:00")).toBe(11 * 60); // ACCT-2110-01
+    expect(parseTime("2026-08-11T16:00:00+00:00")).toBe(12 * 60); // ACCT-2110-02
+    expect(parseTime("2026-08-11T12:30:00+00:00")).toBe(8 * 60 + 30); // ACCT-2120-03
+    expect(parseTime("2026-08-11T13:00:00Z")).toBe(9 * 60);
+  });
+
+  test("standard time shifts by five hours, not four", () => {
+    // January is EST; the same wall clock needs a different offset.
+    expect(parseTime("2026-01-15T16:00:00+00:00")).toBe(11 * 60);
   });
 
   test("handles the noon and midnight edges", () => {
@@ -185,6 +200,37 @@ describe("building offerings from a response", () => {
 
   // Observed in the spec: Meetings[].StartTime comes back null and the time
   // only exists on the display twin.
+  // The display string wins: it is zone-free and is what the school shows.
+  test("prefers the display time over the UTC instant", () => {
+    const o = toOffering(
+      section({
+        Meetings: [
+          {
+            ...structured,
+            StartTime: "2026-08-11T15:00:00+00:00",
+            EndTime: "2026-08-11T15:50:00+00:00",
+          },
+        ],
+        FormattedMeetingTimes: [
+          {
+            ...structured,
+            StartTimeDisplay: "11:00 AM",
+            EndTimeDisplay: "11:50 AM",
+            DaysOfWeekDisplay: "M/W/F",
+            BuildingDisplay: "Scharnberg",
+            RoomDisplay: "142",
+            DatesDisplay: "",
+          },
+        ],
+      }),
+    );
+    expect(o.meetings[0]).toMatchObject({ start: 11 * 60, end: 11 * 60 + 50 });
+  });
+
+  test("reads slash-separated days from the display string", () => {
+    expect(parseDays("M/W/F")).toEqual([1, 3, 5]);
+  });
+
   test("falls back to the display times when the structured ones are null", () => {
     const o = toOffering(
       section({
@@ -271,5 +317,57 @@ describe("laying out a week", () => {
     expect(formatTime(720)).toBe("12:00pm");
     expect(formatTime(13 * 60 + 5)).toBe("1:05pm");
     expect(formatTime(0)).toBe("12:00am");
+  });
+});
+
+describe("the flat section-search shape", () => {
+  // SectionListing puts section fields directly on the entry, with no
+  // Section wrapper and FacultyDisplay as an array.
+  test("reads sections that arrive without a wrapper", () => {
+    const entry = {
+      Id: "s9",
+      CourseId: "c9",
+      CourseName: "ACCT-2110",
+      Number: "01",
+      Title: "Principles of Accounting",
+      Synonym: "40123",
+      TermId: "2026FA",
+      MinimumCredits: 3,
+      MaximumCredits: null,
+      Capacity: 40,
+      Enrolled: 40,
+      Available: 0,
+      Waitlisted: 0,
+      AvailabilityStatus: "Waitlisted",
+      IsNonStandardDates: false,
+      StartDate: "2026-08-19T00:00:00-04:00",
+      EndDate: "2026-12-11T00:00:00-05:00",
+      FacultyDisplay: ["Mrs. Lindsey M. Howell"],
+      Meetings: [
+        {
+          Days: [1, 3, 5],
+          StartTime: "2026-08-11T15:00:00+00:00",
+          EndTime: "2026-08-11T15:50:00+00:00",
+          StartDate: "2026-08-19T00:00:00-04:00",
+          EndDate: "2026-12-11T00:00:00-05:00",
+          Room: "142",
+          Frequency: "W",
+          IsOnline: false,
+          InstructionalMethodCode: "LEC",
+        },
+      ],
+      FormattedMeetingTimes: [],
+    };
+
+    const [o] = offeringsFromListing([entry]);
+    expect(o).toMatchObject({ courseName: "ACCT-2110", synonym: "40123", term: "2026FA" });
+    expect(o!.instructors).toEqual(["Mrs. Lindsey M. Howell"]);
+    // No display twin here, so the UTC instant must still land at 11am.
+    expect(o!.meetings[0]).toMatchObject({ days: [1, 3, 5], start: 11 * 60, end: 11 * 60 + 50 });
+    expect(o!.meetings[0]!.from).toBe("2026-08-19");
+  });
+
+  test("an empty listing yields nothing", () => {
+    expect(offeringsFromListing([])).toEqual([]);
   });
 });

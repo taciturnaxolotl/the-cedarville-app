@@ -104,22 +104,61 @@ export function parseDays(raw: unknown): Weekday[] {
 }
 
 /**
- * Accepts an ISO datetime ("2026-08-24T08:00:00"), a bare "08:00:00", or the
- * display form ("8:00 AM"). Returns minutes since midnight, or null when the
+ * Cedarville, Ohio. Meeting times are wall-clock times on this campus, and
+ * Colleague hands them over in UTC, so we need somewhere to put them back.
+ */
+export const CAMPUS_TZ = "America/New_York";
+
+const CLOCK = new Intl.DateTimeFormat("en-US", {
+  timeZone: CAMPUS_TZ,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/**
+ * Colleague sends an offset-bearing instant, pinned to an arbitrary reference
+ * date: an 11:00 AM class arrives as "2026-08-11T15:00:00+00:00". Reading the
+ * hour straight out of that string puts every class four hours late, so the
+ * instant has to be converted back to campus time.
+ */
+function fromInstant(raw: string): number | null {
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return null;
+
+  const parts = CLOCK.formatToParts(new Date(at));
+  const hour = parts.find((p) => p.type === "hour")?.value;
+  const minute = parts.find((p) => p.type === "minute")?.value;
+  if (hour === undefined || minute === undefined) return null;
+  // en-US 2-digit hour renders midnight as "24" in some runtimes.
+  return (Number(hour) % 24) * 60 + Number(minute);
+}
+
+/**
+ * Accepts the display form ("8:00 AM"), a bare clock ("08:00:00"), or an ISO
+ * instant. Returns minutes since midnight in campus time, or null when the
  * meeting has no time at all, which is normal for online sections.
+ *
+ * Prefer the display string wherever both exist: it is what the registrar
+ * shows a student, and it carries no timezone to get wrong.
  */
 export function parseTime(raw: string | null | undefined): number | null {
   if (!raw) return null;
+  const text = raw.trim();
 
-  const iso = /T(\d{2}):(\d{2})/.exec(raw) ?? /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(raw);
-  if (iso) return Number(iso[1]) * 60 + Number(iso[2]);
-
-  const display = /^(\d{1,2}):(\d{2})\s*([ap])\.?m\.?$/i.exec(raw.trim());
+  const display = /^(\d{1,2}):(\d{2})\s*([ap])\.?m\.?$/i.exec(text);
   if (display) {
     const hour = Number(display[1]) % 12;
     const pm = display[3]!.toLowerCase() === "p";
     return (hour + (pm ? 12 : 0)) * 60 + Number(display[2]);
   }
+
+  // An offset or a Z makes it an instant; without one it is already local.
+  if (/T\d{2}:\d{2}/.test(text) && /(Z|[+-]\d{2}:?\d{2})$/.test(text)) return fromInstant(text);
+
+  const clock = /T(\d{2}):(\d{2})/.exec(text) ?? /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(text);
+  if (clock) return Number(clock[1]) * 60 + Number(clock[2]);
+
   return null;
 }
 
@@ -135,8 +174,9 @@ export function toOffering(section: Section, instructors: string[] = []): Offeri
   const meetings: Meeting[] = [];
   raw.forEach((m, i) => {
     const fallback = formatted[i];
-    const start = parseTime(m.StartTime) ?? parseTime(fallback?.StartTimeDisplay);
-    const end = parseTime(m.EndTime) ?? parseTime(fallback?.EndTimeDisplay);
+    // Display first: zone-free, and the string the registrar itself shows.
+    const start = parseTime(fallback?.StartTimeDisplay) ?? parseTime(m.StartTime);
+    const end = parseTime(fallback?.EndTimeDisplay) ?? parseTime(m.EndTime);
     const days = parseDays(m.Days?.length ? m.Days : fallback?.DaysOfWeekDisplay);
 
     // No time or no day means nothing to place on a grid and nothing that can
@@ -177,6 +217,19 @@ export function toOffering(section: Section, instructors: string[] = []): Offeri
     meetings,
     nonStandardDates: Boolean(section.IsNonStandardDates),
   };
+}
+
+/**
+ * The section-search view returns section fields flat on each entry, with no
+ * `Section` wrapper, unlike the per-course endpoint. Same data, different
+ * envelope; nothing about Colleague is uniform.
+ */
+export function offeringsFromListing(sections: unknown[]): Offering[] {
+  return (sections ?? []).map((entry) => {
+    const flat = entry as Section & { FacultyDisplay?: string[] | string };
+    const faculty = flat.FacultyDisplay;
+    return toOffering(flat, Array.isArray(faculty) ? faculty : faculty ? [faculty] : []);
+  });
 }
 
 /** Flattens the term/section nesting Colleague wraps around a course. */

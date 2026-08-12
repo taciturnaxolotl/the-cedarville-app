@@ -35,13 +35,26 @@ export function extractCookie(input: string): string | null {
   const raw = (fromCurl?.[1] ?? (input.includes("=") && !input.includes("\n") ? input : "")).trim();
   if (!raw) return null;
 
-  // Keep only what Self-Service actually authenticates with, so an entire
-  // browser's cookie jar does not end up on disk.
-  const wanted =
-    /^(\.ASPXAUTH|SERVERID|studentselfservice_live_\w+|\.ColleagueSelfServiceAntiforgery)$/i;
+  // Keep only what Self-Service authenticates with, so an entire browser's
+  // cookie jar does not end up on disk.
+  //
+  // Matched by prefix, not exactly. ASP.NET splits a cookie too large for one
+  // header into a base cookie plus numbered parts, and an exact match keeps
+  // "studentselfservice_live_0" while dropping the "studentselfservice_live"
+  // it belongs to. That yields a set which looks complete, saves without
+  // complaint, and authenticates as nobody.
+  const wanted = [
+    ".aspxauth",
+    "serverid",
+    "studentselfservice_live",
+    ".colleagueselfserviceantiforgery",
+  ];
   const kept = raw
     .split(/;\s*/)
-    .filter((pair) => wanted.test(pair.split("=", 1)[0] ?? ""))
+    .filter((pair) => {
+      const name = (pair.split("=", 1)[0] ?? "").toLowerCase();
+      return wanted.some((prefix) => name.startsWith(prefix));
+    })
     .join("; ");
   return kept || null;
 }

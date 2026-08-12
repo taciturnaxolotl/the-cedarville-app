@@ -26,6 +26,26 @@ describe("extracting a session", () => {
     expect(extractCookie(".ASPXAUTH=Z; _ga=drop")).toBe(".ASPXAUTH=Z");
   });
 
+  /**
+   * Regression: a real session was saved with eight cookies and still failed
+   * to authenticate. ASP.NET chunks an oversized cookie into a base plus
+   * numbered parts, and an exact-match filter kept "..._0" while dropping the
+   * base "studentselfservice_live" it belongs to.
+   */
+  test("keeps chunked cookies and the base they belong to", () => {
+    const kept =
+      extractCookie(
+        "cookie: studentselfservice_live=chunks:2; studentselfservice_live_0=aaa; " +
+          "studentselfservice_live_1=bbb; .ASPXAUTHC1=ccc; .ASPXAUTH=ddd; _ga=drop",
+      ) ?? "";
+    expect(kept).toContain("studentselfservice_live=chunks:2");
+    expect(kept).toContain("studentselfservice_live_0=aaa");
+    expect(kept).toContain("studentselfservice_live_1=bbb");
+    expect(kept).toContain(".ASPXAUTHC1=ccc");
+    expect(kept).toContain(".ASPXAUTH=ddd");
+    expect(kept).not.toContain("_ga");
+  });
+
   test("returns null rather than an empty session", () => {
     expect(extractCookie("no cookies here")).toBeNull();
     expect(extractCookie("")).toBeNull();

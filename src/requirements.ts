@@ -112,6 +112,13 @@ export interface ProgramTree {
   title: string;
   catalog: string;
   degree: string;
+  /**
+   * The majors and minors this one enrolment covers, named the way a student
+   * would name them. One program code routinely carries several: a cyber
+   * operations major and the honors program arrive as a single BS.CYOPR.
+   */
+  majors: string[];
+  minors: string[];
   credits: { minimum: number; completed: number; inProgress: number; planned: number };
   requirements: Requirement[];
 }
@@ -253,6 +260,8 @@ export function normalize(res: EvaluationResponse): ProgramTree {
     title: p.Title,
     catalog: p.Catalog,
     degree: p.Degree,
+    majors: list(p.Majors),
+    minors: list(p.Minors),
     credits: {
       minimum: p.MinimumCredits,
       completed: p.CompletedCredits,

@@ -131,6 +131,13 @@ export interface EvaluationResponse {
     Requirements: RawRequirement[];
     RequiredRequirementCount: number;
     CompletedRequirementCount: number;
+    /**
+     * What the program is made of, in words a student would use. A single
+     * enrolment carries several: "BS.CYOPR" is a cyber operations major *and*
+     * the honors program, and only these arrays say so.
+     */
+    Majors?: string[] | null;
+    Minors?: string[] | null;
   };
 }
 

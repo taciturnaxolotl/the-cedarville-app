@@ -37,6 +37,19 @@ interface State {
 
 const PINS = "cedarville:pins";
 
+/**
+ * What a program is, in the student's words.
+ *
+ * Colleague lists the majors and minors an enrolment covers separately from
+ * its code, and the code alone hides them: a student with an honors minor
+ * sees only "BS.CYOPR" and reasonably asks where their minor went. Falls back
+ * to the code for programs that name nothing.
+ */
+function namesOf(tree: ProgramTree): string[] {
+  const named = [...tree.majors, ...tree.minors];
+  return named.length ? named : [tree.title || tree.code];
+}
+
 /** "+2 terms" reads better than a bare number, and null is not a number. */
 function priceOf(candidate: Candidate): { text: string; kind: string } {
   if (candidate.forced) return { text: "already required", kind: "free" };
@@ -54,8 +67,13 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const subs = new Subscriptions();
   const { trees, sections: catalog } = ctx;
 
+  // A program evaluated but not enrolled in is a what-if the student added.
+  // Seeding the picker with them is what lets the same control take one away.
+  const enrolled = new Set(ctx.enrolled ?? trees.map((t) => t.code));
+  const added = trees.map((t) => t.code).filter((code) => !enrolled.has(code));
+
   const store = createStore<State>({
-    wanted: [],
+    wanted: added,
     pinned: JSON.parse(localStorage.getItem(PINS) ?? "[]"),
     available: [],
     resolved: new Map(),
@@ -154,6 +172,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   // ---- the program picker ----------------------------------------------
 
+  /** Re-evaluate against a set of what-if programs. An empty list is valid. */
+  async function evaluate(codes: string[]) {
+    store.set({ wanted: codes, busy: "evaluating…" });
+    try {
+      ctx.adopt?.(await capture(codes));
+    } catch {
+      store.set({ busy: "" });
+    }
+  }
+
   subs.add(
     store.watch(
       (s) => `${s.available.length}:${s.wanted.join(",")}:${s.busy}`,
@@ -162,50 +190,71 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         picker.replaceChildren();
         picker.append(el("h2", undefined, "majors and minors"));
 
-        const enrolled = new Set(trees.map((t) => t.code));
-        // One label, then bare codes. Repeating "enrolled" on every chip says
-        // the same word as many times as you have programs.
+        // One label per kind, then bare codes. Repeating a word on every chip
+        // says it as many times as you have programs.
         const chips = el("div", "chips");
-        chips.append(el("span", "muted", "enrolled"));
-        for (const t of trees) chips.append(tag(t.code, "on"));
+        const mine = trees.filter((t) => enrolled.has(t.code));
+        const theirs = trees.filter((t) => !enrolled.has(t.code));
+        if (mine.length) {
+          chips.append(el("span", "muted", "enrolled"));
+          // One enrolment covers several credentials: BS.CYOPR is a cyber
+          // operations major and the honors program, and the code says
+          // neither. Showing what Colleague named is what makes a student
+          // recognise their own degree.
+          for (const t of mine) {
+            for (const name of namesOf(t)) chips.append(tag(name, "on"));
+          }
+        }
+        if (theirs.length) {
+          chips.append(el("span", "muted", "trying"));
+          for (const t of theirs) {
+            // Removable in place. Hunting for the row in a multi-select and
+            // ctrl-clicking it is not a way to undo something.
+            const chip = el("span", "tag trying", namesOf(t).join(" + "));
+            const drop = el("button", "drop", "×");
+            drop.type = "button";
+            drop.title = `stop considering ${t.code}`;
+            drop.disabled = Boolean(busy);
+            drop.addEventListener("click", () =>
+              evaluate(theirs.filter((o) => o.code !== t.code).map((o) => o.code)),
+            );
+            chip.append(drop);
+            chips.append(chip);
+          }
+        }
         picker.append(chips);
 
         if (!available.length) {
           picker.append(
             el("p", "muted", "connect the extension to add programs you are not enrolled in."),
           );
-        } else {
-          const select = el("select");
-          select.multiple = true;
-          select.size = 8;
-          for (const p of available) {
-            if (enrolled.has(p.Code)) continue;
-            const option = el("option", undefined, `${p.Code} — ${p.Title}`);
-            option.value = p.Code;
-            option.selected = wanted.includes(p.Code);
-            select.append(option);
-          }
-          select.addEventListener("change", () =>
-            store.set({
-              wanted: Array.from(select.selectedOptions).map((o) => o.value),
-            }),
-          );
-          picker.append(select);
-
-          const go = el("button", "primary", busy || "evaluate this combination");
-          go.type = "button";
-          go.disabled = Boolean(busy) || wanted.length === 0;
-          go.addEventListener("click", async () => {
-            store.set({ busy: "evaluating…" });
-            try {
-              const snapshot = await capture(store.get().wanted);
-              ctx.adopt?.(snapshot);
-            } catch {
-              store.set({ busy: "" });
-            }
-          });
-          picker.append(go);
+          return;
         }
+
+        const select = el("select");
+        select.multiple = true;
+        select.size = 8;
+        for (const p of available) {
+          if (enrolled.has(p.Code)) continue;
+          const option = el("option", undefined, `${p.Code} — ${p.Title}`);
+          option.value = p.Code;
+          option.selected = wanted.includes(p.Code);
+          select.append(option);
+        }
+        select.addEventListener("change", () =>
+          store.set({ wanted: Array.from(select.selectedOptions).map((o) => o.value) }),
+        );
+        picker.append(select);
+
+        // Enabled whenever the selection differs from what is loaded, which
+        // includes clearing it back to the enrolled programs alone.
+        const same =
+          wanted.length === theirs.length && theirs.every((t) => wanted.includes(t.code));
+        const go = el("button", "primary", busy || "evaluate this combination");
+        go.type = "button";
+        go.disabled = Boolean(busy) || same;
+        go.addEventListener("click", () => void evaluate(store.get().wanted));
+        picker.append(go);
       },
     ),
   );

@@ -5,7 +5,15 @@ import type { Capture } from "../content";
 import type { ProgramTree } from "../requirements";
 
 export interface Ctx {
+  /**
+   * Every program evaluated, enrolled or hypothetical. A what-if evaluation
+   * comes back in exactly the same shape as a real one, which is what makes
+   * "what if I added this minor" answerable — and also why the trees alone
+   * cannot say which programs the student is actually in.
+   */
   trees: ProgramTree[];
+  /** Program codes the registrar has the student enrolled in. */
+  enrolled?: string[];
   sections?: TermCatalog;
   /**
    * Every course in the catalog, offered this term or not. Prerequisites

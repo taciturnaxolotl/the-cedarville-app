@@ -772,3 +772,23 @@ label.section.clashes:not(:has(input:checked)) .when {
 .tag.bad {
   color: var(--red);
 }
+
+.tag.trying {
+  color: var(--yellow);
+}
+
+/* Sits inside the chip, so it reads as part of it rather than a stray control. */
+.tag .drop {
+  margin-left: 6px;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: none;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tag .drop:hover:not(:disabled) {
+  color: var(--red);
+}

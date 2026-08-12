@@ -66,10 +66,15 @@ const group = (over: Partial<RawGroup>): RawGroup =>
     ...over,
   }) as RawGroup;
 
-const program = (code: string, groups: RawGroup[]): EvaluationResponse =>
+const program = (
+  code: string,
+  groups: RawGroup[],
+  named: { Majors?: string[]; Minors?: string[] } = {},
+): EvaluationResponse =>
   ({
     StudentId: "1",
     Program: {
+      ...named,
       Code: code,
       Title: `${code} program`,
       Catalog: "2026",
@@ -520,14 +525,57 @@ describe("build view", () => {
     expect(root.textContent).toContain("capture your requirements first");
   });
 
-  test("labels the enrolled programs once, not once each", () => {
-    build.mount(root, { trees: [treeOf("BS.CYOPR", required), treeOf("BS.CMPEG", required)] });
+  /** One enrolment covering a major and a minor, as BS.CYOPR really does. */
+  const cyops = normalize(
+    program("BS.CYOPR", required, { Majors: ["Cyber Operations"], Minors: ["Honors Program"] }),
+  );
+
+  test("names every major and minor an enrolment covers", () => {
+    // The program code hides them: a student with an honors minor sees only
+    // "BS.CYOPR" and asks, reasonably, where their minor went.
+    build.mount(root, { trees: [cyops], enrolled: ["BS.CYOPR"] });
     const chips = root.querySelector(".chips") as unknown as HTMLElement;
     expect(Array.from(chips.querySelectorAll(".tag")).map((n) => n.textContent)).toEqual([
-      "BS.CYOPR",
-      "BS.CMPEG",
+      "Cyber Operations",
+      "Honors Program",
     ]);
     expect(chips.textContent?.match(/enrolled/g)).toHaveLength(1);
+  });
+
+  test("falls back to the title when a program names nothing", () => {
+    build.mount(root, { trees: [treeOf("BS.CYOPR", required)], enrolled: ["BS.CYOPR"] });
+    expect(root.querySelector(".chips .tag")?.textContent).toBe("BS.CYOPR program");
+  });
+
+  test("separates a what-if program from a real enrolment", () => {
+    // Both come back from Colleague in the same shape; only the capture's own
+    // enrolment list can tell them apart.
+    build.mount(root, {
+      trees: [cyops, treeOf("BS.CMPEG", required)],
+      enrolled: ["BS.CYOPR"],
+    });
+    const chips = root.querySelector(".chips") as unknown as HTMLElement;
+    expect(chips.querySelector(".tag.on")?.textContent).toBe("Cyber Operations");
+    expect(chips.querySelector(".tag.trying")?.textContent).toContain("BS.CMPEG");
+    expect(chips.textContent).toContain("trying");
+  });
+
+  test("a what-if program can be dropped, an enrolled one cannot", () => {
+    build.mount(root, {
+      trees: [treeOf("BS.CYOPR", required), treeOf("BS.CMPEG", required)],
+      enrolled: ["BS.CYOPR"],
+    });
+    const drops = root.querySelectorAll(".tag .drop");
+    expect(drops).toHaveLength(1);
+    expect((drops[0] as unknown as HTMLElement).title).toContain("BS.CMPEG");
+  });
+
+  test("without an enrolment list every captured program is treated as real", () => {
+    // Older captures predate the field; calling them all hypothetical would
+    // offer to remove a program the student is actually in.
+    build.mount(root, { trees: [treeOf("BS.CYOPR", required)] });
+    expect(root.querySelectorAll(".tag .drop")).toHaveLength(0);
+    expect(root.querySelector(".chips")?.textContent).toContain("enrolled");
   });
 
   test("puts the course another program already requires at the top", () => {

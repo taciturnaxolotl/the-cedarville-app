@@ -400,3 +400,48 @@ describe("the chain behind a course", () => {
     expect([...prerequisitesOf(graph, "GHOST-1000")]).toEqual([]);
   });
 });
+
+describe("choosing between alternative prerequisites", () => {
+  const graph = buildGraph([
+    // "Take BUS-2150 GMTH-2110 MATH-2520 or MATH-3110" — five ways in, and
+    // only one of them is a course the student was taking anyway.
+    { code: "DSAI-3110", title: "", requisites: [req("Take GMTH-2110 MATH-2520 or MATH-3110")] },
+    { code: "GMTH-2110", title: "", requisites: [req("Take BIO-1115")] },
+    { code: "MATH-2520", title: "", requisites: [] },
+    { code: "MATH-3110", title: "", requisites: [] },
+    { code: "BIO-1115", title: "", requisites: [] },
+  ]);
+
+  test("reaches for a course the plan already holds", () => {
+    // MATH-2520 and MATH-3110 are both one step away, so depth alone would
+    // take whichever the text listed first. The plan breaks the tie.
+    expect([...prerequisitesOf(graph, "DSAI-3110", new Set(), new Set(["MATH-3110"]))]).toEqual([
+      "MATH-3110",
+    ]);
+    expect([...prerequisitesOf(graph, "DSAI-3110", new Set(), new Set(["MATH-2520"]))]).toEqual([
+      "MATH-2520",
+    ]);
+  });
+
+  test("falls back to the shallowest chain when the plan offers none", () => {
+    // GMTH-2110 drags BIO-1115 along; the others stand alone.
+    const picked = [...prerequisitesOf(graph, "DSAI-3110")];
+    expect(picked).not.toContain("BIO-1115");
+    expect(picked).toHaveLength(1);
+  });
+
+  test("an alternative already passed satisfies the requisite outright", () => {
+    // Filtering the passed course out of the options and then picking one of
+    // the rest buys a course for a requisite that is already met.
+    expect([...prerequisitesOf(graph, "DSAI-3110", new Set(["MATH-3110"]))]).toEqual([]);
+  });
+
+  test("every course of an all-requisite is still needed when one is passed", () => {
+    const both = buildGraph([
+      { code: "CS-4000", title: "", requisites: [req("Take CS-1210 CS-1220")] },
+      { code: "CS-1210", title: "", requisites: [] },
+      { code: "CS-1220", title: "", requisites: [] },
+    ]);
+    expect([...prerequisitesOf(both, "CS-4000", new Set(["CS-1210"]))]).toEqual(["CS-1220"]);
+  });
+});

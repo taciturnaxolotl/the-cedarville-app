@@ -236,6 +236,14 @@ export function prerequisitesOf(
   graph: Graph,
   code: string,
   completed: ReadonlySet<string> = new Set(),
+  /**
+   * Courses the plan already intends to take. A requisite offering a choice
+   * should reach for one of these before introducing anything new: the AI
+   * track's `DSAI-3110` accepts five different statistics courses, one of
+   * which — `MATH-2520` — cyber operations already requires, and picking any
+   * of the other four invents a chain the student was never going to walk.
+   */
+  planned: ReadonlySet<string> = new Set(),
   seen = new Set<string>(),
 ): Set<string> {
   const needed = new Set<string>();
@@ -246,17 +254,27 @@ export function prerequisitesOf(
     // A corequisite is taken alongside, so it gates nothing.
     if (!requisite.required || requisite.timing === "with") continue;
 
+    // "Take A or B" with A already passed is satisfied outright; adding B
+    // because A was filtered out buys a course for a requisite that is met.
+    const met = requisite.courses.filter((c) => completed.has(c));
+    if (requisite.mode === "any" && met.length) continue;
+
     const open = requisite.courses.filter((c) => !completed.has(c) && graph.courses.has(c));
     if (open.length === 0) continue;
 
     const chosen =
       requisite.mode === "any"
-        ? [open.reduce((a, b) => (depth(graph, a) <= depth(graph, b) ? a : b))]
+        ? [
+            open.find((c) => planned.has(c)) ??
+              open.reduce((a, b) => (depth(graph, a) <= depth(graph, b) ? a : b)),
+          ]
         : open;
 
     for (const needs of chosen) {
       needed.add(needs);
-      for (const deeper of prerequisitesOf(graph, needs, completed, seen)) needed.add(deeper);
+      for (const deeper of prerequisitesOf(graph, needs, completed, planned, seen)) {
+        needed.add(deeper);
+      }
     }
   }
   return needed;

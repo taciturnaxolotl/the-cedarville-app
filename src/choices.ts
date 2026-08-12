@@ -137,8 +137,12 @@ function finishIndex(plan: Plan, slots: readonly TermSlot[]): number {
  */
 function closure(need: Iterable<string>, options: RankOptions): Set<string> {
   const all = new Set(need);
+  // The plan itself is passed as `planned`, so a requisite offering a choice
+  // reaches for a course already being taken before inventing a new chain.
   for (const code of [...all]) {
-    for (const required of prerequisitesOf(options.graph, code, options.have)) all.add(required);
+    for (const required of prerequisitesOf(options.graph, code, options.have, all)) {
+      all.add(required);
+    }
   }
   return all;
 }
@@ -192,7 +196,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     // Choosing a course chooses its prerequisites too, and they cost real
     // terms. Pinning the course alone would leave it unschedulable and report
     // the choice as impossible rather than merely expensive.
-    const requires = [...prerequisitesOf(options.graph, code, options.have)];
+    const requires = [...prerequisitesOf(options.graph, code, options.have, solved.courses)];
     const pinned = new Set([...(options.pinned ?? []), code, ...requires]);
     const withIt = coursesNeededAcross(trees, { ...options, pinned });
     const plan = planFor(withIt.courses, options);

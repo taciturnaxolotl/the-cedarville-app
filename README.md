@@ -24,6 +24,7 @@ another tab, and click capture.
     src/types.ts         raw Colleague shapes, shared by both halves
     src/requirements.ts  Ellucian's 40-field Group as a tagged union
     src/merge.ts         which course satisfies a requirement in both majors
+    src/schedule.ts      meeting times, seat counts, and date-aware conflicts
     src/client/          the planner: no framework, one CSS file, mount/destroy views
 
 The split is by change rate. Auth bridging is stable and security-sensitive;
@@ -42,6 +43,17 @@ filters that no evaluation endpoint resolves. Those are reported as
 is worse than a shorter honest one. Schools also cap credits shared between
 two majors, and that policy lives in the academic catalog, not the API: pass
 `sharedCreditCap` to `merge` to have it checked.
+
+### conflicts are date-aware
+
+A 16-week term routinely contains 8-week sessions, so two sections can share a
+weekday and an hour and never coexist. Every meeting carries its own date
+range and every comparison uses it; a day-and-time check alone invents clashes
+and makes half the catalog look unschedulable.
+
+Loading sections fetches only courses that could still close an open
+requirement, one call per course with a small delay. It is someone's registrar,
+not a load test.
 
 The canonical repo for this is hosted on tangled over at [`https://tangled.org/dunkirk.sh/the-cedarville-app`](https://tangled.org/dunkirk.sh/the-cedarville-app)
 

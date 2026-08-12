@@ -10,6 +10,7 @@
  */
 
 import { type Group, gaps, openGroups, type ProgramTree } from "../../requirements";
+import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 
 function renderGroup(group: Group): HTMLElement {
@@ -100,8 +101,8 @@ function renderTree(tree: ProgramTree): HTMLElement {
   return box;
 }
 
-export function mount(root: HTMLElement, trees: ProgramTree[]) {
-  root.replaceChildren(...trees.map(renderTree));
+export function mount(root: HTMLElement, ctx: Ctx) {
+  root.replaceChildren(...ctx.trees.map(renderTree));
   return {
     destroy() {
       root.replaceChildren();

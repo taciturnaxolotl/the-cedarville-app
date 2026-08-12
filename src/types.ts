@@ -169,7 +169,8 @@ export interface SearchResponse {
 }
 
 export interface Meeting {
-  Days: string[] | null;
+  /** Sometimes names ("Monday"), sometimes 0-6 integers, depending on endpoint. */
+  Days: (string | number)[] | null;
   StartTime: string | null;
   EndTime: string | null;
   StartDate: string;
@@ -178,6 +179,15 @@ export interface Meeting {
   Frequency: string;
   IsOnline: boolean;
   InstructionalMethodCode: string;
+}
+
+export interface FormattedMeeting extends Meeting {
+  BuildingDisplay: string;
+  RoomDisplay: string;
+  DaysOfWeekDisplay: string;
+  StartTimeDisplay: string;
+  EndTimeDisplay: string;
+  DatesDisplay: string;
 }
 
 export interface Section {
@@ -199,7 +209,8 @@ export interface Section {
   StartDate: string;
   EndDate: string;
   Meetings: Meeting[];
-  FormattedMeetingTimes: (Meeting & { BuildingDisplay: string; DaysOfWeekDisplay: string })[];
+  /** The display half, which carries times when the structured ones are null. */
+  FormattedMeetingTimes: FormattedMeeting[];
 }
 
 export interface SectionsResponse {

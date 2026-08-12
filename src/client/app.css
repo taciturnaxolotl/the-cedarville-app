@@ -247,3 +247,96 @@ table {
 td {
   padding: 2px 16px 2px 0;
 }
+
+/* ---- schedule ---- */
+
+.week {
+  margin-bottom: 22px;
+}
+
+.clash {
+  margin: 4px 0;
+  padding: 5px 9px;
+  border-left: 2px solid var(--red);
+  background: var(--mantle);
+  color: var(--red);
+}
+
+.grid {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.day {
+  position: relative;
+  flex: 1 0 130px;
+  padding-top: 26px;
+  border-left: 1px solid var(--surface);
+}
+
+.day h3 {
+  position: absolute;
+  top: 0;
+  margin: 0;
+  padding-left: 6px;
+  color: var(--subtext);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.block {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  overflow: hidden;
+  padding: 3px 6px;
+  border-radius: 3px;
+  border-left: 2px solid var(--lavender);
+  background: var(--mantle);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.block b {
+  display: block;
+  color: var(--lavender);
+  font-weight: 500;
+}
+
+.block span {
+  color: var(--overlay);
+}
+
+details.req {
+  margin-bottom: 2px;
+}
+
+label.section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0 3px 16px;
+  cursor: pointer;
+}
+
+label.section:hover {
+  background: var(--mantle);
+}
+
+label.section.clashes .when {
+  color: var(--overlay);
+  text-decoration: line-through;
+}
+
+.when {
+  min-width: 340px;
+}
+
+.tag.open {
+  color: var(--green);
+}
+.tag.full {
+  color: var(--red);
+}

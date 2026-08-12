@@ -42,6 +42,9 @@ function send<K extends Request["type"]>(msg: Request & { type: K }): Promise<Re
 }
 
 export const ping = () => send({ type: "ping" });
+export const terms = () => send({ type: "terms" });
+export const sections = (courseIds: string[], term: string) =>
+  send({ type: "sections", courseIds, term });
 export const programs = (): Promise<ProgramSummary[]> => send({ type: "programs" });
 export const capture = (whatIf: string[] = []): Promise<Capture> =>
   send({ type: "capture", whatIf });

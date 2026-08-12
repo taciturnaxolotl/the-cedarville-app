@@ -11,6 +11,7 @@
 
 import { merge } from "../../merge";
 import type { ProgramTree } from "../../requirements";
+import type { Ctx } from "../ctx";
 import { el } from "../dom";
 
 const WHY: Record<string, string> = {
@@ -30,7 +31,8 @@ const BLURB: Record<string, string> = {
   "catch-all": "one side accepts almost any course, so the overlap says little.",
 };
 
-export function mount(root: HTMLElement, trees: ProgramTree[]) {
+export function mount(root: HTMLElement, ctx: Ctx) {
+  const trees = ctx.trees;
   if (trees.length < 2) {
     root.replaceChildren(el("p", "muted", "capture a second major to compare."));
     return { destroy: () => root.replaceChildren() };

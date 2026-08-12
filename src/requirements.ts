@@ -529,6 +529,13 @@ export interface NeedOptions {
    * bought for one requirement can pay for a rule-based one too.
    */
   resolved?: ReadonlyMap<string, readonly string[]>;
+  /**
+   * Courses the student has decided to take, entering the cover as if already
+   * bought. Everything they satisfy then comes free, which is what lets the
+   * cost of a choice be measured: solve without the pin, solve with it, and
+   * the difference is what that choice actually costs.
+   */
+  pinned?: ReadonlySet<string>;
 }
 
 /** How a resolved group is addressed in `NeedOptions.resolved`. */
@@ -635,40 +642,32 @@ function committed(tree: ProgramTree, options: NeedOptions): Set<string> {
   return core;
 }
 
-function coursesForGroup(group: Group, options: NeedOptions): string[] {
-  const c = group.constraint;
-  if (c.kind === "take-all") return c.courses.map((x) => x.CourseName);
-
-  if (c.kind === "choose-from") {
-    // Cheapest first until the minimum is met; anything already done is free.
-    let want = group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? "");
-    const picked: string[] = [];
-    const pool = [...c.courses].sort(
-      (a, b) =>
-        Number(options.have.has(b.CourseName)) - Number(options.have.has(a.CourseName)) ||
-        options.credits(a.CourseName) - options.credits(b.CourseName),
-    );
-    for (const x of pool) {
-      if (want <= 0) break;
-      picked.push(x.CourseName);
-      want -= options.credits(x.CourseName);
-    }
-    return picked;
-  }
-  return [];
+/** A group that offers a choice, carried until the cover can solve them together. */
+export interface OpenChoice {
+  /** Program this came from, so a combined solve can say who wants it. */
+  program: string;
+  /** Colleague's own wording for the requirement. */
+  text: string;
+  pool: string[];
+  credits: number;
+  ids: Unenumerable["ids"];
 }
 
 /**
- * The cheapest set of courses that still satisfies a program.
+ * Walks one program and reports what it owes, without solving the choices.
  *
- * Program-agnostic on purpose: it reads the counts Colleague publishes rather
- * than knowing anything about a particular major's tracks.
+ * Split out from `coursesNeeded` so that several programs can be solved
+ * against a single cover. A student adding a minor to a major does not owe the
+ * two bills separately — a course bought for one pays for the other — and that
+ * discount only appears if every choice is on the table at once.
  */
-export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
+function walkProgram(
+  tree: ProgramTree,
+  options: NeedOptions,
+): { courses: Set<string>; choices: OpenChoice[]; unenumerable: Unenumerable[] } {
   const courses = new Set<string>();
   const unenumerable: Unenumerable[] = [];
-  /** Groups that offer a choice, resolved together rather than one at a time. */
-  const choices: { pool: string[]; credits: number }[] = [];
+  const choices: OpenChoice[] = [];
   // Priced against what the plan already owes, so a branch whose courses are
   // required anyway is recognised as free rather than merely tied.
   const free = committed(tree, options);
@@ -717,7 +716,13 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
           // its own afterwards.
           const pool = !bucket ? options.resolved?.get(groupKey(ids)) : undefined;
           if (pool?.length) {
-            choices.push({ pool: [...pool], credits: group.min.credits ?? 3 });
+            choices.push({
+              program: tree.code,
+              text: group.text || requirement.text || group.code,
+              pool: [...pool],
+              credits: group.min.credits ?? 3,
+              ids,
+            });
             continue;
           }
 
@@ -737,16 +742,63 @@ export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
           for (const x of c.courses) if (!options.have.has(x.CourseName)) courses.add(x.CourseName);
         } else if (c.kind === "choose-from") {
           choices.push({
+            program: tree.code,
+            text: group.text || requirement.text || group.code,
             pool: c.courses.map((x) => x.CourseName),
             credits: group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? ""),
+            ids: {
+              requirement: group.requirementCode,
+              subrequirement: group.subrequirementId,
+              group: group.id,
+            },
           });
         }
       }
     }
   }
 
+  return { courses, choices, unenumerable };
+}
+
+/**
+ * The cheapest set of courses that still satisfies a program.
+ *
+ * Program-agnostic on purpose: it reads the counts Colleague publishes rather
+ * than knowing anything about a particular major's tracks.
+ */
+export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
+  return coursesNeededAcross([tree], options);
+}
+
+/**
+ * The cheapest set of courses that satisfies several programs at once.
+ *
+ * This is the dual-major question stated properly. Solving each program on its
+ * own and taking the union double-buys every requirement the two share: both
+ * ask for a laboratory science, both accept `GBIO-1000`, and two separate
+ * covers each purchase their own. One cover over every choice buys it once.
+ *
+ * `pinned` is a course the student has decided to take. It enters the cover as
+ * though already bought, which is what makes "what does choosing this cost me"
+ * answerable: solve once without it, once with, and compare.
+ */
+export function coursesNeededAcross(
+  trees: readonly ProgramTree[],
+  options: NeedOptions,
+): Needed & { choices: OpenChoice[] } {
+  const courses = new Set<string>(options.pinned ?? []);
+  const choices: OpenChoice[] = [];
+  const unenumerable: Unenumerable[] = [];
+
+  for (const tree of trees) {
+    const walked = walkProgram(tree, options);
+    for (const code of walked.courses) courses.add(code);
+    choices.push(...walked.choices);
+    unenumerable.push(...walked.unenumerable);
+  }
+
   cover(courses, choices, options);
-  return { courses, unenumerable };
+  return { courses, choices, unenumerable };
 }
 
 /**

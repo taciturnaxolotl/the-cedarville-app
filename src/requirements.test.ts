@@ -4,6 +4,7 @@ import {
   absorbInto,
   accepts,
   coursesNeeded,
+  coursesNeededAcross,
   creditOverflow,
   enumeratedCourseIds,
   gaps,
@@ -1071,5 +1072,77 @@ describe("choosing a branch by what it adds", () => {
     );
     const { courses } = coursesNeeded(tree, { credits: () => 3, have: new Set() });
     expect(courses.size).toBe(2);
+  });
+});
+
+describe("solving several programs against one cover", () => {
+  /** Two programs, each asking for one lab science from an overlapping pool. */
+  const labScience = (code: string, pool: CourseRef[]) =>
+    normalize(program(code, [group({ FromCourses: pool, MinCredits: 3 })]));
+
+  const bio = course("1", "GBIO", "1000");
+  const chem = course("2", "CHEM", "1110");
+
+  test("buys a shared requirement once, not once per program", () => {
+    const a = labScience("A", [bio, chem]);
+    const b = labScience("B", [bio, chem]);
+    const options = { credits: () => 3, have: new Set<string>() };
+
+    // Solved separately the union is still one course only by luck of both
+    // covers picking the same one; solved together it is one by construction.
+    const together = coursesNeededAcross([a, b], options);
+    expect(together.courses.size).toBe(1);
+    // Both programs' choices are on the table.
+    expect(together.choices).toHaveLength(2);
+    expect(together.choices.map((c) => c.program).sort()).toEqual(["A", "B"]);
+  });
+
+  test("a program needing something the other does not still pays for it", () => {
+    const a = labScience("A", [bio]);
+    const b = labScience("B", [chem]);
+    const { courses } = coursesNeededAcross([a, b], { credits: () => 3, have: new Set() });
+    expect([...courses].sort()).toEqual(["CHEM-1110", "GBIO-1000"]);
+  });
+
+  test("carries the wording and ids a caller needs to explain a choice", () => {
+    const a = normalize(
+      program("A", [
+        group({ DisplayText: "One laboratory science", FromCourses: [bio, chem], MinCredits: 3 }),
+      ]),
+    );
+    const [choice] = coursesNeededAcross([a], { credits: () => 3, have: new Set() }).choices;
+    expect(choice).toMatchObject({ program: "A", text: "One laboratory science", credits: 3 });
+    expect(choice!.pool).toEqual(["GBIO-1000", "CHEM-1110"]);
+    expect(choice!.ids).toBeDefined();
+  });
+});
+
+describe("pinning a course", () => {
+  test("makes everything it satisfies free", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          FromCourses: [course("1", "GBIO", "1000"), course("2", "CHEM", "1110")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    const options = { credits: () => 3, have: new Set<string>() };
+    const pinned = coursesNeededAcross([tree], {
+      ...options,
+      pinned: new Set(["CHEM-1110"]),
+    });
+    // The cover must not buy a second lab science on top of the pinned one.
+    expect([...pinned.courses]).toEqual(["CHEM-1110"]);
+  });
+
+  test("a pin nothing wants is still owed", () => {
+    const tree = normalize(program("A", [group({ Courses: [course("1", "CS", "1210")] })]));
+    const { courses } = coursesNeededAcross([tree], {
+      credits: () => 3,
+      have: new Set(),
+      pinned: new Set(["ART-1100"]),
+    });
+    expect([...courses].sort()).toEqual(["ART-1100", "CS-1210"]);
   });
 });

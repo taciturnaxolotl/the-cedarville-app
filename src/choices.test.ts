@@ -416,3 +416,74 @@ describe("required outright versus merely chosen", () => {
     expect(picked[0]!.forced).toBe(false);
   });
 });
+
+describe("switching away from a dearer track", () => {
+  const twoRoutes = () =>
+    normalize({
+      StudentId: "1",
+      Program: {
+        Code: "A",
+        Title: "A",
+        Catalog: "2026",
+        Degree: "BS",
+        MinimumCredits: 120,
+        CompletedCredits: 0,
+        InProgressCredits: 0,
+        PlannedCredits: 0,
+        RequiredRequirementCount: 1,
+        CompletedRequirementCount: 0,
+        Requirements: [
+          {
+            Id: "r",
+            Code: "r",
+            Description: "core",
+            CompletionStatus: "NotStarted",
+            PlanningStatus: "NotPlanned",
+            MinSubrequirements: null,
+            MinGpa: null,
+            Subrequirements: [
+              {
+                Id: "s",
+                Code: "s",
+                DisplayText: "Electives or the AI track",
+                CompletionStatus: "NotStarted",
+                PlanningStatus: "NotPlanned",
+                MinGroups: 1,
+                MinGpa: null,
+                MinInstitutionalCredits: null,
+                Groups: [
+                  group({
+                    Id: "tech",
+                    DisplayText: "Technical electives",
+                    FromCourses: [course("1", "CS", "3220")],
+                    MinCredits: 3,
+                  }),
+                  group({
+                    Id: "ai",
+                    DisplayText: "AI Track",
+                    FromCourses: [course("2", "DSAI", "2110"), course("3", "DSAI", "3110")],
+                    MinCredits: 6,
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as EvaluationResponse);
+
+  const graph = [node("CS-3220"), node("DSAI-2110"), node("DSAI-3110")];
+
+  test("the cheaper route reads as a saving once the dearer one is chosen", () => {
+    const ranking = rankChoices([twoRoutes()], {
+      ...base(graph),
+      tracks: new Map([["r/s", ["ai"]]]),
+    });
+    const [branch] = ranking.branches;
+    const tech = branch!.options.find((o) => o.id === "tech")!;
+    expect(tech.taken).toBe(false);
+    // Three credits against six: switching back gives three back, and saying
+    // "free" would hide the only number worth showing.
+    expect(tech.addedCredits).toBe(-3);
+  });
+});

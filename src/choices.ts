@@ -260,11 +260,12 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
       return {
         ...option,
         taken,
+        // Unclamped, like a course candidate: once a dearer track is chosen,
+        // the other route is a saving, and saying "free" hides the number a
+        // student is looking for.
         addedTerms:
-          plan.unscheduled.length > baseUnplaced
-            ? null
-            : Math.max(0, finishIndex(plan, options.slots) - baseAt),
-        addedCredits: Math.max(0, plan.totalCredits - baseCredits),
+          plan.unscheduled.length > baseUnplaced ? null : finishIndex(plan, options.slots) - baseAt,
+        addedCredits: plan.totalCredits - baseCredits,
       };
     }),
   }));

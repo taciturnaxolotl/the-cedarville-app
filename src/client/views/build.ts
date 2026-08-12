@@ -72,13 +72,15 @@ function namesOf(tree: ProgramTree): string[] {
  * written to sit above a printed list, so it ends in a colon that leads
  * nowhere here, and states a credit count shown beside it anyway.
  */
-function tidy(text: string): string {
+function tidy(text: string, keepCredits = false): string {
   return (
     text
       // The count is often buried in a longer aside — "(3 credit hours
       // selected from the list of courses identified in the catalog)" — so the
       // whole parenthetical goes once it opens with a credit count.
-      .replace(/\s*\(\s*\d+(?:\.\d+)?\s*credit hours?\b[^)]*\)\s*/gi, " ")
+      .replace(/\s*\(\s*\d+(?:\.\d+)?\s*credit hours?\b[^)]*\)\s*/gi, (match) =>
+        keepCredits ? match : " ",
+      )
       .replace(/\s*selected from the following\b/gi, "")
       .replace(/\s+/g, " ")
       .replace(/[\s:.]+$/, "")
@@ -114,13 +116,23 @@ function priceOf(candidate: Candidate): { text: string; kind: string; why: strin
   return delta(candidate.addedTerms, candidate.addedCredits);
 }
 
-/** Signs the numbers, so a saving reads as one rather than as "free". */
+/**
+ * Signs the numbers, so a saving reads as one rather than as "free".
+ *
+ * Always a number, including zero: "+0 cr" sits in the same column as "+3 cr"
+ * and is read at a glance against it, where "free" is a word you have to stop
+ * and translate.
+ */
 function delta(terms: number, credits: number): { text: string; kind: string; why: string } {
   const signed = (n: number, unit: string) =>
-    `${n > 0 ? "+" : "−"}${Math.abs(n)} ${unit}${unit === "term" && Math.abs(n) !== 1 ? "s" : ""}`;
+    `${n > 0 ? "+" : n < 0 ? "−" : "+"}${Math.abs(n)} ${unit}${unit === "term" && Math.abs(n) !== 1 ? "s" : ""}`;
 
   if (terms === 0 && credits === 0) {
-    return { text: "free", kind: "free", why: "it fits in credits you are already spending" };
+    return {
+      text: signed(0, "cr"),
+      kind: "free",
+      why: "it fits in credits you are already spending",
+    };
   }
   if (terms === 0) {
     return credits < 0
@@ -534,7 +546,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
               );
             }
             row.append(pick);
-            row.append(el("span", "label", option.label));
+            row.append(el("span", "label", tidy(option.label, true)));
 
             if (done) {
               row.append(tag("already met", "free"));

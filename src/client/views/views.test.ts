@@ -1067,3 +1067,94 @@ describe("build view — a saving reads as a saving", () => {
     localStorage.removeItem("cedarville:pins");
   });
 });
+
+describe("build view — a cost is always a number", () => {
+  test("shows +0 cr rather than the word free", () => {
+    // ART-1200 is a swap for ART-1100 at the same price, so it costs nothing —
+    // and a signed zero sits in the same column as +3 and is read against it.
+    const major = normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));
+    const minor = normalize(
+      program("MIN", [
+        group({
+          Id: "e",
+          DisplayText: "One elective",
+          FromCourses: [
+            course("1", "CS", "1210"),
+            course("9", "ART", "1100"),
+            course("8", "ART", "1200"),
+          ],
+          MinCredits: 6,
+        }),
+      ]),
+    );
+    build.mount(root, { trees: [major, minor], enrolled: ["MAJ"] });
+    const badges = Array.from(root.querySelectorAll(".candidate .tag")).map((n) => n.textContent);
+    expect(badges).not.toContain("free");
+    expect(badges).toContain("+0 cr");
+  });
+
+  test("keeps the credit count on a track label but drops the boilerplate", () => {
+    const tree = normalize({
+      StudentId: "1",
+      Program: {
+        Code: "BS.CYOPR",
+        Title: "cyber",
+        Catalog: "2026",
+        Degree: "BS",
+        MinimumCredits: 128,
+        CompletedCredits: 0,
+        InProgressCredits: 0,
+        PlannedCredits: 0,
+        RequiredRequirementCount: 1,
+        CompletedRequirementCount: 0,
+        Requirements: [
+          {
+            Id: "r",
+            Code: "r",
+            Description: "core",
+            CompletionStatus: "NotStarted",
+            PlanningStatus: "NotPlanned",
+            MinSubrequirements: null,
+            MinGpa: null,
+            Subrequirements: [
+              {
+                Id: "s",
+                Code: "s",
+                DisplayText: "Electives or the track",
+                CompletionStatus: "NotStarted",
+                PlanningStatus: "NotPlanned",
+                MinGroups: 1,
+                MinGpa: null,
+                MinInstitutionalCredits: null,
+                Groups: [
+                  group({
+                    Id: "tech",
+                    DisplayText:
+                      "Technical electives selected from the following (6 credit hours):",
+                    FromCourses: [course("1", "CS", "3220")],
+                    MinCredits: 6,
+                  }),
+                  group({
+                    Id: "ai",
+                    DisplayText: "Artificial Intelligence Track (9 credit hours)",
+                    FromCourses: [course("2", "DSAI", "2110")],
+                    MinCredits: 9,
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as EvaluationResponse);
+
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+    const labels = Array.from(root.querySelectorAll(".choice.branch .label")).map(
+      (n) => n.textContent,
+    );
+    // The count is the substance of the choice and stays; the trailing colon
+    // and the pointer to a printed list do not.
+    expect(labels).toContain("Technical electives (6 credit hours)");
+    expect(labels).toContain("Artificial Intelligence Track (9 credit hours)");
+  });
+});

@@ -500,6 +500,51 @@ export function sharedCredits(tree: ProgramTree): SharedCourse[] {
   return [...seen.values()].filter((s) => s.requirements.length > 1);
 }
 
+/**
+ * The transcript, grouped into the terms it was earned in.
+ *
+ * Colleague reports applied credit per requirement, so the same course appears
+ * under every group it counts toward and carries the term it was taken in.
+ * Turning that back into "what did I take, and when" is what lets a plan be
+ * drawn against the degree so far rather than starting from nowhere.
+ *
+ * Terms arrive as "2025FA" and are shortened to "FA25", which is how the
+ * projection names the terms ahead — two spellings of a term on one axis
+ * reads as two different things.
+ */
+export interface TakenTerm {
+  /** "FA25". */
+  name: string;
+  /** Sort key, the raw "2025FA", since the short form does not order. */
+  code: string;
+  courses: { code: string; credits: number; done: boolean }[];
+}
+
+export function coursesTaken(tree: ProgramTree): TakenTerm[] {
+  const byTerm = new Map<string, TakenTerm>();
+  const seen = new Set<string>();
+
+  for (const { group } of walkGroups(tree)) {
+    for (const credit of group.applied) {
+      if (credit.IsWithdrawn || !credit.Term || seen.has(credit.CourseName)) continue;
+      seen.add(credit.CourseName);
+
+      const term = byTerm.get(credit.Term) ?? {
+        name: `${credit.Term.slice(4)}${credit.Term.slice(2, 4)}`,
+        code: credit.Term,
+        courses: [],
+      };
+      term.courses.push({
+        code: credit.CourseName,
+        credits: credit.Credit ?? 0,
+        done: credit.IsCompletedCredit,
+      });
+      byTerm.set(credit.Term, term);
+    }
+  }
+  return [...byTerm.values()].sort((a, b) => a.code.localeCompare(b.code));
+}
+
 /** Courses the student is enrolled in now, which satisfy a corequisite. */
 export function inProgressCourses(tree: ProgramTree): Set<string> {
   const now = new Set<string>();

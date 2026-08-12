@@ -125,3 +125,77 @@ describe("what the graph leaves out", () => {
     expect(map.nodes).toHaveLength(2);
   });
 });
+
+describe("drawing the degree so far", () => {
+  test("puts the transcript in columns before the plan", () => {
+    const map = buildMap(plan([["SP27", ["CS-2210"]]]), {
+      graph: chain,
+      have: new Set(["CS-1210", "CS-1220"]),
+      history: [
+        { name: "FA25", courses: [{ code: "CS-1210", credits: 3, done: true }] },
+        { name: "SP26", courses: [{ code: "CS-1220", credits: 3, done: true }] },
+      ],
+    });
+    expect(map.terms.map((t) => t.name)).toEqual(["FA25", "SP26", "SP27"]);
+    expect(map.terms.filter((t) => t.past)).toHaveLength(2);
+    // Left to right, oldest first.
+    expect(map.nodes.find((n) => n.code === "CS-1210")!.x).toBeLessThan(
+      map.nodes.find((n) => n.code === "CS-2210")!.x,
+    );
+  });
+
+  test("draws the edges a met prerequisite would otherwise hide", () => {
+    // The whole reason to show history: without it CS-2210 waits on nothing
+    // visible and the chain appears to start in the middle.
+    const map = buildMap(plan([["SP27", ["CS-2210"]]]), {
+      graph: chain,
+      have: new Set(["CS-1210", "CS-1220"]),
+      history: [
+        {
+          name: "FA25",
+          courses: [
+            { code: "CS-1210", credits: 3, done: true },
+            { code: "CS-1220", credits: 3, done: true },
+          ],
+        },
+      ],
+    });
+    expect(map.edges.map((e) => `${e.from}->${e.to}`).sort()).toEqual([
+      "CS-1210->CS-1220",
+      "CS-1220->CS-2210",
+    ]);
+  });
+
+  test("marks what is finished apart from what is under way", () => {
+    const map = buildMap(plan([]), {
+      graph: chain,
+      have: new Set(["CS-1210", "CS-1220"]),
+      history: [
+        {
+          name: "FA26",
+          courses: [
+            { code: "CS-1210", credits: 3, done: true },
+            { code: "CS-1220", credits: 3, done: false },
+          ],
+        },
+      ],
+    });
+    expect(map.nodes.find((n) => n.code === "CS-1210")?.past).toBe("done");
+    expect(map.nodes.find((n) => n.code === "CS-1220")?.past).toBe("running");
+  });
+
+  test("counts a finished course's leverage over the work ahead", () => {
+    const map = buildMap(
+      plan([
+        ["SP27", ["CS-1220"]],
+        ["FA27", ["CS-2210"]],
+      ]),
+      {
+        graph: chain,
+        have: new Set(["CS-1210"]),
+        history: [{ name: "FA25", courses: [{ code: "CS-1210", credits: 3, done: true }] }],
+      },
+    );
+    expect(map.nodes.find((n) => n.code === "CS-1210")?.unlocks).toBe(2);
+  });
+});

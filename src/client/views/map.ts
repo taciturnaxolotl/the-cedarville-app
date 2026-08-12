@@ -17,6 +17,7 @@ import { buildGraph, type CourseNode, parseRequisite, prerequisitesOf } from "..
 import {
   completedCourses,
   coursesNeededAcross,
+  coursesTaken,
   expectedCredits,
   inProgressCourses,
   type ProgramTree,
@@ -182,7 +183,12 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     }
 
     const plan = projectPlan({ need, completed: have, graph, credits: price, offeredIn, slots });
-    const map = buildMap(plan, { graph, have, title: (c) => titles.get(c) ?? "" });
+    const map = buildMap(plan, {
+      graph,
+      have,
+      history: coursesTaken(trees[0] as ProgramTree),
+      title: (c) => titles.get(c) ?? "",
+    });
     const { focus } = store.get();
     const lit = focus ? related(map, focus) : null;
 
@@ -190,7 +196,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     legend.append(
       document.createTextNode(
         `${map.nodes.length} courses across ${map.terms.length} terms · finishes ${plan.finishes ?? "beyond the horizon"} · ` +
-          `${map.edges.length} prerequisite links`,
+          `${map.edges.length} prerequisite links · ${map.nodes.filter((n) => n.past).length} already taken`,
       ),
     );
     if (focus) legend.append(el("span", "shared", ` · tracing ${focus}`));
@@ -200,9 +206,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
     for (const term of map.terms) {
       canvas.append(
-        Object.assign(svg("text", { x: term.x, y: 14, class: "term-label" }), {
-          textContent: `${term.name} · ${term.credits}cr`,
-        }),
+        Object.assign(
+          svg("text", { x: term.x, y: 14, class: `term-label${term.past ? " past" : ""}` }),
+          { textContent: `${term.name} · ${term.credits}cr` },
+        ),
       );
     }
 
@@ -221,7 +228,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     for (const node of map.nodes) {
       const dim = lit && !lit.has(node.code);
       const g = svg("g", {
-        class: `node${node.critical ? " critical" : ""}${dim ? " dim" : ""}`,
+        class: `node${node.past ? ` ${node.past}` : ""}${node.critical ? " critical" : ""}${dim ? " dim" : ""}`,
         transform: `translate(${node.x}, ${node.y})`,
       });
       g.append(svg("rect", { width: 168, height: 32, rx: 3 }));
@@ -230,7 +237,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       );
       g.append(
         Object.assign(svg("text", { x: 8, y: 25, class: "sub" }), {
-          textContent: `${node.credits}cr${node.unlocks ? ` · gates ${node.unlocks}` : ""}`,
+          textContent: `${node.credits}cr${node.past === "running" ? " · now" : ""}${node.unlocks ? ` · gates ${node.unlocks}` : ""}`,
         }),
       );
       const hint = [

@@ -5,6 +5,7 @@ import {
   accepts,
   coursesNeeded,
   coursesNeededAcross,
+  coursesTaken,
   creditOverflow,
   directiveFor,
   directivesIn,
@@ -1383,5 +1384,79 @@ describe("a pinned course is a choice, not a requirement", () => {
       pinned: new Set(["CS-1210"]),
     });
     expect(solved.required.has("CS-1210")).toBe(true);
+  });
+});
+
+describe("the transcript, by term", () => {
+  const credit = (name: string, term: string, done = true) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: 3,
+    VerifiedGrade: done ? "A" : "",
+    Term: term,
+    IsCompletedCredit: done,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+  });
+
+  test("groups courses into the terms they were taken in, oldest first", () => {
+    const tree = normalize(
+      program("A", [
+        group({ AppliedAcademicCredits: [credit("CS-1220", "2026SP")] }),
+        group({ AppliedAcademicCredits: [credit("CS-1210", "2025FA")] }),
+      ]),
+    );
+    expect(coursesTaken(tree).map((t) => t.name)).toEqual(["FA25", "SP26"]);
+  });
+
+  test("names a term the way the projection names one", () => {
+    // Two spellings of a term on one axis read as two different things.
+    const tree = normalize(
+      program("A", [group({ AppliedAcademicCredits: [credit("CS-1210", "2025FA")] })]),
+    );
+    expect(coursesTaken(tree)[0]).toMatchObject({ name: "FA25", code: "2025FA" });
+  });
+
+  test("counts a course once however many requirements claim it", () => {
+    const tree = normalize(
+      program("A", [
+        group({ AppliedAcademicCredits: [credit("PHYS-2110", "2026SP")] }),
+        group({ Id: "b", AppliedAcademicCredits: [credit("PHYS-2110", "2026SP")] }),
+      ]),
+    );
+    expect(coursesTaken(tree)[0]?.courses).toHaveLength(1);
+  });
+
+  test("keeps a course under way apart from one passed", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          AppliedAcademicCredits: [
+            credit("CS-1210", "2025FA"),
+            credit("HON-1010", "2026FA", false),
+          ],
+        }),
+      ]),
+    );
+    const all = coursesTaken(tree).flatMap((t) => t.courses);
+    expect(all.find((c) => c.code === "HON-1010")?.done).toBe(false);
+    expect(all.find((c) => c.code === "CS-1210")?.done).toBe(true);
+  });
+
+  test("a withdrawn course is not on the transcript", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          AppliedAcademicCredits: [{ ...credit("CS-1210", "2025FA"), IsWithdrawn: true }],
+        }),
+      ]),
+    );
+    expect(coursesTaken(tree)).toEqual([]);
   });
 });

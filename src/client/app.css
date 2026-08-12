@@ -899,3 +899,21 @@ label.section.clashes:not(:has(input:checked)) .when {
 .graph .node.dim {
   opacity: 0.3;
 }
+
+/* History is context, not plan: present and readable, clearly behind you. */
+.graph .term-label.past {
+  fill: var(--surface);
+}
+
+.graph .node.done rect {
+  fill: var(--crust);
+  stroke: var(--surface);
+}
+
+.graph .node.done .code {
+  fill: var(--overlay);
+}
+
+.graph .node.running rect {
+  stroke: var(--sky);
+}

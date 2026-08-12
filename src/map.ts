@@ -31,6 +31,8 @@ export interface MapNode {
   unlocks: number;
   /** A prerequisite we could not fully parse, carried through from the plan. */
   caution?: string;
+  /** On the transcript rather than ahead: passed, or being taken now. */
+  past?: "done" | "running";
 }
 
 export interface MapEdge {
@@ -48,13 +50,30 @@ export interface CourseMap {
   width: number;
   height: number;
   /** Terms in order, for the column headings. */
-  terms: { name: string; credits: number; x: number }[];
+  terms: { name: string; credits: number; x: number; past?: boolean }[];
+}
+
+/** A term already on the transcript, drawn to the left of the plan. */
+export interface PastTerm {
+  /** Short form, matching the projection: "FA25". */
+  name: string;
+  courses: { code: string; credits: number; done: boolean }[];
 }
 
 export interface MapOptions {
   graph: Graph;
-  /** Already passed, so a prerequisite met years ago draws no edge. */
+  /** Already passed or under way. Never scheduled, but drawn as history. */
   have: ReadonlySet<string>;
+  /**
+   * What the student has taken, in the terms they took it.
+   *
+   * Without this the picture opens mid-degree with chains that start nowhere:
+   * `LIT-2090` waits on `LIT-1990`, `BTGE-2730` on `BTGE-1725`, and a plan
+   * showing only the work ahead draws neither. It also answers the question a
+   * student asks first, which is where their general education went — the
+   * answer being that most of it is behind them.
+   */
+  history?: PastTerm[];
   title?: (code: string) => string;
   columnWidth?: number;
   rowHeight?: number;
@@ -140,7 +159,33 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
   const nodes = new Map<string, MapNode>();
   const terms: CourseMap["terms"] = [];
 
-  plan.terms.forEach((term, column) => {
+  const history = options.history ?? [];
+  history.forEach((term, column) => {
+    const x = padding + column * columnWidth;
+    terms.push({
+      name: term.name,
+      credits: term.courses.reduce((n, c) => n + c.credits, 0),
+      x,
+      past: true,
+    });
+    term.courses.forEach((course, row) => {
+      nodes.set(course.code, {
+        code: course.code,
+        title: options.title?.(course.code) ?? "",
+        credits: course.credits,
+        term: column,
+        termName: term.name,
+        x,
+        y: padding + headerHeight + row * rowHeight,
+        critical: false,
+        unlocks: 0,
+        past: course.done ? "done" : "running",
+      });
+    });
+  });
+
+  plan.terms.forEach((term, index) => {
+    const column = history.length + index;
     const x = padding + column * columnWidth;
     terms.push({ name: term.slot.name, credits: term.credits, x });
     term.courses.forEach((course, row) => {
@@ -167,7 +212,10 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
   for (const node of nodes.values()) {
     // Direct gates only: the implied CS-1210 to CS-2210 edge says nothing the
     // two it is drawn over do not already say, and crosses the picture.
-    for (const from of gatesOf(options.graph, node.code, options.have, new Set(nodes.keys()))) {
+    // Completion is passed as empty here on purpose: a prerequisite already
+    // met still draws its edge once the course sits on the board, and that
+    // edge is the whole reason to draw the history at all.
+    for (const from of gatesOf(options.graph, node.code, new Set(), new Set(nodes.keys()))) {
       if (!nodes.has(from)) continue;
       pairs.push({ from, to: node.code });
       out.set(from, [...(out.get(from) ?? []), node.code]);
@@ -198,11 +246,16 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
     };
   });
 
-  const rows = Math.max(0, ...plan.terms.map((t) => t.courses.length));
+  const columns = history.length + plan.terms.length;
+  const rows = Math.max(
+    0,
+    ...plan.terms.map((t) => t.courses.length),
+    ...history.map((t) => t.courses.length),
+  );
   return {
     nodes: [...nodes.values()],
     edges,
-    width: padding * 2 + Math.max(1, plan.terms.length) * columnWidth,
+    width: padding * 2 + Math.max(1, columns) * columnWidth,
     height: padding * 2 + headerHeight + rows * rowHeight,
     terms,
   };

@@ -654,3 +654,115 @@ label.section.clashes:not(:has(input:checked)) .when {
 .plan-course span {
   color: var(--subtext);
 }
+
+/* ---- build ---- */
+
+.picker {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--surface);
+}
+
+.picker h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.picker select {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  margin-bottom: 10px;
+}
+
+.chips {
+  margin-bottom: 10px;
+}
+
+.chips .tag {
+  margin: 0 6px 0 0;
+}
+
+.tag.on {
+  color: var(--green);
+}
+
+.tag.prog {
+  color: var(--lavender);
+}
+
+.shared {
+  color: var(--green);
+}
+
+.choice {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  background: var(--mantle);
+  border: 1px solid var(--surface);
+  border-radius: 4px;
+}
+
+.choice h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.choice h3 .cr {
+  margin-left: auto;
+  color: var(--overlay);
+  font-size: 11px;
+}
+
+.candidate {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.candidate .title {
+  flex: 1;
+  color: var(--subtext);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate.picked {
+  color: var(--green);
+}
+
+/* The pick control is the only affordance in a dense list, so it stays a
+   fixed width: a row that reflows when its label changes is unclickable. */
+.pick {
+  width: 26px;
+  padding: 0;
+  color: var(--subtext);
+  line-height: 20px;
+  text-align: center;
+}
+
+.candidate.picked .pick {
+  color: var(--crust);
+  background: var(--green);
+  border-color: var(--green);
+}
+
+/* Cost, ranked by how much it should worry you. */
+.tag.free {
+  color: var(--green);
+}
+
+.tag.cheap {
+  color: var(--yellow);
+}
+
+.tag.bad {
+  color: var(--red);
+}

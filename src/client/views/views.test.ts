@@ -10,6 +10,7 @@ import { Window } from "happy-dom";
 import { normalize, type ProgramTree } from "../../requirements";
 import type { EvaluationResponse, RawGroup } from "../../types";
 import type { Ctx } from "../ctx";
+import * as build from "./build";
 import * as overlap from "./overlap";
 import * as plan from "./plan";
 import * as schedule from "./schedule";
@@ -495,6 +496,67 @@ describe("plan view", () => {
 
   test("destroy clears the outlet", () => {
     plan.mount(root, ctxWith(CHAIN)).destroy();
+    expect(root.children).toHaveLength(0);
+  });
+});
+
+describe("build view", () => {
+  // Each program carries one group, because the shared harness lets a
+  // subrequirement pick only one of them.
+  const required: RawGroup[] = [
+    group({ Courses: [course("1", "CS", "1210")], DisplayText: "Take this" }),
+  ];
+  const elective: RawGroup[] = [
+    group({
+      Id: "elective",
+      DisplayText: "One computing elective",
+      FromCourses: [course("1", "CS", "1210"), course("9", "ART", "1100")],
+      MinCredits: 3,
+    }),
+  ];
+
+  test("asks for a capture before it can rank anything", () => {
+    build.mount(root, { trees: [] });
+    expect(root.textContent).toContain("capture your requirements first");
+  });
+
+  test("puts the course another program already requires at the top", () => {
+    build.mount(root, {
+      trees: [treeOf("MAJ", required), treeOf("MIN", elective)],
+    });
+    const codes = Array.from(root.querySelectorAll(".candidate b")).map((n) => n.textContent);
+    expect(codes[0]).toBe("CS-1210");
+    expect(root.textContent).toContain("already required");
+  });
+
+  test("prices the alternative rather than hiding it", () => {
+    build.mount(root, { trees: [treeOf("MAJ", required), treeOf("MIN", elective)] });
+    const rows = Array.from(root.querySelectorAll(".candidate")).map((n) => n.textContent ?? "");
+    expect(rows.find((r) => r.includes("ART-1100"))).toContain("+3 cr");
+  });
+
+  test("picking a course marks it and survives a remount", () => {
+    const trees = [treeOf("MAJ", required), treeOf("MIN", elective)];
+    const view = build.mount(root, { trees });
+    const pick = root.querySelector(".candidate .pick") as unknown as HTMLElement;
+    pick.click();
+    expect(root.querySelectorAll(".candidate.picked").length).toBeGreaterThan(0);
+    view.destroy();
+
+    build.mount(root, { trees });
+    expect(root.querySelectorAll(".candidate.picked").length).toBeGreaterThan(0);
+    localStorage.removeItem("cedarville:pins");
+  });
+
+  test("collapses one requirement shared by two programs and names both", () => {
+    build.mount(root, { trees: [treeOf("A", elective), treeOf("B", elective)] });
+    expect(root.querySelectorAll(".choice")).toHaveLength(1);
+    expect(root.textContent).toContain("counts for A + B");
+  });
+
+  test("destroys cleanly", () => {
+    const view = build.mount(root, { trees: [treeOf("BS.CYOPR", elective)] });
+    view.destroy();
     expect(root.children).toHaveLength(0);
   });
 });

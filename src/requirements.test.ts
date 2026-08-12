@@ -1242,3 +1242,39 @@ describe("a course whose credits are a range", () => {
     expect(expected.size).toBe(0);
   });
 });
+
+describe("what a course really costs the cover", () => {
+  test("prefers a standalone course to one behind a sequence", () => {
+    // Both are three credits and both close the requirement. One of them
+    // brings three more courses with it.
+    const tree = normalize(
+      program("A", [
+        group({
+          DisplayText: "One elective",
+          FromCourses: [course("1", "ART", "1100"), course("9", "ARBC", "2420")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    const chain: Record<string, number> = { "ARBC-2420": 12 };
+    const { courses } = coursesNeededAcross([tree], {
+      credits: () => 3,
+      cost: (c) => chain[c] ?? 3,
+      have: new Set(),
+    });
+    expect([...courses]).toEqual(["ART-1100"]);
+  });
+
+  test("without a cost function it still picks by credits alone", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          FromCourses: [course("1", "ART", "1100"), course("9", "ARBC", "2420")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    const { courses } = coursesNeededAcross([tree], { credits: () => 3, have: new Set() });
+    expect(courses.size).toBe(1);
+  });
+});

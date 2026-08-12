@@ -487,3 +487,48 @@ describe("switching away from a dearer track", () => {
     expect(tech.addedCredits).toBe(-3);
   });
 });
+
+describe("when a course would actually be taken", () => {
+  const pool = [course("1", "ART", "1100"), course("9", "DEEP", "4000")];
+  const tree = () =>
+    normalize(
+      program("A", [group({ DisplayText: "one elective", FromCourses: pool, MinCredits: 3 })]),
+    );
+  const graph = [node("ART-1100"), node("DEEP-4000", ["DEEP-3000"]), node("DEEP-3000")];
+
+  test("reports the term the projection puts it in", () => {
+    const ranking = rankChoices([tree()], base(graph));
+    const art = ranking.choices[0]!.candidates.find((c) => c.code === "ART-1100")!;
+    expect(art.lands).toBe("SP27");
+    // A four-course chain lands later than a course with none.
+    const deep = ranking.choices[0]!.candidates.find((c) => c.code === "DEEP-4000")!;
+    expect(deep.lands).not.toBe("SP27");
+  });
+
+  test("reports the seasons a course has been seen taught in", () => {
+    const ranking = rankChoices([tree()], {
+      ...base(graph),
+      offeredIn: (code: string, season) => code !== "DEEP-4000" || season === "spring",
+    });
+    const deep = ranking.choices[0]!.candidates.find((c) => c.code === "DEEP-4000")!;
+    expect(deep.offered).toEqual(["spring"]);
+  });
+
+  test("names what a choice pushes off the end", () => {
+    // Two slots and a required course that only runs in summer, which the
+    // horizon does not reach once the chain is bought.
+    const crowded = normalize(
+      program("A", [
+        group({ Courses: [course("8", "LATE", "4000")] }),
+        group({ Id: "e", DisplayText: "one elective", FromCourses: pool, MinCredits: 3 }),
+      ]),
+    );
+    const ranking = rankChoices([crowded], {
+      ...base([...graph, node("LATE-4000")]),
+      slots: termsFrom({ year: 2027, season: "spring" }, 2, { capacity: 3, includeSummers: false }),
+    });
+    const deep = ranking.choices.flatMap((c) => c.candidates).find((c) => c.code === "DEEP-4000")!;
+    expect(deep.addedTerms).toBeNull();
+    expect(deep.displaces.length).toBeGreaterThan(0);
+  });
+});

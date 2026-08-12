@@ -526,6 +526,15 @@ export function inProgressCourses(tree: ProgramTree): Set<string> {
 export interface NeedOptions {
   /** Credits for a course; used to pick the cheapest way to satisfy a choice. */
   credits: (code: string) => number;
+  /**
+   * What a course really costs, counting whatever it drags in behind it.
+   *
+   * `ARBC-2420` is a three-credit humanities elective sitting behind three
+   * terms of Arabic, and a cover that prices it at three picks it over a
+   * standalone course and then pays nine more. Defaults to `credits`, which
+   * keeps this module free of the prerequisite graph.
+   */
+  cost?: (code: string) => number;
   /** Courses already passed or under way. */
   have: ReadonlySet<string>;
   /**
@@ -1038,7 +1047,9 @@ function cover(
 
     let best: { code: string; value: number } | null = null;
     for (const code of candidates) {
-      const price = options.credits(code) || 1;
+      // Closed against true cost: what the requirement gains over what the
+      // whole purchase costs, chain included.
+      const price = (options.cost ?? options.credits)(code) || 1;
       // Credit actually closed, not credit offered: a 4-credit course against
       // a 3-credit requirement closes three.
       const closed = open

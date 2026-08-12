@@ -1233,3 +1233,59 @@ describe("build view — variable-credit courses", () => {
     expect(other.querySelector(".tag")?.textContent).toBe("+0 cr");
   });
 });
+
+describe("build view — when, and why not", () => {
+  const pool = [course("1", "ART", "1100"), course("9", "ARBC", "2420")];
+  const tree = normalize(
+    program("BS.CYOPR", [
+      group({ Id: "e", DisplayText: "One elective", FromCourses: pool, MinCredits: 3 }),
+    ]),
+  );
+
+  test("shows the term a course would be taken in", () => {
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+    const lands = Array.from(root.querySelectorAll(".candidate .lands")).map((n) => n.textContent);
+    expect(lands.length).toBeGreaterThan(0);
+    expect(lands[0]).toMatch(/^(SP|FA|SU)\d\d$/);
+  });
+
+  test("explains a refusal instead of stating one", () => {
+    // ARBC-2420 is Arabic IV: a spring-only course behind a three-course
+    // sequence. "Won't schedule" tells a student nothing they can act on.
+    const withChain = {
+      trees: [tree],
+      enrolled: ["BS.CYOPR"],
+      allCourses: [
+        { SubjectCode: "ART", Number: "1100", Title: "Drawing", MinimumCredits: 3 },
+        {
+          SubjectCode: "ARBC",
+          Number: "2420",
+          Title: "Arabic IV",
+          MinimumCredits: 3,
+          CourseRequisites: [
+            {
+              DisplayText: "Take ARBC-1410, ARBC-1420, ARBC-2410",
+              DisplayTextExtension: "- Must be completed prior to taking this course.",
+              IsRequired: true,
+            },
+          ],
+        },
+        { SubjectCode: "ARBC", Number: "1410", Title: "Arabic I", MinimumCredits: 3 },
+        { SubjectCode: "ARBC", Number: "1420", Title: "Arabic II", MinimumCredits: 3 },
+        { SubjectCode: "ARBC", Number: "2410", Title: "Arabic III", MinimumCredits: 3 },
+      ] as unknown as NonNullable<Ctx["allCourses"]>,
+    };
+    build.mount(root, withChain);
+    const arabic = Array.from(root.querySelectorAll(".candidate")).find((r) =>
+      r.textContent?.includes("ARBC-2420"),
+    )!;
+    // Three credits on paper, twelve in practice — and the cover must not
+    // prefer it to the standalone course on the strength of the sticker price.
+    expect(arabic.textContent).toContain("needs ARBC-1410, ARBC-1420, ARBC-2410 first");
+    expect(arabic.textContent).toContain("+9 cr");
+    const art = Array.from(root.querySelectorAll(".candidate")).find((r) =>
+      r.textContent?.includes("ART-1100"),
+    )!;
+    expect(art.textContent).toContain("cheapest");
+  });
+});

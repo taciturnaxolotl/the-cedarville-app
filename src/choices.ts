@@ -14,7 +14,7 @@
  * question the student is actually asking.
  */
 
-import { type Plan, type PlanRequest, projectPlan, type TermSlot } from "./planner";
+import { type Plan, type PlanRequest, projectPlan, type Season, type TermSlot } from "./planner";
 import { type Graph, prerequisitesOf } from "./prereqs";
 import {
   type BranchOption,
@@ -45,6 +45,23 @@ export interface Candidate {
   addedCredits: number;
   /** Prerequisites this choice drags in, which are part of its price. */
   requires: string[];
+  /**
+   * The term the projection puts this course in, when it fits. "SP28" answers
+   * "when would I actually take this", which a credit count never does.
+   */
+  lands?: string;
+  /**
+   * Seasons the course has been seen taught in. Empty means every listing we
+   * hold is silent about it, which is not the same as never — Colleague
+   * publishes a term or two ahead, so an unread season proves nothing.
+   */
+  offered: Season[];
+  /**
+   * What taking this pushes off the end of the plan. The reason a choice will
+   * not schedule is nearly always something else it displaces, and naming that
+   * is the difference between a refusal and an explanation.
+   */
+  displaces: string[];
   /** Requirements it would satisfy, across every program selected. */
   satisfies: { program: string; text: string }[];
   /**
@@ -176,6 +193,16 @@ function planFor(need: Iterable<string>, options: RankOptions): Plan {
  * with it finishes no later than the plan without it.
  */
 export function rankChoices(trees: readonly ProgramTree[], options: RankOptions): Ranking {
+  // The cover chooses between courses; a course behind a language sequence is
+  // not the bargain its own credit count suggests.
+  const chained = (code: string) =>
+    options.credits(code) +
+    [...prerequisitesOf(options.graph, code, options.have)].reduce(
+      (n, c) => n + options.credits(c),
+      0,
+    );
+  options = { cost: chained, ...options };
+
   const solved = coursesNeededAcross(trees, options);
   const baseline = planFor(solved.courses, options);
   const baseAt = finishIndex(baseline, options.slots);
@@ -196,7 +223,17 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
 
   // Memoised per pool: within a requirement, picking one course means not
   // picking another, so the same course can cost differently in two pools.
-  type Price = { addedTerms: number | null; addedCredits: number; requires: string[] };
+  const SEASONS: Season[] = ["fall", "spring", "summer"];
+  const baseStranded = new Set(baseline.unscheduled.map((u) => u.code));
+
+  type Price = {
+    addedTerms: number | null;
+    addedCredits: number;
+    requires: string[];
+    lands?: string;
+    offered: Season[];
+    displaces: string[];
+  };
   const priced = new Map<string, Price>();
   const price = (code: string, pool: readonly string[]): Price => {
     // Keyed by pool as well as course: a swap inside one requirement is a
@@ -230,10 +267,14 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     // Not clamped at zero. Once something expensive is pinned, the cheaper
     // alternatives genuinely shorten the plan, and a saving reported as "free"
     // is the one number a student most wants to see.
+    const lands = plan.terms.find((t) => t.courses.some((c) => c.code === code))?.slot.name;
     const result: Price = {
       addedTerms: blocked ? null : finishIndex(plan, options.slots) - baseAt,
       addedCredits: plan.totalCredits - baseCredits,
       requires,
+      ...(lands ? { lands } : {}),
+      offered: SEASONS.filter((season) => options.offeredIn(code, season)),
+      displaces: plan.unscheduled.map((u) => u.code).filter((c) => !baseStranded.has(c)),
     };
     priced.set(key, result);
     return result;
@@ -292,6 +333,11 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
         addedTerms: 0,
         addedCredits: 0,
         requires: [],
+        offered: SEASONS.filter((season) => options.offeredIn(code, season)),
+        displaces: [],
+        ...(baseline.terms.find((t) => t.courses.some((c) => c.code === code))?.slot.name
+          ? { lands: baseline.terms.find((t) => t.courses.some((c) => c.code === code))!.slot.name }
+          : {}),
         satisfies: wanted.get(code) ?? [],
         forced: solved.required.has(code),
         chosen: true,

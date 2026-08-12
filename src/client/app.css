@@ -831,3 +831,8 @@ label.section.clashes:not(:has(input:checked)) .when {
 .guessed {
   color: var(--yellow);
 }
+
+.candidate .lands {
+  color: var(--sky);
+  font-size: 11px;
+}

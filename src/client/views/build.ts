@@ -106,12 +106,20 @@ function priceOf(candidate: Candidate): { text: string; kind: string; why: strin
     };
   }
   if (candidate.addedTerms === null) {
+    // "Won't schedule" is a refusal. What a student needs is the reason, and
+    // the reason is nearly always a sequence that only runs in one season and
+    // shoves something else off the end.
+    const season = candidate.offered.length === 1 ? `${candidate.offered[0]} only` : "";
+    const chain =
+      candidate.requires.length > 1 ? `a ${candidate.requires.length + 1}-course sequence` : "";
+    const cost = candidate.displaces.length ? `delays ${candidate.displaces.join(", ")}` : "";
+    const reason = [season, chain, cost].filter(Boolean).join(", ");
     return {
-      text: "won't schedule",
+      text: reason ? `won't fit — ${reason}` : "won't fit in this plan",
       kind: "bad",
       why:
-        "no term fits this course or its prerequisites, or taking it pushes " +
-        "something else past the end of the plan",
+        "taking this pushes work past the end of the twelve terms projected. " +
+        "Raising your credits per term, or a longer horizon, may change that.",
     };
   }
   return delta(candidate.addedTerms, candidate.addedCredits);
@@ -467,6 +475,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     const badge = tag(cost.text, cost.kind);
     badge.title = cost.why;
     row.append(badge);
+
+    // When it lands answers "when would I actually take this", which no credit
+    // count does. The seasons say why that term and not an earlier one.
+    if (candidate.lands) {
+      const when = el("span", "lands", candidate.lands);
+      when.title = candidate.offered.length
+        ? `taught in ${candidate.offered.join(" and ")}, as far as the listings we hold go`
+        : "no listing we hold mentions this course, so its season is a guess";
+      row.append(when);
+    }
 
     // A course paying into two programs is the finding worth surfacing.
     const across = [...new Set(candidate.satisfies.map((s) => s.program))];

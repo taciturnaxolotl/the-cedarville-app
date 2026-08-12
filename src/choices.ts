@@ -228,6 +228,15 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
   // Memoised per pool: within a requirement, picking one course means not
   // picking another, so the same course can cost differently in two pools.
   const SEASONS: Season[] = ["fall", "spring", "summer"];
+  // Reporting which seasons a course runs in is a question about the course,
+  // not about any particular term, so it is asked of a representative slot.
+  const seasonSlot = (season: Season): TermSlot =>
+    options.slots.find((s) => s.season === season) ?? {
+      name: season,
+      season,
+      year: new Date().getFullYear(),
+      capacity: 0,
+    };
   const baseStranded = new Set(baseline.unscheduled.map((u) => u.code));
 
   type Price = {
@@ -277,7 +286,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
       addedCredits: plan.totalCredits - baseCredits,
       requires,
       ...(lands ? { lands } : {}),
-      offered: SEASONS.filter((season) => options.offeredIn(code, season)),
+      offered: SEASONS.filter((season) => options.offeredIn(code, seasonSlot(season))),
       displaces: plan.unscheduled.map((u) => u.code).filter((c) => !baseStranded.has(c)),
     };
     priced.set(key, result);
@@ -337,7 +346,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
         addedTerms: 0,
         addedCredits: 0,
         requires: [],
-        offered: SEASONS.filter((season) => options.offeredIn(code, season)),
+        offered: SEASONS.filter((season) => options.offeredIn(code, seasonSlot(season))),
         displaces: [],
         ...(baseline.terms.find((t) => t.courses.some((c) => c.code === code))?.slot.name
           ? { lands: baseline.terms.find((t) => t.courses.some((c) => c.code === code))!.slot.name }

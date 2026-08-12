@@ -10,9 +10,9 @@
  * of the degree you have actually assembled rather than the cheapest one.
  */
 
-import { seasonsOffered } from "../../catalog";
+import { runsIn, seasonsOffered, yearsOffered } from "../../catalog";
 import { buildMap, type CourseMap } from "../../map";
-import { projectPlan, type Season, termsFrom } from "../../planner";
+import { projectPlan, type Season, type TermSlot, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite, prerequisitesOf } from "../../prereqs";
 import {
   completedCourses,
@@ -26,7 +26,7 @@ import { offeringsFromListing } from "../../schedule";
 import { catalogStatus, fetchCatalog, resolveRules } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el } from "../dom";
-import { readLoad } from "../load";
+import { FULL_TIME, readLoad } from "../load";
 import { createStore, Subscriptions } from "../store";
 
 const PINS = "cedarville:pins";
@@ -97,9 +97,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const seasons = new Map<string, ReturnType<typeof seasonsOffered>>(
     records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]),
   );
-  const offeredIn = (code: string, season: Season) => {
+  const cycles = new Map<string, ReturnType<typeof yearsOffered>>(
+    records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]),
+  );
+  const offeredIn = (code: string, slot: TermSlot) => {
     const stated = seasons.get(code);
-    return !stated?.length || stated.includes(season);
+    if (stated?.length && !stated.includes(slot.season)) return false;
+    // 268 courses run in alternate academic years, and a plan that ignores
+    // that puts a student in a classroom that is not running.
+    return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
   };
 
   const stretched = expectedCredits(trees, (c) => ({
@@ -144,6 +150,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     capacity: load.perTerm,
     summerCapacity: load.summer,
     includeSummers: load.summer > 0,
+    minimum: FULL_TIME,
   });
   const legend = el("p", "credits");
   const board = el("div", "board");

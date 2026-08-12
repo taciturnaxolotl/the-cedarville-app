@@ -12,7 +12,7 @@
  * shorten, and it is the first thing worth knowing.
  */
 
-import { criticalPath, projectPlan, type Season, termsFrom } from "../../planner";
+import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
 import {
   completedCourses,
@@ -70,8 +70,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     : catalog.term.includes("SP")
       ? "spring"
       : "fall";
-  const offeredIn = (code: string, season: Season) =>
-    season === thisSeason ? seen.has(code) : true;
+  const offeredIn = (code: string, slot: TermSlot) =>
+    slot.season === thisSeason ? seen.has(code) : true;
 
   const tree = trees[0] as ProgramTree;
   const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);

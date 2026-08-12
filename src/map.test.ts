@@ -18,7 +18,12 @@ const node = (code: string, requires: string[] = []): CourseNode => ({
 /** A plan is only ever read here, so a literal is clearer than projecting one. */
 const plan = (terms: [string, string[]][]): Plan => ({
   terms: terms.map(([name, courses]) => ({
-    slot: { name, season: name.startsWith("SP") ? "spring" : "fall", capacity: 15 },
+    slot: {
+      name,
+      season: name.startsWith("SP") ? "spring" : "fall",
+      year: 2000 + Number(name.slice(2)),
+      capacity: 15,
+    },
     courses: courses.map((code) => ({ code, credits: 3 })),
     credits: courses.length * 3,
   })),

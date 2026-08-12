@@ -13,9 +13,9 @@
  * an ordered list where the top entry is usually free.
  */
 
-import { seasonsOffered } from "../../catalog";
+import { runsIn, seasonsOffered, yearsOffered } from "../../catalog";
 import { type Candidate, type RankedChoice, rankChoices } from "../../choices";
-import { type Season, termsFrom } from "../../planner";
+import { type Season, type TermSlot, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
 import {
   completedCourses,
@@ -226,9 +226,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const seasons = new Map<string, ReturnType<typeof seasonsOffered>>(
     records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]),
   );
-  const offeredIn = (code: string, season: Season) => {
+  const cycles = new Map<string, ReturnType<typeof yearsOffered>>(
+    records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]),
+  );
+  const offeredIn = (code: string, slot: TermSlot) => {
     const stated = seasons.get(code);
-    return !stated?.length || stated.includes(season);
+    if (stated?.length && !stated.includes(slot.season)) return false;
+    // 268 courses run in alternate academic years, and a plan that ignores
+    // that puts a student in a classroom that is not running.
+    return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
   };
 
   // ---- layout ----------------------------------------------------------
@@ -307,6 +313,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         capacity: store.get().load.perTerm,
         summerCapacity: store.get().load.summer,
         includeSummers: store.get().load.summer > 0,
+        minimum: FULL_TIME,
       }),
     });
 

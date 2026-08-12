@@ -508,7 +508,7 @@ describe("when a course would actually be taken", () => {
   test("reports the seasons a course has been seen taught in", () => {
     const ranking = rankChoices([tree()], {
       ...base(graph),
-      offeredIn: (code: string, season) => code !== "DEEP-4000" || season === "spring",
+      offeredIn: (code: string, slot) => code !== "DEEP-4000" || slot.season === "spring",
     });
     const deep = ranking.choices[0]!.candidates.find((c) => c.code === "DEEP-4000")!;
     expect(deep.offered).toEqual(["spring"]);

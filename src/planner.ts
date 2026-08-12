@@ -19,8 +19,16 @@ export interface TermSlot {
   /** "SP27", "SU27". */
   name: string;
   season: Season;
+  /** Calendar year the term falls in, which decides an alternate-year course. */
+  year: number;
   /** Credits allowed. Block tuition usually caps the regular terms. */
   capacity: number;
+  /**
+   * Credits below which a term is not worth opening. Twelve is full time at
+   * Cedarville, and a plan that strands three credits in a term of their own
+   * has quietly made the student part time for a semester.
+   */
+  minimum?: number;
 }
 
 export interface PlanRequest {
@@ -31,7 +39,7 @@ export interface PlanRequest {
   graph: Graph;
   credits: (code: string) => number;
   /** Whether a course is taught in a season, as far as we have seen. */
-  offeredIn: (code: string, season: Season) => boolean;
+  offeredIn: (code: string, slot: TermSlot) => boolean;
   /** Codes that count as a given course, for transcripts from older catalogs. */
   aliases?: (code: string) => string[];
   slots: TermSlot[];
@@ -67,6 +75,10 @@ export interface Plan {
  * pass is good enough here: the binding constraint is nearly always the
  * longest chain, and putting gates first is exactly how you shorten it.
  */
+/** Credits still owed, used to tell a light final term from a stranded one. */
+const creditsOf = (codes: ReadonlySet<string>, credits: (code: string) => number) =>
+  [...codes].reduce((n, c) => n + credits(c), 0);
+
 export function projectPlan(request: PlanRequest): Plan {
   const { graph, credits, offeredIn, slots, aliases } = request;
   const taken = new Set(request.completed);
@@ -87,7 +99,7 @@ export function projectPlan(request: PlanRequest): Plan {
     let used = 0;
 
     const candidates = [...remaining]
-      .filter((code) => offeredIn(code, slot.season))
+      .filter((code) => offeredIn(code, slot))
       .sort((a, b) => (leverage.get(b) ?? 0) - (leverage.get(a) ?? 0) || a.localeCompare(b));
 
     for (const code of candidates) {
@@ -117,6 +129,23 @@ export function projectPlan(request: PlanRequest): Plan {
       used += price;
     }
 
+    // A term that cannot reach full time is not worth opening: enrolling for
+    // three credits makes a student part time for a semester, with everything
+    // that follows for aid and standing. Hold the work back and let a later
+    // term take it.
+    //
+    // Only when holding back is free, though. A course that gates other work
+    // has to be taken whatever the term looks like, or deferring it defers
+    // everything behind it and the degree never finishes. And a term that
+    // clears the last of the work is the final one, where a light load is
+    // simply how a degree ends.
+    const finishes = used === creditsOf(remaining, credits);
+    const short = slot.minimum !== undefined && used > 0 && used < slot.minimum;
+    const gates = courses.some((c) =>
+      [...(graph.unlocks.get(c.code) ?? [])].some((next) => remaining.has(next)),
+    );
+    if (short && !finishes && !gates) continue;
+
     for (const c of courses) {
       taken.add(c.code);
       remaining.delete(c.code);
@@ -126,9 +155,11 @@ export function projectPlan(request: PlanRequest): Plan {
 
   const unscheduled = [...remaining].map((code) => ({
     code,
-    why: (["fall", "spring", "summer"] as Season[]).some((s) => offeredIn(code, s))
+    // A course no slot would accept was never schedulable; one every slot
+    // would accept simply never came up.
+    why: slots.some((slot) => offeredIn(code, slot))
       ? "ran out of terms"
-      : "never observed in any term we have data for",
+      : "not taught in any term this plan covers",
   }));
 
   const lastWithWork = [...terms].reverse().find((t) => t.courses.length);
@@ -160,9 +191,15 @@ function countDownstream(graph: Graph, code: string): number {
 export function termsFrom(
   start: { year: number; season: "spring" | "fall" },
   count: number,
-  options: { capacity?: number; summerCapacity?: number; includeSummers?: boolean } = {},
+  options: {
+    capacity?: number;
+    summerCapacity?: number;
+    includeSummers?: boolean;
+    /** Applied to autumn and spring only; a summer is part time by nature. */
+    minimum?: number;
+  } = {},
 ): TermSlot[] {
-  const { capacity = 18, summerCapacity = 7, includeSummers = true } = options;
+  const { capacity = 18, summerCapacity = 7, includeSummers = true, minimum } = options;
   const slots: TermSlot[] = [];
   let { year, season } = start;
 
@@ -171,11 +208,18 @@ export function termsFrom(
     slots.push({
       name: `${season === "spring" ? "SP" : "FA"}${yy}`,
       season,
+      year,
       capacity,
+      ...(minimum ? { minimum } : {}),
     });
     if (season === "spring") {
       if (includeSummers) {
-        slots.push({ name: `SU${yy}`, season: "summer", capacity: summerCapacity });
+        slots.push({
+          name: `SU${yy}`,
+          season: "summer",
+          year,
+          capacity: summerCapacity,
+        });
       }
       season = "fall";
     } else {

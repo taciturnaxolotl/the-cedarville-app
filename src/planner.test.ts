@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { criticalPath, projectPlan, type Season, termsFrom } from "./planner";
+import { criticalPath, projectPlan, type TermSlot, termsFrom } from "./planner";
 import { buildGraph, type CourseNode, parseRequisite } from "./prereqs";
 
 const BEFORE = "- Must be completed prior to taking this course.";
@@ -33,7 +33,7 @@ const plan = (
     completed: new Set(),
     graph,
     credits: () => 3,
-    offeredIn: (code, season) => everywhere || season !== "summer" || code.startsWith("BB"),
+    offeredIn: (code, slot) => everywhere || slot.season !== "summer" || code.startsWith("BB"),
     slots,
   });
 
@@ -87,7 +87,7 @@ describe("projecting terms", () => {
       graph,
       credits: () => 3,
       offeredIn: () => true,
-      slots: [{ name: "SP27", season: "spring", capacity: 3 }],
+      slots: [{ name: "SP27", season: "spring", year: 2027, capacity: 3 }],
     });
     // AA-1000 unlocks three; the BB courses unlock nothing.
     expect(p.terms[0]!.courses[0]!.code).toBe("AA-1000");
@@ -117,7 +117,7 @@ describe("projecting terms", () => {
     });
     expect(p.terms).toHaveLength(0);
     expect(p.unscheduled[0]).toMatchObject({ code: "BB-1000" });
-    expect(p.unscheduled[0]!.why).toContain("never observed");
+    expect(p.unscheduled[0]!.why).toContain("not taught in any term");
   });
 
   test("running out of terms is a different complaint", () => {
@@ -134,8 +134,7 @@ describe("projecting terms", () => {
   });
 
   test("season limits push a course to the term that teaches it", () => {
-    const springOnly = (code: string, season: Season) =>
-      code === "BB-1000" ? season === "spring" : true;
+    const springOnly = (_code: string, slot: TermSlot) => slot.season === "spring";
     const p = projectPlan({
       need: ["BB-1000"],
       completed: new Set(),
@@ -143,9 +142,9 @@ describe("projecting terms", () => {
       credits: () => 3,
       offeredIn: springOnly,
       slots: [
-        { name: "SU27", season: "summer", capacity: 7 },
-        { name: "FA27", season: "fall", capacity: 18 },
-        { name: "SP28", season: "spring", capacity: 18 },
+        { name: "SU27", season: "summer", year: 2027, capacity: 7 },
+        { name: "FA27", season: "fall", year: 2027, capacity: 18 },
+        { name: "SP28", season: "spring", year: 2028, capacity: 18 },
       ],
     });
     expect(p.finishes).toBe("SP28");
@@ -189,5 +188,77 @@ describe("critical path", () => {
   test("a cycle does not hang the walk", () => {
     const cyclic = buildGraph([node("XX-1000", "Take YY-1000"), node("YY-1000", "Take XX-1000")]);
     expect(criticalPath(cyclic, ["XX-1000"], new Set()).length).toBeLessThan(5);
+  });
+});
+
+describe("a term worth opening", () => {
+  const three = buildGraph([
+    { code: "AA-1000", title: "", requisites: [] },
+    { code: "BB-1000", title: "", requisites: [] },
+  ]);
+
+  const plan = (minimum: number | undefined, capacity: number) =>
+    projectPlan({
+      need: ["AA-1000", "BB-1000"],
+      completed: new Set(),
+      graph: three,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: termsFrom({ year: 2027, season: "spring" }, 4, {
+        capacity,
+        includeSummers: false,
+        ...(minimum === undefined ? {} : { minimum }),
+      }),
+    });
+
+  test("holds work back rather than enrolling a student part time", () => {
+    // Three credits in a term of their own makes a student part time for a
+    // semester. AA and BB gate nothing, so deferring one is free.
+    const held = plan(6, 3);
+    expect(held.terms.every((t) => t.credits >= 6 || t === held.terms.at(-1))).toBe(true);
+  });
+
+  test("takes a short term anyway when the work gates what follows", () => {
+    // Deferring a course that unlocks others defers everything behind it.
+    const chain = buildGraph([
+      { code: "AA-1000", title: "", requisites: [] },
+      { code: "ZZ-4000", title: "", requisites: [req("Take AA-1000")] },
+    ]);
+    const p = projectPlan({
+      need: ["AA-1000", "ZZ-4000"],
+      completed: new Set(),
+      graph: chain,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: termsFrom({ year: 2027, season: "spring" }, 4, {
+        capacity: 3,
+        includeSummers: false,
+        minimum: 12,
+      }),
+    });
+    expect(p.terms.map((t) => t.courses[0]?.code)).toEqual(["AA-1000", "ZZ-4000"]);
+    expect(p.unscheduled).toEqual([]);
+  });
+
+  test("a light final term is simply how a degree ends", () => {
+    // One course left and nothing to hold it back for.
+    const p = projectPlan({
+      need: ["AA-1000"],
+      completed: new Set(),
+      graph: three,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: termsFrom({ year: 2027, season: "spring" }, 2, {
+        capacity: 12,
+        includeSummers: false,
+        minimum: 12,
+      }),
+    });
+    expect(p.terms).toHaveLength(1);
+    expect(p.terms[0]?.credits).toBe(3);
+  });
+
+  test("without a minimum it opens whatever term it can", () => {
+    expect(plan(undefined, 3).terms).toHaveLength(2);
   });
 });

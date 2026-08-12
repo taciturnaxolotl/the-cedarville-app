@@ -9,8 +9,8 @@
  */
 
 import { absorbed, creditCeiling, impliedOverlap, matchProgram, totalCredits } from "../src/book";
-import { compareTerms } from "../src/catalog";
-import { criticalPath, projectPlan, type Season, termsFrom } from "../src/planner";
+import { compareTerms, runsIn, seasonsOffered, yearsOffered } from "../src/catalog";
+import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from "../src/planner";
 import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
 import {
   completedCourses,
@@ -71,8 +71,14 @@ const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseNa
 const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));
 /** Seen in fall implies both regular terms; spring is unpublished, so absence means spring. */
 const regularSeason: Season = regularTerm.includes("SP") ? "spring" : "fall";
-const offeredIn = (code: string, season: Season) =>
-  season === "summer" ? inSummer.has(code) : season === regularSeason ? inFall.has(code) : true;
+const seasons = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]));
+const cycles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]));
+/** The registrar's own statement, rather than what one term's listing implies. */
+const offeredIn = (code: string, slot: TermSlot) => {
+  const stated = seasons.get(code);
+  if (stated?.length && !stated.includes(slot.season)) return false;
+  return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
+};
 
 /**
  * The printed catalog, if it has been scraped. Colleague gives requirements;

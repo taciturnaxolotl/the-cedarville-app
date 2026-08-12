@@ -17,9 +17,10 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
+import { runsIn, seasonsOffered, yearsOffered } from "../catalog";
 import { aliasesOf, buildEquivalences } from "../equivalence";
 import { merge } from "../merge";
-import { criticalPath, projectPlan, type Season, termsFrom } from "../planner";
+import { criticalPath, projectPlan, type TermSlot, termsFrom } from "../planner";
 import {
   buildGraph,
   type CourseNode,
@@ -320,11 +321,15 @@ function planningContext() {
     (id) => codeForId.get(id),
   );
 
-  const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseName));
-  const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));
-  // Spring is unpublished; absence from fall is taken to mean spring.
-  const offeredIn = (code: string, season: Season) =>
-    season === "summer" ? inSummer.has(code) : season === "fall" ? inFall.has(code) : true;
+  // The registrar states when a course runs and in which years; inferring it
+  // from one term's listing was wrong for 367 courses.
+  const seasons = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]));
+  const cycles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]));
+  const offeredIn = (code: string, slot: TermSlot) => {
+    const stated = seasons.get(code);
+    if (stated?.length && !stated.includes(slot.season)) return false;
+    return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
+  };
 
   return {
     graph,

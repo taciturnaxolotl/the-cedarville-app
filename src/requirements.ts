@@ -514,12 +514,29 @@ export function sharedCredits(tree: ProgramTree): SharedCourse[] {
  * reads as two different things.
  */
 export interface TakenTerm {
-  /** "FA25". */
+  /** "FA25", or "transfer" for credit that was never a term here. */
   name: string;
   /** Sort key, the raw "2025FA", since the short form does not order. */
   code: string;
+  /** Credit brought in rather than earned in the term it is filed under. */
+  transfer?: boolean;
   courses: { code: string; credits: number; done: boolean }[];
 }
+
+/**
+ * Credit that arrived rather than being earned in the term it is posted to.
+ *
+ * Colleague files transfer work, examination credit and placement under
+ * whichever term it was recorded in, so four courses from before matriculation
+ * land in the current autumn and make a nine-course semester out of a
+ * five-course one. Transfer carries grade "K", examination "CE", and
+ * proficiency waivers carry no term at all.
+ */
+const broughtIn = (credit: AppliedCredit) =>
+  credit.IsTransferCourse || credit.VerifiedGrade === "CE" || !credit.Term;
+
+/** Sorts before any real term, since `termKey` reads the year first. */
+const TRANSFER = "0000TR";
 
 export function coursesTaken(tree: ProgramTree): TakenTerm[] {
   const byTerm = new Map<string, TakenTerm>();
@@ -527,12 +544,15 @@ export function coursesTaken(tree: ProgramTree): TakenTerm[] {
 
   for (const { group } of walkGroups(tree)) {
     for (const credit of group.applied) {
-      if (credit.IsWithdrawn || !credit.Term || seen.has(credit.CourseName)) continue;
+      if (credit.IsWithdrawn || seen.has(credit.CourseName)) continue;
       seen.add(credit.CourseName);
 
-      const term = byTerm.get(credit.Term) ?? {
-        name: shortTerm(credit.Term),
-        code: credit.Term,
+      const transfer = broughtIn(credit);
+      const code = transfer ? TRANSFER : credit.Term;
+      const term = byTerm.get(code) ?? {
+        name: transfer ? "transfer" : shortTerm(code),
+        code,
+        ...(transfer ? { transfer: true } : {}),
         courses: [],
       };
       term.courses.push({
@@ -540,7 +560,7 @@ export function coursesTaken(tree: ProgramTree): TakenTerm[] {
         credits: credit.Credit ?? 0,
         done: credit.IsCompletedCredit,
       });
-      byTerm.set(credit.Term, term);
+      byTerm.set(code, term);
     }
   }
   return [...byTerm.values()].sort((a, b) => compareTerms(a.code, b.code));

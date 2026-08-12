@@ -1495,3 +1495,60 @@ describe("the transcript runs in calendar order", () => {
     expect(coursesTaken(tree).map((t) => t.name)).toEqual(["FA25", "SP26", "SU26", "FA26"]);
   });
 });
+
+describe("credit that arrived rather than being earned", () => {
+  const credit = (name: string, over: Record<string, unknown> = {}) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: 3,
+    VerifiedGrade: "A",
+    Term: "2026FA",
+    IsCompletedCredit: true,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+    ...over,
+  });
+
+  const taken = (credits: ReturnType<typeof credit>[]) =>
+    coursesTaken(normalize(program("A", [group({ AppliedAcademicCredits: credits })])));
+
+  test("does not swell the term it happens to be filed under", () => {
+    // Four transferred courses posted to the current autumn made a nine-course
+    // semester out of a five-course one.
+    const terms = taken([
+      credit("PYCH-1600", { IsTransferCourse: true, VerifiedGrade: "K" }),
+      credit("GMTH-1020", { VerifiedGrade: "CE" }),
+      credit("MATH-1715", { VerifiedGrade: "", IsCompletedCredit: false }),
+    ]);
+    expect(terms.map((t) => t.name)).toEqual(["transfer", "FA26"]);
+    expect(terms[0]?.courses.map((c) => c.code).sort()).toEqual(["GMTH-1020", "PYCH-1600"]);
+    expect(terms[1]?.courses.map((c) => c.code)).toEqual(["MATH-1715"]);
+  });
+
+  test("keeps placement credit, which carries no term at all", () => {
+    // LANG-HS02 is why the global awareness requirement is already met, so
+    // dropping it leaves that satisfaction unexplained.
+    const terms = taken([credit("LANG-HS02", { Term: "", Credit: 0, VerifiedGrade: "" })]);
+    expect(terms).toHaveLength(1);
+    expect(terms[0]).toMatchObject({ name: "transfer", transfer: true });
+  });
+
+  test("sorts before every term of study", () => {
+    const terms = taken([
+      credit("CS-1210", { Term: "2025FA" }),
+      credit("ENG-1400", { IsTransferCourse: true, VerifiedGrade: "K" }),
+    ]);
+    expect(terms.map((t) => t.name)).toEqual(["transfer", "FA25"]);
+  });
+
+  test("a course earned here is not marked as transfer", () => {
+    const terms = taken([credit("CS-1210", { Term: "2025FA" })]);
+    expect(terms[0]?.transfer).toBeUndefined();
+  });
+});

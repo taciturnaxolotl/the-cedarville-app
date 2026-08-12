@@ -917,3 +917,14 @@ label.section.clashes:not(:has(input:checked)) .when {
 .graph .node.running rect {
   stroke: var(--sky);
 }
+
+/* Credit that arrived rather than being earned: present, and visibly apart. */
+.graph .node.transfer rect {
+  fill: var(--crust);
+  stroke: var(--surface);
+  stroke-dasharray: 3 3;
+}
+
+.graph .node.transfer .code {
+  fill: var(--overlay);
+}

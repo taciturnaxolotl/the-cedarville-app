@@ -31,8 +31,8 @@ export interface MapNode {
   unlocks: number;
   /** A prerequisite we could not fully parse, carried through from the plan. */
   caution?: string;
-  /** On the transcript rather than ahead: passed, or being taken now. */
-  past?: "done" | "running";
+  /** On the transcript rather than ahead, and how it got there. */
+  past?: "done" | "running" | "transfer";
 }
 
 export interface MapEdge {
@@ -50,13 +50,15 @@ export interface CourseMap {
   width: number;
   height: number;
   /** Terms in order, for the column headings. */
-  terms: { name: string; credits: number; x: number; past?: boolean }[];
+  terms: { name: string; credits: number; x: number; past?: boolean; transfer?: boolean }[];
 }
 
 /** A term already on the transcript, drawn to the left of the plan. */
 export interface PastTerm {
-  /** Short form, matching the projection: "FA25". */
+  /** Short form, matching the projection: "FA25", or "transfer". */
   name: string;
+  /** Credit brought in, which belongs to no semester of study here. */
+  transfer?: boolean;
   courses: { code: string; credits: number; done: boolean }[];
 }
 
@@ -167,6 +169,7 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
       credits: term.courses.reduce((n, c) => n + c.credits, 0),
       x,
       past: true,
+      ...(term.transfer ? { transfer: true } : {}),
     });
     term.courses.forEach((course, row) => {
       nodes.set(course.code, {
@@ -179,7 +182,7 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
         y: padding + headerHeight + row * rowHeight,
         critical: false,
         unlocks: 0,
-        past: course.done ? "done" : "running",
+        past: term.transfer ? "transfer" : course.done ? "done" : "running",
       });
     });
   });

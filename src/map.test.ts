@@ -199,3 +199,23 @@ describe("drawing the degree so far", () => {
     expect(map.nodes.find((n) => n.code === "CS-1210")?.unlocks).toBe(2);
   });
 });
+
+describe("credit brought in", () => {
+  test("is drawn apart from work done here", () => {
+    const map = buildMap(plan([["SP27", ["CS-1220"]]]), {
+      graph: chain,
+      have: new Set(["CS-1210"]),
+      history: [
+        {
+          name: "transfer",
+          transfer: true,
+          courses: [{ code: "CS-1210", credits: 3, done: true }],
+        },
+      ],
+    });
+    expect(map.terms[0]).toMatchObject({ name: "transfer", past: true, transfer: true });
+    expect(map.nodes.find((n) => n.code === "CS-1210")?.past).toBe("transfer");
+    // It still gates what it gates.
+    expect(map.edges.map((e) => `${e.from}->${e.to}`)).toEqual(["CS-1210->CS-1220"]);
+  });
+});

@@ -62,6 +62,13 @@ export interface RankedChoice {
   /** Credits the group still wants. */
   credits: number;
   ids: Unenumerable["ids"];
+  /**
+   * Courses in this pool the student has already passed or is taking. They
+   * never appear as candidates — there is nothing to decide about a course you
+   * have done — but they are why a requirement can be met with an empty-looking
+   * list of options.
+   */
+  satisfiedBy: { code: string; credits: number }[];
   /** Cheapest first, then fewest added credits, then alphabetical. */
   candidates: Candidate[];
 }
@@ -255,8 +262,12 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
     // priced without a re-solve and always sorts first.
     const free: Candidate[] = [];
     const rest: string[] = [];
+    const satisfiedBy: { code: string; credits: number }[] = [];
     for (const code of choice.pool) {
-      if (options.have.has(code)) continue;
+      if (options.have.has(code)) {
+        satisfiedBy.push({ code, credits: options.credits(code) });
+        continue;
+      }
       if (!solved.courses.has(code)) {
         rest.push(code);
         continue;
@@ -288,6 +299,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
       text: choice.text,
       credits: choice.credits,
       ids: choice.ids,
+      satisfiedBy,
       // Cheapest in terms first; anything that does not finish at all sorts
       // last, however few credits it looks like.
       candidates: [...free, ...ranked].sort(

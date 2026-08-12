@@ -379,9 +379,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
    * decided on their behalf that they should not.
    */
   const metBy = (choice: RankedChoice) => {
-    const forced = choice.candidates.filter((c) => c.forced);
-    const covered = forced.reduce((n, c) => n + c.credits, 0);
-    return covered >= choice.credits ? forced : [];
+    // A course already passed counts as much as one the degree forces on you,
+    // and counts more plainly: HON-1010 met the humanities slot two years ago,
+    // and listing HUM-1400 at "+1 term" implies work that is behind you.
+    const done = choice.satisfiedBy.map((c) => ({ code: c.code, credits: c.credits, done: true }));
+    const forced = choice.candidates
+      .filter((c) => c.forced)
+      .map((c) => ({ code: c.code, credits: c.credits, done: false }));
+    const covering = [...done, ...forced];
+    const covered = covering.reduce((n, c) => n + c.credits, 0);
+    return covered >= choice.credits ? covering : [];
   };
 
   function candidateRow(candidate: Candidate) {
@@ -477,21 +484,39 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           b.options.some((o) => o.status.completion !== "Completed"),
         );
         for (const branch of open) {
-          const box = el("div", "choice branch");
+          // A route already walked ends the decision. Two years of high-school
+          // language met the global-awareness requirement, and offering the
+          // other five ways to meet it invites work that is already done.
+          const finished = branch.options.filter((o) => o.status.completion === "Completed");
+          const box = el("div", `choice branch${finished.length ? " met" : ""}`);
           const head = el("h3");
           head.append(document.createTextNode(tidy(branch.text)));
           head.append(tag(branch.program, "prog"));
+          if (finished.length) head.append(tag("met", "free"));
           box.append(head);
 
           for (const option of branch.options) {
-            const row = el("div", `candidate${option.taken ? " picked" : ""}`);
+            const done = option.status.completion === "Completed";
+            // With one route finished the others are moot, not merely unchosen.
+            const settled = finished.length > 0;
+            const row = el(
+              "div",
+              `candidate${done || (!settled && option.taken) ? " picked" : ""}`,
+            );
             const pick = el("button", "pick");
             pick.type = "button";
-            pick.textContent = option.taken ? "●" : "○";
-            pick.title = option.taken ? "currently chosen" : `choose ${option.label}`;
-            pick.addEventListener("click", () =>
-              store.set({ tracks: { ...store.get().tracks, [branch.key]: option.id } }),
-            );
+            pick.textContent = done || (!settled && option.taken) ? "●" : "○";
+            if (settled) {
+              pick.disabled = true;
+              pick.title = done
+                ? "you have already met the requirement this way"
+                : "the requirement is already met another way";
+            } else {
+              pick.title = option.taken ? "currently chosen" : `choose ${option.label}`;
+              pick.addEventListener("click", () =>
+                store.set({ tracks: { ...store.get().tracks, [branch.key]: option.id } }),
+              );
+            }
             row.append(pick);
             row.append(el("span", "label", option.label));
 
@@ -512,7 +537,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             box.append(row);
           }
 
-          if (store.get().tracks[branch.key]) {
+          if (!finished.length && store.get().tracks[branch.key]) {
             const reset = el("button", "reset", "use the cheapest instead");
             reset.type = "button";
             reset.addEventListener("click", () => {
@@ -547,8 +572,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
               el(
                 "p",
                 "muted",
-                `${met.map((c) => c.code).join(" and ")} covers this, since your degree requires ` +
-                  "it anyway. Pick more if you want them; they will be priced like anything else.",
+                `${met.map((c) => c.code).join(" and ")} covers this — ` +
+                  `${met.every((c) => c.done) ? "already passed" : met.some((c) => c.done) ? "partly passed, partly required anyway" : "your degree requires it anyway"}. ` +
+                  "Pick more if you want them; they will be priced like anything else.",
               ),
             );
           }

@@ -915,3 +915,112 @@ describe("build view — what the projection knows about seasons", () => {
     expect(note?.textContent).toContain("assumed to run then");
   });
 });
+
+describe("build view — a route already walked", () => {
+  const applied = (name: string, credit: number) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: credit,
+    VerifiedGrade: "A",
+    Term: "24/FA",
+    IsCompletedCredit: true,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+  });
+
+  /** Global awareness: six routes, one of them already finished. */
+  const sixRoutes = normalize({
+    StudentId: "1",
+    Program: {
+      Code: "BS.CYOPR",
+      Title: "cyber",
+      Catalog: "2026",
+      Degree: "BS",
+      MinimumCredits: 128,
+      CompletedCredits: 0,
+      InProgressCredits: 0,
+      PlannedCredits: 0,
+      RequiredRequirementCount: 1,
+      CompletedRequirementCount: 0,
+      Requirements: [
+        {
+          Id: "g",
+          Code: "UG.GLOBAL",
+          Description: "Global Awareness Requirement",
+          CompletionStatus: "Completed",
+          PlanningStatus: "CompletelyPlanned",
+          MinSubrequirements: 1,
+          MinGpa: null,
+          Subrequirements: [
+            {
+              Id: "hs",
+              Code: "2Yr HS Foreign Lang",
+              DisplayText: "",
+              CompletionStatus: "Completed",
+              PlanningStatus: "CompletelyPlanned",
+              MinGroups: null,
+              MinGpa: null,
+              MinInstitutionalCredits: null,
+              Groups: [group({ Id: "hsg", CompletionStatus: "Completed" })],
+            },
+            {
+              Id: "fl",
+              Code: "Elem-Lvl Coll FL",
+              DisplayText: "",
+              CompletionStatus: "NotStarted",
+              PlanningStatus: "NotPlanned",
+              MinGroups: null,
+              MinGpa: null,
+              MinInstitutionalCredits: null,
+              Groups: [
+                group({ Id: "flg", FromCourses: [course("7", "SPAN", "1010")], MinCredits: 4 }),
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  } as EvaluationResponse);
+
+  test("locks every route once one is finished", () => {
+    build.mount(root, { trees: [sixRoutes], enrolled: ["BS.CYOPR"] });
+    const box = root.querySelector(".choice.branch") as unknown as HTMLElement;
+    expect(box.querySelector("h3")?.textContent).toContain("met");
+
+    const picks = Array.from(box.querySelectorAll(".pick")) as unknown as HTMLButtonElement[];
+    expect(picks.length).toBeGreaterThan(1);
+    expect(picks.every((p) => p.disabled)).toBe(true);
+    // The finished route reads as the answer, whatever the solver preferred.
+    expect(box.querySelector(".candidate.picked")?.textContent).toContain("2Yr HS Foreign Lang");
+    // And there is no way back to "cheapest", because nothing is being chosen.
+    expect(box.querySelector(".reset")).toBeNull();
+  });
+
+  test("a requirement met by a course already passed says so", () => {
+    // HON-1010 met the humanities slot years ago; listing HUM-1400 at a term's
+    // cost implies work that is behind you.
+    const tree = normalize(
+      program("BS.CYOPR", [
+        group({
+          Id: "hum",
+          DisplayText: "Introduction to Humanities",
+          FromCourses: [course("1", "HUM", "1400"), course("2", "HON", "1010")],
+          MinCredits: 3,
+          CompletionStatus: "PartiallyCompleted",
+          AppliedAcademicCredits: [applied("HON-1010", 5)],
+        }),
+      ]),
+    );
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+    const box = root.querySelector(".choice.met") as unknown as HTMLElement;
+    expect(box).toBeTruthy();
+    expect(box.textContent).toContain("HON-1010 covers this");
+    expect(box.textContent).toContain("already passed");
+  });
+});

@@ -374,3 +374,12 @@ progress::-webkit-progress-value {
   color: var(--subtext);
   font-size: 11px;
 }
+
+.tag.live {
+  border-bottom: 1px dotted currentColor;
+}
+
+.seats-note {
+  margin: 2px 0 8px;
+  font-size: 11px;
+}

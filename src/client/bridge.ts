@@ -91,3 +91,17 @@ export const catalogStatus = async (): Promise<CatalogStatus> =>
 /** Asks the server to re-crawl. Returns immediately; the crawl runs on. */
 export const refreshCatalog = (term: string) =>
   fetch(`/catalog/${encodeURIComponent(term)}/refresh`, { method: "POST" });
+
+/** Current availability for the courses on screen. Never cached. */
+export async function liveSeats(
+  term: string,
+  courseIds: string[],
+): Promise<Record<string, { available: number; capacity: number; status: string }>> {
+  if (courseIds.length === 0) return {};
+  const query = `?courses=${encodeURIComponent(courseIds.join(","))}`;
+  const res = await fetch(`/catalog/${encodeURIComponent(term)}/seats${query}`);
+  if (!res.ok) throw new Error(`seat counts unavailable (${res.status})`);
+  return res.json() as Promise<
+    Record<string, { available: number; capacity: number; status: string }>
+  >;
+}

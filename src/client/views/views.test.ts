@@ -286,4 +286,58 @@ describe("schedule view", () => {
     schedule.mount(root, withSections()).destroy();
     expect(root.children).toHaveLength(0);
   });
+
+  // The refactor this replaced ran a full DOM sweep on every tick. These
+  // assert the reactive path: an event sets state, state repaints the parts
+  // that depend on it, and nothing else is touched.
+  test("ticking a section updates the week without a manual sweep", () => {
+    localStorage.clear();
+    schedule.mount(root, withSections());
+    expect(root.textContent).toContain("nothing picked yet");
+
+    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    box.checked = true;
+    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+
+    expect(root.textContent).toContain("1 sections · 3 credits");
+    expect(root.querySelector(".grid")).toBeTruthy();
+    expect(root.textContent).toContain("Mon");
+  });
+
+  test("unticking puts the week back", () => {
+    localStorage.clear();
+    schedule.mount(root, withSections());
+    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+
+    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    expect(root.querySelector(".grid")).toBeTruthy();
+
+    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    expect(root.textContent).toContain("nothing picked yet");
+    expect(root.querySelector(".grid")).toBeFalsy();
+  });
+
+  test("a pick survives a remount", () => {
+    localStorage.clear();
+    const first = schedule.mount(root, withSections());
+    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    box.dispatchEvent(new window.Event("change", { bubbles: true }));
+    first.destroy();
+
+    schedule.mount(root, withSections());
+    const restored = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(restored.checked).toBe(true);
+    expect(root.textContent).toContain("1 sections");
+  });
+
+  test("destroy detaches subscriptions so a stale view cannot repaint", () => {
+    localStorage.clear();
+    const view = schedule.mount(root, withSections());
+    const box = root.querySelector("input[type=checkbox]") as HTMLInputElement;
+    view.destroy();
+
+    // The node is detached; firing at it must not throw or resurrect anything.
+    expect(() => box.dispatchEvent(new window.Event("change"))).not.toThrow();
+    expect(root.children).toHaveLength(0);
+  });
 });

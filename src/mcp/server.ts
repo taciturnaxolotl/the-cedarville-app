@@ -279,8 +279,17 @@ async function loadTrees(): Promise<Record<string, ProgramTree>> {
 
 /** Shared setup for the planning tools: graph, credits, seasons. */
 function planningContext() {
-  const fall = store.read("2026FA");
-  const summer = store.read("2026SU");
+  // Newest terms first; naming them literally is how a planner goes stale.
+  const cached = store
+    .stats()
+    .map((s) => s.term)
+    .sort()
+    .reverse();
+  const regular = cached.find((t) => !t.includes("SU"));
+  const summerTerm = cached.find((t) => t.includes("SU"));
+
+  const fall = regular ? store.read(regular) : { sections: [], courses: [] };
+  const summer = summerTerm ? store.read(summerTerm) : { sections: [], courses: [] };
   const records = [...(fall.courses ?? []), ...(summer.courses ?? [])];
 
   const credits = new Map(

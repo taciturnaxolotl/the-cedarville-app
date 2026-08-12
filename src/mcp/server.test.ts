@@ -201,6 +201,15 @@ describe("planning tools", () => {
     expect(body.toLowerCase()).toMatch(/no captured evaluation|evaluations\.json/);
   }, 20_000);
 
+  // Regression: both planning entry points named "2026FA" literally, so a
+  // newer catalog would land and be ignored without anything looking wrong.
+  test("planning reads the newest cached term, not a named one", async () => {
+    const source = await Bun.file(new URL("./server.ts", import.meta.url).pathname).text();
+    const planning = source.slice(source.indexOf("function planningContext"));
+    expect(planning.slice(0, 600)).not.toMatch(/store\.read\("\d{4}(FA|SP|SU)"\)/);
+    expect(planning).toContain("store.stats()");
+  });
+
   test("critical_path is registered only with --personal", async () => {
     expect(await listTools()).not.toContain("critical_path");
     expect(await listTools(["--personal"])).toContain("plan_terms");

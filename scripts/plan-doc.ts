@@ -21,8 +21,20 @@ import { offeringsFromListing } from "../src/schedule";
 import { CatalogStore } from "../src/server/store";
 
 const store = new CatalogStore();
-const fall = store.read("2026FA");
-const summer = store.read("2026SU");
+
+// Newest cached terms rather than named ones, so the projection does not keep
+// reasoning from last autumn's catalog after a newer one lands.
+const cached = store
+  .stats()
+  .map((s) => s.term)
+  .sort()
+  .reverse();
+const regularTerm = cached.find((t) => !t.includes("SU"));
+const summerTerm = cached.find((t) => t.includes("SU"));
+if (!regularTerm) throw new Error("no catalog cached; run the planner server once to crawl");
+
+const fall = store.read(regularTerm);
+const summer = summerTerm ? store.read(summerTerm) : { sections: [], courses: [] };
 
 const records = [...(fall.courses ?? []), ...(summer.courses ?? [])];
 const credits = new Map(
@@ -43,8 +55,9 @@ const graph = buildGraph(
 const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseName));
 const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));
 /** Seen in fall implies both regular terms; spring is unpublished, so absence means spring. */
+const regularSeason: Season = regularTerm.includes("SP") ? "spring" : "fall";
 const offeredIn = (code: string, season: Season) =>
-  season === "summer" ? inSummer.has(code) : season === "fall" ? inFall.has(code) : true;
+  season === "summer" ? inSummer.has(code) : season === regularSeason ? inFall.has(code) : true;
 
 const snapshot = await Bun.file(".data/evaluations.json").json();
 const cy = normalize(snapshot.evaluations["BS.CYOPR"]);
@@ -87,7 +100,9 @@ const w = (line = "") => out.push(line);
 w("# Degree plan");
 w();
 w(`Generated ${new Date().toISOString().slice(0, 10)} from the captured evaluations and the`);
-w("cached Fall 2026 / Summer 2026 catalog. Regenerate with `bun scripts/plan-doc.ts`.");
+w(
+  `cached ${regularTerm}${summerTerm ? ` / ${summerTerm}` : ""} catalog. Regenerate with \`bun scripts/plan-doc.ts\`.`,
+);
 w();
 w("Spring terms are modelled, not read: Colleague publishes only a term or two ahead, so a");
 w("course absent from Fall 2026 is assumed to run in spring. Treat dates as a projection.");

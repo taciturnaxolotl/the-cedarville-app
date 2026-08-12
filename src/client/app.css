@@ -960,3 +960,8 @@ label.section.clashes:not(:has(input:checked)) .when {
   color: var(--text);
   text-align: right;
 }
+
+.export {
+  padding: 4px 10px;
+  font-size: 11px;
+}

@@ -17,13 +17,16 @@ import * as plan from "./plan";
 import * as schedule from "./schedule";
 import * as tree from "./tree";
 
-const window = new Window();
+// The dev dump only fires on localhost, which is where the app runs.
+const window = new Window({ url: "http://localhost:5173/" });
 // The views call document.createElement, and the schedule view persists picks.
 // Without localStorage here its try/catch would hide a real failure.
 Object.assign(globalThis, {
   document: window.document,
   window,
   localStorage: window.localStorage,
+  location: window.location,
+  navigator: window.navigator,
 });
 
 const course = (id: string, subject: string, num: string) => ({
@@ -1518,5 +1521,48 @@ describe("build view — how heavy a term", () => {
     build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
     expect((root.querySelector(".dial input") as unknown as HTMLInputElement).value).toBe("17");
     localStorage.removeItem("cedarville:load");
+  });
+});
+
+describe("build view — sharing a plan", () => {
+  test("writes out every decision, not just the courses", () => {
+    const tree = normalize(
+      program(
+        "BS.CYOPR",
+        [
+          group({
+            Id: "e",
+            DisplayText: "One elective",
+            FromCourses: [course("1", "ART", "1100"), course("2", "ART", "1200")],
+            MinCredits: 3,
+          }),
+        ],
+        { Majors: ["Cyber Operations"] },
+      ),
+    );
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+
+    const written: unknown[] = [];
+    Object.assign(globalThis, {
+      fetch: async (_url: string, init?: { body?: string }) => {
+        if (init?.body) written.push(JSON.parse(init.body));
+        return { ok: true, json: async () => ({}) };
+      },
+    });
+    const art = Array.from(root.querySelectorAll(".candidate")).find((r) =>
+      r.textContent?.includes("ART-1200"),
+    )!;
+    (art.querySelector(".pick") as unknown as HTMLElement).click();
+    (root.querySelector(".export") as unknown as HTMLElement).click();
+
+    const picks = written.at(-1) as {
+      pinned: string[];
+      load: { perTerm: number };
+      programs: { names: string[] }[];
+    };
+    expect(picks.pinned).toContain("ART-1200");
+    expect(picks.load.perTerm).toBeGreaterThan(0);
+    expect(picks.programs[0]?.names).toEqual(["Cyber Operations"]);
+    localStorage.removeItem("cedarville:pins");
   });
 });

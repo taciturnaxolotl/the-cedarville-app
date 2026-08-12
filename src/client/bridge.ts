@@ -54,7 +54,9 @@ export const capture = (whatIf: string[] = []): Promise<Capture> =>
  * the schema. Localhost only, gitignored, and a no-op anywhere else.
  */
 export async function dumpForDev(name: string, snapshot: unknown): Promise<void> {
-  if (location.hostname !== "localhost") return;
+  // Optional by design, and never worth throwing over: a fire-and-forget
+  // helper that raises synchronously takes its caller down with it.
+  if (globalThis.location?.hostname !== "localhost") return;
   try {
     await fetch(`/dev/capture?name=${encodeURIComponent(name)}`, {
       method: "POST",

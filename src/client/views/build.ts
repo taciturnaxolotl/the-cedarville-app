@@ -26,7 +26,15 @@ import {
 } from "../../requirements";
 import { offeringsFromListing } from "../../schedule";
 import type { ProgramSummary } from "../../types";
-import { capture, catalogStatus, fetchCatalog, installed, programs, resolveRules } from "../bridge";
+import {
+  capture,
+  catalogStatus,
+  dumpForDev,
+  fetchCatalog,
+  installed,
+  programs,
+  resolveRules,
+} from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, verdictOf, writeLoad } from "../load";
@@ -463,6 +471,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             verdictOf,
             (perTerm) => store.set({ load: { ...store.get().load, perTerm } }),
           ),
+          exporter(),
           dial(
             "credits a summer",
             load.summer,
@@ -474,6 +483,42 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       },
     ),
   );
+
+  /**
+   * Everything the student has decided, in one file.
+   *
+   * The choices live in localStorage, which is exactly where nobody else can
+   * read them — including an advisor being asked whether the plan is sound.
+   * This writes them somewhere shareable and copies them to the clipboard.
+   */
+  function exporter() {
+    const button = el("button", "export", "copy my plan");
+    button.type = "button";
+    button.addEventListener("click", async () => {
+      const { pinned, tracks, load } = store.get();
+      const picks = {
+        exportedAt: new Date().toISOString(),
+        programs: trees.map((t) => ({ code: t.code, names: namesOf(t) })),
+        enrolled: [...enrolled],
+        load,
+        tracks,
+        pinned,
+      };
+      const text = JSON.stringify(picks, null, 2);
+      void dumpForDev("picks", picks);
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "copied";
+      } catch {
+        // Clipboard access is not always granted; the file is written anyway.
+        button.textContent = "written to .data/picks.json";
+      }
+      setTimeout(() => {
+        button.textContent = "copy my plan";
+      }, 2000);
+    });
+    return button;
+  }
 
   // ---- the choices -----------------------------------------------------
 

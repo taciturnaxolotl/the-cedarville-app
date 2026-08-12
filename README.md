@@ -105,6 +105,31 @@ one per user.
 The extension is then only needed for the one thing that is genuinely
 personal: your own program evaluation.
 
+### mcp
+
+An MCP server exposes the catalog, and optionally your own requirements, as
+tools. Add it to Claude Code with:
+
+```sh
+claude mcp add cedarville -- bun /abs/path/to/the-cedarville-app/src/mcp/server.ts
+```
+
+Five tools are always available, over public catalog data:
+`list_terms`, `search_courses`, `course_details`, `list_sections`,
+`check_conflicts`.
+
+Three more read a captured evaluation, and are **only registered when the
+server is started with `--personal`** (or `CEDARVILLE_MCP_PERSONAL=1`):
+`my_requirements`, `my_eligibility`, `compare_programs`.
+
+The opt-in is structural, not a runtime check. Without the flag those tools do
+not appear in `tools/list` and calling one returns "tool not found" — there is
+nothing to refuse, because nothing is registered. Every tool is read-only;
+none of them can register for a class or write anything back to Colleague.
+
+The server reads `.data/catalog.sqlite` directly, so the planner server does
+not need to be running, but a crawl must have happened at least once.
+
 ### dumping a session (local only)
 
 Some of Colleague is genuinely personal and needs your own login: the program

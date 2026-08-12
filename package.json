@@ -13,7 +13,9 @@
     "lint": "biome lint",
     "format": "biome format --write",
     "check": "biome check --write",
-    "ci": "biome ci . && tsc --noEmit && bun test"
+    "ci": "biome ci . && tsc --noEmit && bun test",
+    "mcp": "bun src/mcp/server.ts",
+    "mcp:personal": "bun src/mcp/server.ts --personal"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
@@ -21,5 +23,9 @@
     "@types/chrome": "^0.0.268",
     "happy-dom": "^20.11.2",
     "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.4.3"
   }
 }

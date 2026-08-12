@@ -419,10 +419,23 @@ describe("schedule view", () => {
 });
 
 describe("plan view", () => {
-  /** Its own fixture: the schedule view's lives inside that describe block. */
+  /**
+   * Its own tree as well as its own catalog. The shared fixture declares
+   * MinGroups: 1 over eight groups, which `coursesNeeded` now honours — so it
+   * correctly needs almost nothing, and a plan built from it is empty.
+   */
+  const planTree = () => {
+    const raw = program("BS.CYOPR", [
+      group({ Courses: [course("1", "CS", "1210")] }),
+      group({ Courses: [course("2", "CS", "2210")] }),
+    ]);
+    raw.Program.Requirements[0]!.Subrequirements[0]!.MinGroups = null;
+    return normalize(raw);
+  };
+
   const ctxWith = (courses: unknown[]): Ctx =>
     ({
-      trees: [treeOf("BS.CYOPR")],
+      trees: [planTree()],
       sections: {
         term: "2026FA",
         fetchedAt: "2026-08-12T00:00:00.000Z",

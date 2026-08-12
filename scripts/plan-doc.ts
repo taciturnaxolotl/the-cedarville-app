@@ -10,13 +10,7 @@
 
 import { criticalPath, projectPlan, type Season, termsFrom } from "../src/planner";
 import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
-import {
-  completedCourses,
-  inProgressCourses,
-  normalize,
-  type ProgramTree,
-  walkGroups,
-} from "../src/requirements";
+import { completedCourses, coursesNeeded, inProgressCourses, normalize } from "../src/requirements";
 import { offeringsFromListing } from "../src/schedule";
 import { CatalogStore } from "../src/server/store";
 
@@ -40,6 +34,7 @@ const records = [...(fall.courses ?? []), ...(summer.courses ?? [])];
 const credits = new Map(
   records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
 );
+const price = (c: string) => credits.get(c) ?? 3;
 const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
 const graph = buildGraph(
   records.map(
@@ -60,38 +55,14 @@ const offeredIn = (code: string, season: Season) =>
   season === "summer" ? inSummer.has(code) : season === regularSeason ? inFall.has(code) : true;
 
 const snapshot = await Bun.file(".data/evaluations.json").json();
-const cy = normalize(snapshot.evaluations["BS.CYOPR"]);
-const csFile = Bun.file(".data/whatif-BS.CMPSC.json");
-const cs = (await csFile.exists()) ? normalize(await csFile.json()) : null;
+// Whatever was captured, in capture order: no program code is named here.
+const trees = Object.values(snapshot.evaluations).map((raw) => normalize(raw as never));
+const cy = trees[0];
+if (!cy) throw new Error("no evaluations captured; use the planner's capture button first");
 
 const done = completedCourses(cy);
 const inProgress = inProgressCourses(cy);
 const have = new Set([...done, ...inProgress]);
-
-/** Named requirements, plus enough of each choose-from pool to meet its minimum. */
-function requiredCourses(tree: ProgramTree): Set<string> {
-  const need = new Set<string>();
-  for (const { requirement, group } of walkGroups(tree)) {
-    const label = group.text || requirement.text;
-    if (/Graphic Design|Linguistics|Video Game|Artificial Intelligence Track/i.test(label))
-      continue;
-    const c = group.constraint;
-    if (c.kind === "take-all") {
-      for (const x of c.courses) need.add(x.CourseName);
-    } else if (c.kind === "choose-from" && group.status.completion !== "Completed") {
-      let want = group.min.credits ?? 3;
-      const pool = c.courses
-        .filter((x) => !have.has(x.CourseName))
-        .sort((a, b) => (credits.get(a.CourseName) ?? 3) - (credits.get(b.CourseName) ?? 3));
-      for (const x of pool) {
-        if (want <= 0) break;
-        need.add(x.CourseName);
-        want -= credits.get(x.CourseName) ?? 3;
-      }
-    }
-  }
-  return need;
-}
 
 const label = (code: string) => `${code}${titles.has(code) ? ` — ${titles.get(code)}` : ""}`;
 const out: string[] = [];
@@ -116,16 +87,15 @@ w(
 w(`- ${done.size} courses passed, ${inProgress.size} running now`);
 w();
 
-for (const [name, tree, cap] of [
-  ["Cyber Operations only", cy, 15],
-  ...(cs ? ([["Cyber Operations + CS major", cs, 15]] as const) : []),
-] as const) {
-  const need = new Set([...requiredCourses(cy), ...(tree === cy ? [] : requiredCourses(tree))]);
+for (const tree of trees) {
+  const cap = 15;
+  const name = `${tree.code} — ${tree.title}`;
+  const { courses: need, unenumerable } = coursesNeeded(tree, { credits: price, have });
   const plan = projectPlan({
     need,
     completed: have,
     graph,
-    credits: (c) => credits.get(c) ?? 3,
+    credits: price,
     offeredIn,
     slots: termsFrom({ year: 2027, season: "spring" }, 12, { capacity: cap }),
   });
@@ -146,6 +116,12 @@ for (const [name, tree, cap] of [
     }
     w();
   }
+  if (unenumerable.length) {
+    w("Not plannable — Colleague evaluates these but never publishes the courses:");
+    w();
+    for (const u of unenumerable) w(`- ${u.credits ? `**${u.credits}cr** ` : ""}${u.text}`);
+    w();
+  }
   if (plan.unscheduled.length) {
     w("Not placed:");
     w();
@@ -154,7 +130,7 @@ for (const [name, tree, cap] of [
   }
 }
 
-const path = criticalPath(graph, requiredCourses(cy), have);
+const path = criticalPath(graph, coursesNeeded(cy, { credits: price, have }).courses, have);
 w("## The critical path");
 w();
 w("The longest chain of prerequisites still ahead. No credit load shortens it.");
@@ -168,7 +144,7 @@ w();
 
 w("## Blocked right now, and by what");
 w();
-for (const code of [...requiredCourses(cy)].filter((c) => !have.has(c)).sort()) {
+for (const code of [...coursesNeeded(cy, { credits: price, have }).courses].sort()) {
   const verdict = eligibility(
     graph.courses.get(code) ?? { code, title: "", requisites: [] },
     done,

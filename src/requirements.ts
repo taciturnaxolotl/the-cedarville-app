@@ -394,3 +394,129 @@ export function inProgressCourses(tree: ProgramTree): Set<string> {
   }
   return now;
 }
+
+// ---- what a student actually still owes --------------------------------
+
+/**
+ * Colleague expresses choice with two counts: a requirement may ask for only
+ * `minSubrequirements` of its subrequirements, and a subrequirement for only
+ * `minGroups` of its groups. That is how tracks, concentrations and
+ * "satisfy the global-awareness rule any one of six ways" are encoded.
+ *
+ * Ignoring those counts makes every alternative look mandatory, which is both
+ * wrong and program-specific — it was why a plan could demand Greek *and*
+ * Spanish, and why filtering by track name ever seemed necessary.
+ */
+export interface NeedOptions {
+  /** Credits for a course; used to pick the cheapest way to satisfy a choice. */
+  credits: (code: string) => number;
+  /** Courses already passed or under way. */
+  have: ReadonlySet<string>;
+}
+
+export interface Needed {
+  /** Courses to take, from the cheapest satisfying path through the tree. */
+  courses: Set<string>;
+  /**
+   * Requirements we cannot enumerate: a Colleague rule, or a filter over
+   * attributes the evaluation does not carry. Real work, still owed.
+   */
+  unenumerable: { requirement: string; text: string; credits?: number }[];
+}
+
+/** Remaining credits if this group were chosen. Cheaper is preferred. */
+function groupCost(group: Group, options: NeedOptions): number {
+  if (group.status.completion === "Completed") return 0;
+  const c = group.constraint;
+
+  if (c.kind === "take-all") {
+    return c.courses
+      .filter((x) => !options.have.has(x.CourseName))
+      .reduce((n, x) => n + options.credits(x.CourseName), 0);
+  }
+  if (c.kind === "choose-from")
+    return group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? "");
+  if (c.kind === "print-only") return 0;
+  // A rule or filter: we know the credits it wants, not the courses.
+  return group.min.credits ?? 3;
+}
+
+function coursesForGroup(group: Group, options: NeedOptions): string[] {
+  const c = group.constraint;
+  if (c.kind === "take-all") return c.courses.map((x) => x.CourseName);
+
+  if (c.kind === "choose-from") {
+    // Cheapest first until the minimum is met; anything already done is free.
+    let want = group.min.credits ?? options.credits(c.courses[0]?.CourseName ?? "");
+    const picked: string[] = [];
+    const pool = [...c.courses].sort(
+      (a, b) =>
+        Number(options.have.has(b.CourseName)) - Number(options.have.has(a.CourseName)) ||
+        options.credits(a.CourseName) - options.credits(b.CourseName),
+    );
+    for (const x of pool) {
+      if (want <= 0) break;
+      picked.push(x.CourseName);
+      want -= options.credits(x.CourseName);
+    }
+    return picked;
+  }
+  return [];
+}
+
+/**
+ * The cheapest set of courses that still satisfies a program.
+ *
+ * Program-agnostic on purpose: it reads the counts Colleague publishes rather
+ * than knowing anything about a particular major's tracks.
+ */
+export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
+  const courses = new Set<string>();
+  const unenumerable: Needed["unenumerable"] = [];
+
+  for (const requirement of tree.requirements) {
+    const subs = [...requirement.subrequirements];
+    // "Any one of these six" — take the cheapest, not all six.
+    const wantSubs = requirement.minSubrequirements ?? subs.length;
+    const chosenSubs = subs
+      .map((sub) => ({
+        sub,
+        cost: sub.groups.reduce((n, g) => n + groupCost(g, options), 0),
+        done: sub.status.completion === "Completed",
+      }))
+      .sort((a, b) => Number(b.done) - Number(a.done) || a.cost - b.cost)
+      .slice(0, Math.max(wantSubs, 0))
+      .map((x) => x.sub);
+
+    for (const sub of chosenSubs) {
+      const wantGroups = sub.minGroups ?? sub.groups.length;
+      const chosenGroups = [...sub.groups]
+        .map((group) => ({
+          group,
+          cost: groupCost(group, options),
+          done: group.status.completion === "Completed",
+        }))
+        .sort((a, b) => Number(b.done) - Number(a.done) || a.cost - b.cost)
+        .slice(0, Math.max(wantGroups, 0))
+        .map((x) => x.group);
+
+      for (const group of chosenGroups) {
+        if (group.status.completion === "Completed") continue;
+        const kind = group.constraint.kind;
+
+        if (kind === "rule-based" || kind === "filter") {
+          unenumerable.push({
+            requirement: requirement.text,
+            text: group.text || group.code,
+            ...(group.min.credits !== undefined ? { credits: group.min.credits } : {}),
+          });
+          continue;
+        }
+        for (const code of coursesForGroup(group, options)) {
+          if (!options.have.has(code)) courses.add(code);
+        }
+      }
+    }
+  }
+  return { courses, unenumerable };
+}

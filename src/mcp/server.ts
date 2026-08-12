@@ -29,12 +29,12 @@ import {
 } from "../prereqs";
 import {
   completedCourses,
+  coursesNeeded,
   gaps,
   inProgressCourses,
   normalize,
   openGroups,
   type ProgramTree,
-  walkGroups,
 } from "../requirements";
 import { conflicts, DAY_NAMES, formatTime, offeringsFromListing } from "../schedule";
 import { CatalogStore } from "../server/store";
@@ -313,34 +313,6 @@ function planningContext() {
   return { graph, titles, offeredIn, credits: (c: string) => credits.get(c) ?? 3 };
 }
 
-/** Named requirements, plus enough of each choose-from pool to meet its minimum. */
-function requiredCourses(
-  tree: ProgramTree,
-  credits: (c: string) => number,
-  have: ReadonlySet<string>,
-): Set<string> {
-  const need = new Set<string>();
-  for (const { requirement, group } of walkGroups(tree)) {
-    const label = group.text || requirement.text;
-    if (/Graphic Design|Linguistics|Video Game|Artificial Intelligence Track/i.test(label))
-      continue;
-    const c = group.constraint;
-    if (c.kind === "take-all") {
-      for (const x of c.courses) need.add(x.CourseName);
-    } else if (c.kind === "choose-from" && group.status.completion !== "Completed") {
-      let want = group.min.credits ?? 3;
-      for (const x of c.courses
-        .filter((x) => !have.has(x.CourseName))
-        .sort((a, b) => credits(a.CourseName) - credits(b.CourseName))) {
-        if (want <= 0) break;
-        need.add(x.CourseName);
-        want -= credits(x.CourseName);
-      }
-    }
-  }
-  return need;
-}
-
 function registerPersonal(server: McpServer) {
   server.registerTool(
     "my_requirements",
@@ -351,7 +323,7 @@ function registerPersonal(server: McpServer) {
         program: z
           .string()
           .optional()
-          .describe('Program code, e.g. "BS.CYOPR". Defaults to all captured.'),
+          .describe("Program code. Defaults to every captured evaluation."),
         only_gaps: z
           .boolean()
           .default(false)
@@ -439,7 +411,10 @@ function registerPersonal(server: McpServer) {
       description:
         "Project which term each remaining requirement lands in, respecting prerequisites, seasons and a credit cap. Answers 'when do I graduate' rather than 'how many credits'.",
       inputSchema: z.object({
-        program: z.string().default("BS.CYOPR").describe('Program code, e.g. "BS.CYOPR".'),
+        program: z
+          .string()
+          .optional()
+          .describe("Program code. Defaults to the first captured evaluation."),
         credits_per_term: z.number().int().min(6).max(21).default(15),
         include_summers: z.boolean().default(true),
         start: z
@@ -450,10 +425,10 @@ function registerPersonal(server: McpServer) {
     },
     async ({ program, credits_per_term, include_summers, start }) => {
       const trees = await loadTrees();
-      const tree = trees[program];
+      const tree = program ? trees[program] : Object.values(trees)[0];
       if (!tree)
         return fail(
-          `No captured evaluation for ${program}. Have: ${Object.keys(trees).join(", ")}`,
+          `No captured evaluation${program ? ` for ${program}` : ""}. Have: ${Object.keys(trees).join(", ") || "none"}`,
         );
 
       const { graph, credits, offeredIn, titles } = planningContext();
@@ -462,7 +437,7 @@ function registerPersonal(server: McpServer) {
       const year = 2000 + Number(start.slice(2));
 
       const plan = projectPlan({
-        need: requiredCourses(tree, credits, have),
+        need: coursesNeeded(tree, { credits, have }).courses,
         completed: have,
         graph,
         credits,
@@ -475,7 +450,7 @@ function registerPersonal(server: McpServer) {
 
       const toGo = tree.credits.minimum - tree.credits.completed - tree.credits.inProgress;
       const lines = [
-        `${program}: ${toGo} credits remain; this plan schedules ${plan.totalCredits} across named requirements.`,
+        `${tree.code}: ${toGo} credits remain; this plan schedules ${plan.totalCredits} across named requirements.`,
         `Finishes ${plan.finishes ?? "never within the horizon"} at ${credits_per_term}/term${include_summers ? " with summers" : ""}.`,
         "",
       ];
@@ -491,6 +466,13 @@ function registerPersonal(server: McpServer) {
         lines.push("", "not placed:");
         for (const u of plan.unscheduled) lines.push(`   ${u.code.padEnd(11)} ${u.why}`);
       }
+      const { unenumerable } = coursesNeeded(tree, { credits, have });
+      if (unenumerable.length) {
+        lines.push("", "not plannable — Colleague does not publish the eligible courses:");
+        for (const u of unenumerable) {
+          lines.push(`   ${u.credits ? `${u.credits}cr` : "    "}  ${u.text.slice(0, 70)}`);
+        }
+      }
       lines.push(
         "",
         "Caveats: class standing is not modelled, so senior capstones may appear early;",
@@ -505,16 +487,21 @@ function registerPersonal(server: McpServer) {
     {
       description:
         "The longest chain of prerequisites still ahead. This is the floor on how many terms remain, and no credit load shortens it.",
-      inputSchema: z.object({ program: z.string().default("BS.CYOPR") }),
+      inputSchema: z.object({
+        program: z.string().optional().describe("Defaults to the first captured evaluation."),
+      }),
     },
     async ({ program }) => {
       const trees = await loadTrees();
-      const tree = trees[program];
-      if (!tree) return fail(`No captured evaluation for ${program}.`);
+      const tree = program ? trees[program] : Object.values(trees)[0];
+      if (!tree)
+        return fail(
+          `No captured evaluation${program ? ` for ${program}` : ""}. Have: ${Object.keys(trees).join(", ") || "none"}`,
+        );
 
       const { graph, credits, titles } = planningContext();
       const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
-      const path = criticalPath(graph, requiredCourses(tree, credits, have), have);
+      const path = criticalPath(graph, coursesNeeded(tree, { credits, have }).courses, have);
       if (path.length === 0) return text("Nothing left with prerequisites.");
 
       return text(

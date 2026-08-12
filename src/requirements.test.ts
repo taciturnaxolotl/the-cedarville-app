@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { merge, type Significance } from "./merge";
-import { accepts, enumeratedCourseIds, gaps, levelOf, normalize, openGroups } from "./requirements";
+import {
+  accepts,
+  coursesNeeded,
+  enumeratedCourseIds,
+  gaps,
+  levelOf,
+  normalize,
+  openGroups,
+} from "./requirements";
 import type { CourseRef, EvaluationResponse, RawGroup } from "./types";
 
 const RANK: Record<Significance, number> = { guaranteed: 0, elective: 1, "catch-all": 2 };
@@ -44,6 +52,18 @@ const group = (over: Partial<RawGroup>): RawGroup => ({
   HasRules: false,
   OnlyConveysPrintText: false,
   ...over,
+});
+
+const sub = (code: string, groups: RawGroup[]) => ({
+  Id: code,
+  Code: code,
+  DisplayText: "",
+  CompletionStatus: "NotStarted",
+  PlanningStatus: "NotPlanned",
+  MinGroups: null,
+  MinGpa: null,
+  MinInstitutionalCredits: null,
+  Groups: groups,
 });
 
 const program = (code: string, groups: RawGroup[]): EvaluationResponse => ({
@@ -395,5 +415,151 @@ describe("dual-major merge", () => {
     expect(merge(a, b, { sharedCreditCap: 2 }).exceedsCap).toBe(true);
     expect(merge(a, b, { sharedCreditCap: 5 }).exceedsCap).toBe(false);
     expect(merge(a, b).certainSharedCourses).toHaveLength(3);
+  });
+});
+
+describe("what a student still owes", () => {
+  const credits = (c: string) => (c.endsWith("0000") ? 4 : 3);
+  const need = (tree: ReturnType<typeof normalize>, have: string[] = []) =>
+    coursesNeeded(tree, { credits, have: new Set(have) });
+
+  /**
+   * Colleague encodes tracks, concentrations and "any one of six ways" with
+   * MinSubrequirements and MinGroups. Ignoring them makes every alternative
+   * look mandatory — which is how a plan ends up demanding Greek and Spanish
+   * at once, and why filtering by track name ever seemed necessary.
+   */
+  test("a requirement offering six ways picks only the cheapest one", () => {
+    const raw = program("A", []);
+    raw.Program.Requirements = [
+      {
+        Id: "r",
+        Code: "GLOBAL",
+        Description: "Global Awareness",
+        CompletionStatus: "NotStarted",
+        PlanningStatus: "NotPlanned",
+        MinSubrequirements: 1,
+        MinGpa: null,
+        Subrequirements: [
+          sub("expensive", [
+            group({ Courses: [course("1", "SPAN", "2710"), course("2", "SPAN", "2720")] }),
+          ]),
+          sub("cheap", [group({ Courses: [course("3", "ANTH", "1800")] })]),
+        ],
+      },
+    ] as never;
+
+    const { courses } = need(normalize(raw));
+    expect([...courses]).toEqual(["ANTH-1800"]);
+  });
+
+  test("a subrequirement offering two tracks picks one", () => {
+    const raw = program("A", []);
+    raw.Program.Requirements = [
+      {
+        Id: "r",
+        Code: "MAJOR",
+        Description: "Major",
+        CompletionStatus: "NotStarted",
+        PlanningStatus: "NotPlanned",
+        MinSubrequirements: null,
+        MinGpa: null,
+        Subrequirements: [
+          {
+            ...sub("tracks", [
+              group({ Courses: [course("1", "DSAI", "2110"), course("2", "DSAI", "3110")] }),
+              group({ Courses: [course("3", "EGCP", "3010")] }),
+            ]),
+            MinGroups: 1,
+          },
+        ],
+      },
+    ] as never;
+
+    expect([...need(normalize(raw)).courses]).toEqual(["EGCP-3010"]);
+  });
+
+  test("without a minimum, everything is required", () => {
+    const raw = program("A", []);
+    raw.Program.Requirements = [
+      {
+        Id: "r",
+        Code: "CORE",
+        Description: "Core",
+        CompletionStatus: "NotStarted",
+        PlanningStatus: "NotPlanned",
+        MinSubrequirements: null,
+        MinGpa: null,
+        Subrequirements: [
+          sub("a", [group({ Courses: [course("1", "CS", "1210")] })]),
+          sub("b", [group({ Courses: [course("2", "CS", "1220")] })]),
+        ],
+      },
+    ] as never;
+    expect([...need(normalize(raw)).courses].sort()).toEqual(["CS-1210", "CS-1220"]);
+  });
+
+  test("a choose-from pool is filled to its credit minimum, cheapest first", () => {
+    const tree = normalize(
+      program("A", [
+        group({
+          FromCourses: [
+            course("1", "AA", "1000"),
+            course("2", "BB", "0000"),
+            course("3", "CC", "1000"),
+          ],
+          MinCredits: 6,
+        }),
+      ]),
+    );
+    // 3cr courses before the 4cr one, and only enough to reach six.
+    expect([...need(tree).courses]).toEqual(["AA-1000", "CC-1000"]);
+  });
+
+  test("work already done is not owed again", () => {
+    const tree = normalize(
+      program("A", [group({ Courses: [course("1", "CS", "1210"), course("2", "CS", "1220")] })]),
+    );
+    expect([...need(tree, ["CS-1210"]).courses]).toEqual(["CS-1220"]);
+  });
+
+  test("rules and filters are reported, never silently dropped", () => {
+    const tree = normalize(
+      program("A", [
+        group({ DisplayText: "One laboratory course", MinCredits: 3.5, HasRules: true }),
+        group({ FromSubjects: [{ Code: "LIT", Description: "Lit" }], MinCredits: 3 }),
+      ]),
+    );
+    const { courses, unenumerable } = need(tree);
+    expect(courses.size).toBe(0);
+    expect(unenumerable).toHaveLength(2);
+    // Order follows cost, so match on content rather than position.
+    const lab = unenumerable.find((u) => u.text.includes("laboratory"));
+    expect(lab?.credits).toBe(3.5);
+  });
+
+  test("a completed group costs nothing and is preferred when choosing", () => {
+    const raw = program("A", []);
+    raw.Program.Requirements = [
+      {
+        Id: "r",
+        Code: "PICK",
+        Description: "Pick one",
+        CompletionStatus: "NotStarted",
+        PlanningStatus: "NotPlanned",
+        MinSubrequirements: 1,
+        MinGpa: null,
+        Subrequirements: [
+          sub("unstarted", [group({ Courses: [course("9", "ZZ", "1000")] })]),
+          {
+            ...sub("finished", [
+              group({ Courses: [course("8", "YY", "1000")], CompletionStatus: "Completed" }),
+            ]),
+            CompletionStatus: "Completed",
+          },
+        ],
+      },
+    ] as never;
+    expect([...need(normalize(raw)).courses]).toEqual([]);
   });
 });

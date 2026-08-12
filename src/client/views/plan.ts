@@ -16,9 +16,9 @@ import { criticalPath, projectPlan, type Season, termsFrom } from "../../planner
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
 import {
   completedCourses,
+  coursesNeeded,
   inProgressCourses,
   type ProgramTree,
-  walkGroups,
 } from "../../requirements";
 import { offeringsFromListing } from "../../schedule";
 import type { Ctx } from "../ctx";
@@ -72,29 +72,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
   const price = (c: string) => credits.get(c) ?? 3;
 
-  const need = new Set<string>();
-  for (const { requirement, group } of walkGroups(tree)) {
-    if (
-      /Graphic Design|Linguistics|Video Game|Artificial Intelligence Track/i.test(
-        group.text || requirement.text,
-      )
-    ) {
-      continue;
-    }
-    const c = group.constraint;
-    if (c.kind === "take-all") {
-      for (const x of c.courses) need.add(x.CourseName);
-    } else if (c.kind === "choose-from" && group.status.completion !== "Completed") {
-      let want = group.min.credits ?? 3;
-      for (const x of c.courses
-        .filter((x) => !have.has(x.CourseName))
-        .sort((a, b) => price(a.CourseName) - price(b.CourseName))) {
-        if (want <= 0) break;
-        need.add(x.CourseName);
-        want -= price(x.CourseName);
-      }
-    }
-  }
+  const { courses: need, unenumerable } = coursesNeeded(tree, { credits: price, have });
 
   const store = createStore<State>({ perTerm: 15, summers: true });
 
@@ -200,6 +178,20 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           box.append(el("h3", undefined, "not placed"));
           for (const u of plan.unscheduled) {
             box.append(el("div", "plan-course muted", `${u.code} — ${u.why}`));
+          }
+          body.append(box);
+        }
+
+        if (unenumerable.length) {
+          const box = el("div", "term unenumerable");
+          box.append(el("h3", undefined, "not plannable"));
+          box.append(
+            el("p", "muted", "Colleague evaluates these but never publishes the eligible courses."),
+          );
+          for (const u of unenumerable) {
+            box.append(
+              el("div", "plan-course muted", `${u.credits ? `${u.credits}cr  ` : ""}${u.text}`),
+            );
           }
           body.append(box);
         }

@@ -132,6 +132,23 @@ none of them can register for a class or write anything back to Colleague.
 The server reads `.data/catalog.sqlite` directly, so the planner server does
 not need to be running, but a crawl must have happened at least once.
 
+### one course list, any major
+
+Colleague encodes choice with two counts: a requirement may need only
+`MinSubrequirements` of its subrequirements, and a subrequirement only
+`MinGroups` of its groups. That is how tracks, concentrations and "satisfy the
+global-awareness rule any one of six ways" are all expressed.
+
+`coursesNeeded` reads those counts and returns the cheapest satisfying path,
+which is what makes the planner work for any major rather than the one it was
+written against. Before it, every alternative looked mandatory — a plan could
+demand Greek *and* Spanish, and the only way to get sensible output was a
+hardcoded list of the CS major's track names.
+
+Groups it cannot enumerate — a Colleague rule, or a filter over attributes the
+evaluation does not carry — come back separately as `unenumerable` rather than
+being dropped or guessed at.
+
 ### planning
 
 `src/planner.ts` answers the question a credit total cannot: *when*. Credits

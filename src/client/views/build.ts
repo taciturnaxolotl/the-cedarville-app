@@ -106,20 +106,18 @@ function priceOf(candidate: Candidate): { text: string; kind: string; why: strin
     };
   }
   if (candidate.addedTerms === null) {
-    // "Won't schedule" is a refusal. What a student needs is the reason, and
-    // the reason is nearly always a sequence that only runs in one season and
-    // shoves something else off the end.
-    const season = candidate.offered.length === 1 ? `${candidate.offered[0]} only` : "";
+    // The badge stays two words; the reason goes in the tooltip. A row of
+    // candidates is read by scanning one column, and a sentence in that column
+    // costs every other row its legibility.
+    const season = candidate.offered.length === 1 ? `taught in ${candidate.offered[0]} only` : "";
     const chain =
-      candidate.requires.length > 1 ? `a ${candidate.requires.length + 1}-course sequence` : "";
+      candidate.requires.length > 1 ? `sits behind ${candidate.requires.length} courses` : "";
     const cost = candidate.displaces.length ? `delays ${candidate.displaces.join(", ")}` : "";
     const reason = [season, chain, cost].filter(Boolean).join(", ");
     return {
-      text: reason ? `won't fit — ${reason}` : "won't fit in this plan",
+      text: "won't fit",
       kind: "bad",
-      why:
-        "taking this pushes work past the end of the twelve terms projected. " +
-        "Raising your credits per term, or a longer horizon, may change that.",
+      why: `${reason ? `${reason}. ` : ""}Taking this pushes work past the end of the terms projected; more credits a term, or a longer horizon, may change that.`,
     };
   }
   return delta(candidate.addedTerms, candidate.addedCredits);
@@ -489,8 +487,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     // A course paying into two programs is the finding worth surfacing.
     const across = [...new Set(candidate.satisfies.map((s) => s.program))];
     if (across.length > 1) row.append(tag(`counts for ${across.join(" + ")}`, "free"));
+    // Same reasoning as the cost badge: a count in the row, the names on hover.
     if (candidate.requires.length) {
-      row.append(el("span", "muted", `needs ${candidate.requires.join(", ")} first`));
+      const chain = el("span", "muted", `+${candidate.requires.length} first`);
+      chain.title = `needs ${candidate.requires.join(", ")} before you can take it`;
+      row.append(chain);
     }
     return row;
   }

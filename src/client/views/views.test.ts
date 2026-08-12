@@ -1281,11 +1281,64 @@ describe("build view — when, and why not", () => {
     )!;
     // Three credits on paper, twelve in practice — and the cover must not
     // prefer it to the standalone course on the strength of the sticker price.
-    expect(arabic.textContent).toContain("needs ARBC-1410, ARBC-1420, ARBC-2410 first");
+    // The row shows a count; the names live on the tooltip.
+    expect(arabic.textContent).toContain("+3 first");
+    expect(arabic.querySelector(".muted")?.getAttribute("title")).toContain("ARBC-1410");
     expect(arabic.textContent).toContain("+9 cr");
     const art = Array.from(root.querySelectorAll(".candidate")).find((r) =>
       r.textContent?.includes("ART-1100"),
     )!;
     expect(art.textContent).toContain("cheapest");
+  });
+});
+
+describe("build view — a row stays scannable", () => {
+  test("a refusal is two words with the reason on hover", () => {
+    // Two slots, and a four-course spring-only chain that cannot fit.
+    const tree = normalize(
+      program("BS.CYOPR", [
+        group({
+          Id: "e",
+          DisplayText: "One elective",
+          FromCourses: [course("1", "ART", "1100"), course("9", "ARBC", "2420")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    const allCourses = [
+      { SubjectCode: "ART", Number: "1100", Title: "Drawing", MinimumCredits: 3 },
+      {
+        SubjectCode: "ARBC",
+        Number: "2420",
+        Title: "Arabic IV",
+        MinimumCredits: 3,
+        CourseRequisites: [
+          {
+            DisplayText: "Take ARBC-1410, ARBC-1420, ARBC-2410",
+            DisplayTextExtension: "- Must be completed prior to taking this course.",
+            IsRequired: true,
+          },
+        ],
+      },
+      { SubjectCode: "ARBC", Number: "1410", Title: "A1", MinimumCredits: 3 },
+      { SubjectCode: "ARBC", Number: "1420", Title: "A2", MinimumCredits: 3 },
+      { SubjectCode: "ARBC", Number: "2410", Title: "A3", MinimumCredits: 3 },
+    ] as unknown as NonNullable<Ctx["allCourses"]>;
+
+    build.mount(root, {
+      trees: [tree],
+      enrolled: ["BS.CYOPR"],
+      allCourses,
+      // One term of capacity three: the Arabic chain cannot possibly land.
+      sections: { term: "2027SP", sections: [], courses: [], fetchedAt: "" } as never,
+    });
+
+    const arabic = Array.from(root.querySelectorAll(".candidate")).find((r) =>
+      r.textContent?.includes("ARBC-2420"),
+    )!;
+    const badge = arabic.querySelector(".tag") as unknown as HTMLElement;
+    // Whatever the verdict, the badge never becomes a sentence.
+    expect((badge.textContent ?? "").length).toBeLessThan(20);
+    expect((badge.title ?? "").length).toBeGreaterThan(badge.textContent!.length);
   });
 });

@@ -22,12 +22,34 @@ export interface TermCatalog {
   /** When these sections were fetched from Self-Service. */
   fetchedAt: string;
   sections: ListingSection[];
+  /** Course-level records, which is where requisites live. */
+  courses?: CatalogCourseRecord[];
+}
+
+/**
+ * A course as the catalog view returns it. `CourseRequisites` is the only
+ * machine-readable prerequisite data Colleague exposes: the section view
+ * carries an opaque rule id instead.
+ */
+export interface CatalogCourseRecord {
+  Id: string;
+  SubjectCode: string;
+  Number: string;
+  Title: string;
+  Description?: string;
+  MinimumCredits?: number;
+  CourseRequisites?: {
+    DisplayText?: string | null;
+    DisplayTextExtension?: string | null;
+    IsRequired?: boolean;
+  }[];
 }
 
 export const emptyCatalog = (term: string): TermCatalog => ({
   term,
   fetchedAt: new Date(0).toISOString(),
   sections: [],
+  courses: [],
 });
 
 /**

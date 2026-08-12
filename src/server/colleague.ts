@@ -31,6 +31,7 @@ export interface SearchCriteria {
 export interface SearchPage {
   Sections?: unknown[];
   Courses?: unknown[];
+  CourseFullModels?: unknown[];
   TotalItems: number;
   TotalPages: number;
   CurrentPageIndex: number;

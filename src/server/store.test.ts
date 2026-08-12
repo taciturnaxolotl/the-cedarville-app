@@ -98,6 +98,45 @@ describe("catalog store", () => {
     db.close();
   });
 
+  test("stores course records with their requisites", () => {
+    const db = store();
+    db.replace(
+      catalog({
+        courses: [
+          {
+            Id: "c1",
+            SubjectCode: "CS",
+            Number: "2210",
+            Title: "Data Structures",
+            CourseRequisites: [
+              { DisplayText: "Take CS-1220", DisplayTextExtension: "- prior", IsRequired: true },
+            ],
+          },
+        ],
+      }),
+    );
+
+    const read = db.read("2026FA");
+    expect(read.courses).toHaveLength(1);
+    expect(read.courses?.[0]?.CourseRequisites?.[0]?.DisplayText).toBe("Take CS-1220");
+    db.close();
+  });
+
+  // A sections-only refresh must not wipe the requisite data, which is
+  // collected by a separate, slower pass.
+  test("a crawl with no courses leaves the stored ones alone", () => {
+    const db = store();
+    db.replace(
+      catalog({
+        courses: [{ Id: "c1", SubjectCode: "CS", Number: "2210", Title: "Data Structures" }],
+      }),
+    );
+    db.replace(catalog({ fetchedAt: "2026-08-13T00:00:00.000Z", courses: [] }));
+
+    expect(db.read("2026FA").courses).toHaveLength(1);
+    db.close();
+  });
+
   test("stats summarise what is cached", () => {
     const db = store();
     db.replace(catalog());

@@ -7,7 +7,7 @@
  * less traffic for the registrar: one crawl serves every user of the app.
  */
 
-import type { ListingSection, TermCatalog } from "../catalog";
+import type { CatalogCourseRecord, ListingSection, TermCatalog } from "../catalog";
 import { GuestColleague } from "./colleague";
 import type { CatalogStore } from "./store";
 
@@ -16,6 +16,7 @@ export interface CrawlProgress {
   page: number;
   pages: number;
   sections: number;
+  phase?: "sections" | "courses";
 }
 
 export interface CrawlOptions {
@@ -60,7 +61,50 @@ export async function crawlTerm(
     if (page <= pages && delayMs > 0) await sleep(delayMs);
   }
 
-  return { term, fetchedAt: new Date().toISOString(), sections };
+  return {
+    term,
+    fetchedAt: new Date().toISOString(),
+    sections,
+    courses: await crawlCourses(term, options, client),
+  };
+}
+
+/**
+ * The same term again in catalog view, which is the only place requisites
+ * come back as readable text rather than an opaque rule id. Half the pages of
+ * the section crawl, and it is what makes "what blocks what" answerable.
+ */
+export async function crawlCourses(
+  term: string,
+  options: CrawlOptions = {},
+  client = new GuestColleague(),
+): Promise<CatalogCourseRecord[]> {
+  const { delayMs = 300, onProgress, signal } = options;
+  const byId = new Map<string, CatalogCourseRecord>();
+
+  let page = 1;
+  let pages = 1;
+
+  while (page <= pages) {
+    if (signal?.aborted) break;
+
+    const result = await client.search({
+      terms: [term],
+      pageNumber: page,
+      searchResultsView: "CatalogListing",
+    });
+    pages = Math.max(result.TotalPages ?? 1, 1);
+
+    for (const raw of result.CourseFullModels ?? []) {
+      const course = raw as CatalogCourseRecord;
+      if (course?.Id) byId.set(course.Id, course);
+    }
+
+    onProgress?.({ term, page, pages, sections: byId.size, phase: "courses" });
+    page++;
+    if (page <= pages && delayMs > 0) await sleep(delayMs);
+  }
+  return [...byId.values()];
 }
 
 /** Crawls and stores in one step. Returns how many sections landed. */

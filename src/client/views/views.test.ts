@@ -1158,3 +1158,78 @@ describe("build view — a cost is always a number", () => {
     expect(labels).toContain("Artificial Intelligence Track (9 credit hours)");
   });
 });
+
+describe("build view — variable-credit courses", () => {
+  test("prices the two honors capstone routes as equal", () => {
+    // HON-4950 runs 1 to 2 credits and the requirement asks for 2, so the
+    // research project costs exactly what the two-course colloquium does.
+    const allCourses = [
+      { SubjectCode: "HON", Number: "4910", Title: "Colloq I", MinimumCredits: 1 },
+      { SubjectCode: "HON", Number: "4920", Title: "Colloq II", MinimumCredits: 1 },
+      {
+        SubjectCode: "HON",
+        Number: "4950",
+        Title: "Project",
+        MinimumCredits: 1,
+        MaximumCredits: 2,
+      },
+    ] as unknown as NonNullable<Ctx["allCourses"]>;
+
+    const tree = normalize({
+      StudentId: "1",
+      Program: {
+        Code: "BS.CYOPR",
+        Title: "cyber",
+        Catalog: "2026",
+        Degree: "BS",
+        MinimumCredits: 128,
+        CompletedCredits: 0,
+        InProgressCredits: 0,
+        PlannedCredits: 0,
+        RequiredRequirementCount: 1,
+        CompletedRequirementCount: 0,
+        Requirements: [
+          {
+            Id: "r",
+            Code: "ID.99.MINOR",
+            Description: "Honors",
+            CompletionStatus: "NotStarted",
+            PlanningStatus: "NotPlanned",
+            MinSubrequirements: null,
+            MinGpa: null,
+            Subrequirements: [
+              {
+                Id: "cap",
+                Code: "Research Proj/Thesis",
+                DisplayText: "Honors capstone",
+                CompletionStatus: "NotStarted",
+                PlanningStatus: "NotPlanned",
+                MinGroups: 1,
+                MinGpa: null,
+                MinInstitutionalCredits: null,
+                Groups: [
+                  group({
+                    Id: "colloq",
+                    DisplayText: "Honors Senior Colloquium I & II (2 credit hours)",
+                    Courses: [course("1", "HON", "4910"), course("2", "HON", "4920")],
+                  }),
+                  group({
+                    Id: "proj",
+                    DisplayText: "Honors Senior Project (2 credit hours)",
+                    FromCourses: [course("3", "HON", "4950")],
+                    MinCredits: 2,
+                  }),
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    } as EvaluationResponse);
+
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    const rows = Array.from(root.querySelectorAll(".choice.branch .candidate"));
+    const other = rows.find((r) => !r.className.includes("picked"))!;
+    expect(other.querySelector(".tag")?.textContent).toBe("+0 cr");
+  });
+});

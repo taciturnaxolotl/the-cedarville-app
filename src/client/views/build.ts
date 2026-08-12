@@ -19,6 +19,7 @@ import { type Season, termsFrom } from "../../planner";
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
 import {
   completedCourses,
+  expectedCredits,
   groupKey,
   inProgressCourses,
   type ProgramTree,
@@ -174,6 +175,13 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const credits = new Map(
     records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
   );
+  const maxima = new Map<string, number>(
+    records.flatMap((c) =>
+      c.MaximumCredits
+        ? [[`${c.SubjectCode}-${c.Number}`, c.MaximumCredits] as [string, number]]
+        : [],
+    ),
+  );
   const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
   const graph = buildGraph(
     records.map(
@@ -221,13 +229,20 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     return { destroy: () => root.replaceChildren() };
   }
 
+  // A variable-credit course is worth what the requirement asking for it
+  // demands, not its floor.
+  const stretched = expectedCredits(trees, (c) => ({
+    min: credits.get(c) ?? 3,
+    max: maxima.get(c) ?? credits.get(c) ?? 3,
+  }));
+
   const passed = completedCourses(trees[0] as ProgramTree);
   const running = inProgressCourses(trees[0] as ProgramTree);
   // A plan starts after this term, so a course under way counts as held — but
   // telling a student they "already passed" something they sit for in December
   // is simply untrue, so the two are kept apart for the wording.
   const have = new Set([...passed, ...running]);
-  const price = (c: string) => credits.get(c) ?? 3;
+  const price = (c: string) => stretched.get(c) ?? credits.get(c) ?? 3;
 
   // ---- fetching --------------------------------------------------------
 

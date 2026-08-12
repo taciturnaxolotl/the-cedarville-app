@@ -38,6 +38,13 @@ export interface CatalogCourseRecord {
   Title: string;
   Description?: string;
   MinimumCredits?: number;
+  /**
+   * Present only when the course is variable credit. `HON-4950` runs 1 to 2,
+   * and the honors capstone requires it at 2 — so pricing every course at its
+   * minimum makes the research project look a credit cheaper than the
+   * colloquium it is an alternative to, when the two are equal.
+   */
+  MaximumCredits?: number;
   CourseRequisites?: {
     DisplayText?: string | null;
     DisplayTextExtension?: string | null;

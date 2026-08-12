@@ -686,6 +686,46 @@ export interface OpenBranch {
   chosen: string[];
 }
 
+/**
+ * How many credits a variable-credit course is worth, given what wants it.
+ *
+ * Colleague states a range and the requirement states a demand, and only the
+ * two together say what a course is worth here. "Honors Senior Project (2
+ * credit hours)" draws on `HON-4950`, which runs 1 to 2; priced at its floor
+ * the whole route looks a credit cheaper than the colloquium it replaces.
+ *
+ * Only pools of one course are resolved this way, and deliberately. Where
+ * several courses could stretch, which of them does is a judgement the data
+ * does not contain — "two sections of the Honors Seminar" is four credits over
+ * a pool whose second entry is an independent study, and quietly inflating
+ * that study to close the gap would invent a plan the registrar never wrote.
+ * Those stay reported as shortfalls.
+ */
+export function expectedCredits(
+  trees: readonly ProgramTree[],
+  range: (code: string) => { min: number; max: number },
+): Map<string, number> {
+  const expected = new Map<string, number>();
+  for (const tree of trees) {
+    for (const { group } of walkGroups(tree)) {
+      const wanted = group.min.credits;
+      if (wanted === undefined) continue;
+
+      const pool =
+        group.constraint.kind === "choose-from" || group.constraint.kind === "take-all"
+          ? group.constraint.courses
+          : [];
+      if (pool.length !== 1) continue;
+
+      const only = pool[0]!.CourseName;
+      const { min, max } = range(only);
+      if (max <= min || wanted <= min) continue;
+      expected.set(only, Math.max(expected.get(only) ?? 0, Math.min(max, wanted)));
+    }
+  }
+  return expected;
+}
+
 /** Addresses a branch: a requirement's subrequirements, or a subrequirement's groups. */
 export const branchKey = (requirement: string, subrequirement?: string) =>
   subrequirement ? `${requirement}/${subrequirement}` : requirement;

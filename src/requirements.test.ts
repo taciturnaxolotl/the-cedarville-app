@@ -7,6 +7,7 @@ import {
   coursesNeededAcross,
   creditOverflow,
   enumeratedCourseIds,
+  expectedCredits,
   gaps,
   groupCoverage,
   groupKey,
@@ -1184,5 +1185,60 @@ describe("a requirement its own pool cannot close", () => {
     expect(coursesNeededAcross([tree], { credits: () => 2, have: new Set() }).shortfalls).toEqual(
       [],
     );
+  });
+});
+
+describe("a course whose credits are a range", () => {
+  const range = (spec: Record<string, [number, number]>) => (code: string) => {
+    const [min, max] = spec[code] ?? [3, 3];
+    return { min, max };
+  };
+
+  test("takes the credits the requirement asks for", () => {
+    // "Honors Senior Project (2 credit hours)" draws on HON-4950, which runs
+    // 1 to 2. At its floor the whole route looks a credit cheaper than the
+    // colloquium it replaces, when the catalog says the two are equal.
+    const tree = normalize(
+      program("A", [
+        group({
+          DisplayText: "Honors Senior Project (2 credit hours)",
+          FromCourses: [course("1", "HON", "4950")],
+          MinCredits: 2,
+        }),
+      ]),
+    );
+    const expected = expectedCredits([tree], range({ "HON-4950": [1, 2] }));
+    expect(expected.get("HON-4950")).toBe(2);
+  });
+
+  test("never stretches past the course's own ceiling", () => {
+    const tree = normalize(
+      program("A", [group({ FromCourses: [course("1", "HON", "4900")], MinCredits: 9 })]),
+    );
+    expect(expectedCredits([tree], range({ "HON-4900": [1, 3] })).get("HON-4900")).toBe(3);
+  });
+
+  test("leaves a fixed-credit course alone", () => {
+    const tree = normalize(
+      program("A", [group({ FromCourses: [course("1", "CS", "1210")], MinCredits: 6 })]),
+    );
+    expect(expectedCredits([tree], range({ "CS-1210": [3, 3] })).size).toBe(0);
+  });
+
+  test("declines to guess when several courses could stretch", () => {
+    // "Two sections of the Honors Seminar" is four credits over a pool whose
+    // second entry is an independent study. Inflating that study to close the
+    // gap would invent a plan the registrar never wrote; the shortfall stands.
+    const tree = normalize(
+      program("A", [
+        group({
+          DisplayText: "Honors Integrative Seminars (4 credit hours)",
+          FromCourses: [course("1", "HON", "3020"), course("2", "HON", "4900")],
+          MinCredits: 4,
+        }),
+      ]),
+    );
+    const expected = expectedCredits([tree], range({ "HON-3020": [2, 2], "HON-4900": [1, 3] }));
+    expect(expected.size).toBe(0);
   });
 });

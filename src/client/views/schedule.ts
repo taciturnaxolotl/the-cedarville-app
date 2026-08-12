@@ -14,7 +14,7 @@ import {
   DAY_NAMES,
   formatTime,
   type Offering,
-  offeringsFrom,
+  offeringsFromListing,
   span,
   week,
 } from "../../schedule";
@@ -34,15 +34,17 @@ const loadPicked = (): Set<string> => {
 export function mount(root: HTMLElement, ctx: Ctx) {
   const { trees, sections: capture } = ctx;
   if (!capture) {
-    root.replaceChildren(el("p", "muted", "pick a term and load sections to build a schedule."));
+    root.replaceChildren(el("p", "muted", "pick a term to build a schedule."));
     return { destroy: () => root.replaceChildren() };
   }
 
+  const all = offeringsFromListing(capture.sections);
   const byCourse = new Map<string, Offering[]>();
-  for (const [courseId, response] of Object.entries(capture.sections)) {
-    byCourse.set(courseId, offeringsFrom(response));
+  for (const offering of all) {
+    const bucket = byCourse.get(offering.courseId) ?? [];
+    bucket.push(offering);
+    byCourse.set(offering.courseId, bucket);
   }
-  const all = [...byCourse.values()].flat();
   const byId = new Map(all.map((o) => [o.id, o]));
 
   const picked = loadPicked();
@@ -192,8 +194,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       el(
         "p",
         "muted",
-        `no sections offered in ${capture.term} for any open requirement. ` +
-          `${capture.notOffered.length} courses are not taught this term.`,
+        `none of your open requirements have a section in ${capture.term}. ` +
+          `the catalog holds ${all.length} sections for that term.`,
       ),
     );
   }

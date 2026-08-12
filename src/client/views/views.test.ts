@@ -211,81 +211,63 @@ describe("overlap view", () => {
 });
 
 describe("schedule view", () => {
-  const withSections = (): Ctx => {
-    const structured = {
-      Days: ["Monday", "Wednesday"],
-      StartTime: "2026-08-24T08:00:00",
-      EndTime: "2026-08-24T09:00:00",
-      StartDate: "2026-08-24T00:00:00",
-      EndDate: "2026-12-11T00:00:00",
-      Room: "234",
-      Frequency: "W",
-      IsOnline: false,
-      InstructionalMethodCode: "LEC",
-    };
-    const section = (id: string, name: string, start: string, end: string) => ({
-      Section: {
-        Id: id,
-        CourseId: "1",
-        CourseName: name,
-        Number: "01",
-        Title: name,
-        Synonym: id,
-        TermId: "26/FA",
-        MinimumCredits: 3,
-        MaximumCredits: null,
-        Capacity: 30,
-        Enrolled: 30,
-        Available: 0,
-        Waitlisted: 2,
-        AvailabilityStatus: "Waitlisted",
-        IsNonStandardDates: false,
-        StartDate: "2026-08-24T00:00:00",
-        EndDate: "2026-12-11T00:00:00",
-        Meetings: [{ ...structured, StartTime: start, EndTime: end }],
-        FormattedMeetingTimes: [],
-      },
-      FacultyDisplay: "Dr Who",
-      InstructorDetails: [{ FacultyId: "1", FacultyName: "Dr Who" }],
-    });
-
-    return {
+  const withSections = (): Ctx =>
+    ({
       // Course id "1" is CS-1210 in the take-all group of everyKind.
       trees: [treeOf("BS.CYOPR")],
       sections: {
-        capturedAt: "2026-08-12T00:00:00Z",
-        term: "26/FA",
-        requested: 4,
-        notOffered: [],
-        sections: {
-          "1": {
-            SectionsRetrieved: {
-              Course: {},
-              TermsAndSections: [
-                {
-                  Term: { Code: "26/FA", Description: "Fall 2026" },
-                  Sections: [
-                    section("s1", "CS-1210", "2026-08-24T08:00:00", "2026-08-24T09:00:00"),
-                  ],
-                },
-              ],
-            },
+        term: "2026FA",
+        fetchedAt: "2026-08-12T00:00:00.000Z",
+        sections: [
+          {
+            Id: "s1",
+            CourseId: "1",
+            CourseName: "CS-1210",
+            Number: "01",
+            Title: "Intro",
+            Synonym: "40123",
+            TermId: "2026FA",
+            MinimumCredits: 3,
+            MaximumCredits: null,
+            Capacity: 30,
+            Enrolled: 30,
+            Available: 0,
+            Waitlisted: 2,
+            AvailabilityStatus: "Waitlisted",
+            IsNonStandardDates: false,
+            StartDate: "2026-08-19T00:00:00-04:00",
+            EndDate: "2026-12-11T00:00:00-05:00",
+            FacultyDisplay: ["Dr Who"],
+            Meetings: [
+              {
+                Days: [1, 3],
+                // UTC, as Colleague really sends it: 13:00Z is 9am on campus.
+                StartTime: "2026-08-11T13:00:00+00:00",
+                EndTime: "2026-08-11T13:50:00+00:00",
+                StartDate: "2026-08-19T00:00:00-04:00",
+                EndDate: "2026-12-11T00:00:00-05:00",
+                Room: "234",
+                Frequency: "W",
+                IsOnline: false,
+                InstructionalMethodCode: "LEC",
+              },
+            ],
+            FormattedMeetingTimes: [],
           },
-        },
+        ],
       },
-    } as unknown as Ctx;
-  };
+    }) as unknown as Ctx;
 
-  test("asks for sections before it can build anything", () => {
+  test("asks for a term before it can build anything", () => {
     schedule.mount(root, { trees: [treeOf("BS.CYOPR")] });
-    expect(root.textContent).toContain("load sections");
+    expect(root.textContent).toContain("pick a term");
   });
 
   test("lists a section under the requirement it would close", () => {
     schedule.mount(root, withSections());
     expect(root.querySelectorAll("details.req").length).toBeGreaterThan(0);
     expect(root.textContent).toContain("CS-1210");
-    expect(root.textContent).toContain("MonWed 8:00am–9:00am");
+    expect(root.textContent).toContain("MonWed 9:00am\u20139:50am");
     expect(root.textContent).toContain("Dr Who");
   });
 

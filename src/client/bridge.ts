@@ -44,10 +44,6 @@ function send<K extends Request["type"]>(msg: Request & { type: K }): Promise<Re
 
 export const ping = () => send({ type: "ping" });
 export const terms = () => send({ type: "terms" });
-export const sectionIds = (courseIds: string[], term: string) =>
-  send({ type: "section-ids", courseIds, term });
-export const sections = (courseId: string, ids: string[]) =>
-  send({ type: "sections", courseId, sectionIds: ids });
 export const programs = (): Promise<ProgramSummary[]> => send({ type: "programs" });
 export const capture = (whatIf: string[] = []): Promise<Capture> =>
   send({ type: "capture", whatIf });
@@ -73,28 +69,25 @@ export async function dumpForDev(name: string, snapshot: unknown): Promise<void>
 // ---- the shared catalog cache -----------------------------------------
 
 /**
- * Sections other students have already fetched. Public course data only; the
- * server has never seen an evaluation and has nowhere to put one.
+ * The term's sections, fetched by the server from the public course search.
+ * No session is spent here and none is needed: this is the same timetable
+ * every student sees.
  */
-export async function fetchCached(term: string, courseIds: string[]): Promise<TermCatalog | null> {
-  try {
-    const query = `?courses=${encodeURIComponent(courseIds.join(","))}`;
-    const res = await fetch(`/catalog/${encodeURIComponent(term)}${query}`);
-    return res.ok ? ((await res.json()) as TermCatalog) : null;
-  } catch {
-    // The cache is an optimisation; never let it block a crawl.
-    return null;
-  }
+export async function fetchCatalog(term: string, courseIds?: string[]): Promise<TermCatalog> {
+  const query = courseIds?.length ? `?courses=${encodeURIComponent(courseIds.join(","))}` : "";
+  const res = await fetch(`/catalog/${encodeURIComponent(term)}${query}`);
+  if (!res.ok) throw new Error(`catalog unavailable (${res.status})`);
+  return (await res.json()) as TermCatalog;
 }
 
-export async function publishCached(catalog: TermCatalog): Promise<void> {
-  try {
-    await fetch(`/catalog/${encodeURIComponent(catalog.term)}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(catalog),
-    });
-  } catch {
-    // Same: a failed contribution costs this student nothing.
-  }
+export interface CatalogStatus {
+  terms: { term: string; sections: number; courses: number; fetchedAt: string }[];
+  refreshing: string[];
 }
+
+export const catalogStatus = async (): Promise<CatalogStatus> =>
+  (await fetch("/catalog")).json() as Promise<CatalogStatus>;
+
+/** Asks the server to re-crawl. Returns immediately; the crawl runs on. */
+export const refreshCatalog = (term: string) =>
+  fetch(`/catalog/${encodeURIComponent(term)}/refresh`, { method: "POST" });

@@ -25,9 +25,10 @@ another tab, and click capture.
     src/requirements.ts  Ellucian's 40-field Group as a tagged union
     src/merge.ts         which course satisfies a requirement in both majors
     src/schedule.ts      meeting times, seat counts, and date-aware conflicts
-    src/catalog.ts       the one shape that is public rather than personal
-    src/server/store.ts  SQLite cache of the section catalog
-    src/client/crawl.ts  the fetch loop: cache-aware, paced, cancellable
+    src/catalog.ts        the one shape that is public rather than personal
+    src/server/colleague.ts  guest client: the catalog needs no session
+    src/server/crawler.ts    one term per crawl, ~60 pages
+    src/server/store.ts      SQLite cache of the section catalog
     src/client/          the planner: no framework, one CSS file, mount/destroy views
 
 The split is by change rate. Auth bridging is stable and security-sensitive;
@@ -50,6 +51,14 @@ is worse than a shorter honest one. Schools also cap credits shared between
 two majors, and that policy lives in the academic catalog, not the API: pass
 `sharedCreditCap` to `merge` to have it checked.
 
+### two traps in the timetable
+
+Meeting times arrive as UTC pinned to an arbitrary reference date: an 11:00 AM
+class is `2026-08-11T15:00:00+00:00`. Reading the hour out of that string puts
+every class four hours late. Prefer `StartTimeDisplay`, which is what the
+registrar shows and carries no timezone; convert the instant only when it is
+the only source.
+
 ### conflicts are date-aware
 
 A 16-week term routinely contains 8-week sessions, so two sections can share a
@@ -57,9 +66,21 @@ weekday and an hour and never coexist. Every meeting carries its own date
 range and every comparison uses it; a day-and-time check alone invents clashes
 and makes half the catalog look unschedulable.
 
-Loading sections fetches only courses that could still close an open
-requirement, skips anything the shared cache already answers, paces itself, and
-can be cancelled. It is someone's registrar, not a load test.
+### the catalog needs no login
+
+Self-Service gates `/Student/Student/Courses/*` but serves `/Student/Courses/*`
+to anyone: it is what the signed-out search page uses. One search in
+`SectionListing` view returns sections directly, so a whole term is about sixty
+pages rather than one request per course.
+
+The server therefore crawls the catalog itself, anonymously, on boot and every
+six hours, and caches it in SQLite. Fall 2026 is 1784 sections across 943
+courses and takes about thirty seconds. No student session is spent on data
+that is identical for all of them, and the registrar sees one crawl instead of
+one per user.
+
+The extension is then only needed for the one thing that is genuinely
+personal: your own program evaluation.
 
 Tests run with `test/setup.ts` preloaded, which pins `CATALOG_DB` to
 `:memory:`. Without it a stray import of `serve.ts` would open the real

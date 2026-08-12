@@ -1,24 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import type { TermCatalog } from "../catalog";
-import type { SectionsResponse } from "../types";
+import type { ListingSection, TermCatalog } from "../catalog";
 import { CatalogStore } from "./store";
 
 /** ":memory:" keeps each test's database to itself. */
 const store = () => new CatalogStore(":memory:");
 
-const payload = (name: string) =>
-  ({
-    SectionsRetrieved: {
-      Course: { CourseName: name },
-      TermsAndSections: [],
-    },
-  }) as unknown as SectionsResponse;
+const section = (id: string, courseId = "c1", name = "ACCT-2110"): ListingSection =>
+  ({ Id: id, CourseId: courseId, CourseName: name, Number: "01" }) as ListingSection;
 
 const catalog = (over: Partial<TermCatalog> = {}): TermCatalog => ({
-  term: "26/FA",
+  term: "2026FA",
   fetchedAt: "2026-08-12T00:00:00.000Z",
-  sections: { c1: payload("CS-3310") },
-  notOffered: ["c2"],
+  sections: [section("s1"), section("s2", "c2", "ACCT-2120")],
   ...over,
 });
 
@@ -30,7 +23,7 @@ describe("the test guard", () => {
     expect(process.env.CATALOG_DB).toBe(":memory:");
 
     const db = new CatalogStore();
-    db.write(catalog());
+    db.replace(catalog());
     expect(db.stats()).toHaveLength(1);
     db.close();
 
@@ -42,96 +35,74 @@ describe("the test guard", () => {
 });
 
 describe("catalog store", () => {
-  test("round-trips sections and the not-offered list", () => {
+  test("round-trips sections", () => {
     const db = store();
-    expect(db.write(catalog())).toBe(2);
+    expect(db.replace(catalog())).toBe(2);
 
-    const read = db.read("26/FA");
-    expect(Object.keys(read.sections)).toEqual(["c1"]);
-    expect(read.notOffered).toEqual(["c2"]);
+    const read = db.read("2026FA");
+    expect(read.sections.map((s) => s.Id).sort()).toEqual(["s1", "s2"]);
     expect(read.fetchedAt).toBe("2026-08-12T00:00:00.000Z");
     db.close();
   });
 
-  test("reads only the courses asked for", () => {
+  test("narrows to the courses asked for", () => {
     const db = store();
-    db.write(catalog({ sections: { c1: payload("A"), c3: payload("B") } }));
+    db.replace(catalog());
 
-    expect(Object.keys(db.read("26/FA", ["c1"]).sections)).toEqual(["c1"]);
-    expect(db.read("26/FA", ["nope"]).sections).toEqual({});
+    expect(db.read("2026FA", ["c2"]).sections.map((s) => s.Id)).toEqual(["s2"]);
+    expect(db.read("2026FA", ["nope"]).sections).toEqual([]);
     db.close();
   });
 
   test("keeps terms apart", () => {
     const db = store();
-    db.write(catalog());
-    db.write(catalog({ term: "27/SP", sections: { c9: payload("Z") }, notOffered: [] }));
+    db.replace(catalog());
+    db.replace(catalog({ term: "2026SU", sections: [section("s9", "c9")] }));
 
-    expect(Object.keys(db.read("26/FA").sections)).toEqual(["c1"]);
-    expect(Object.keys(db.read("27/SP").sections)).toEqual(["c9"]);
+    expect(db.read("2026FA").sections).toHaveLength(2);
+    expect(db.read("2026SU").sections.map((s) => s.Id)).toEqual(["s9"]);
     db.close();
   });
 
-  // Seat counts are the reason to refetch, so a newer crawl has to win.
-  test("a newer fetch overwrites an older one", () => {
+  test("a later crawl updates a section in place", () => {
     const db = store();
-    db.write(catalog({ sections: { c1: payload("stale") } }));
-    db.write(
+    db.replace(catalog({ sections: [{ ...section("s1"), Available: 5 } as ListingSection] }));
+    db.replace(
       catalog({
         fetchedAt: "2026-08-13T00:00:00.000Z",
-        sections: { c1: payload("fresh") },
-        notOffered: [],
+        sections: [{ ...section("s1"), Available: 0 } as ListingSection],
       }),
     );
 
-    const read = db.read("26/FA");
-    expect(read.sections.c1?.SectionsRetrieved.Course).toMatchObject({ CourseName: "fresh" });
+    const read = db.read("2026FA");
+    expect(read.sections).toHaveLength(1);
+    expect(read.sections[0]!.Available).toBe(0);
     db.close();
   });
 
-  test("an older fetch does not clobber newer data", () => {
+  // A crawl sees every section that exists, so one that vanished was
+  // cancelled and must not linger in a student's timetable.
+  test("a section missing from a newer crawl is dropped", () => {
     const db = store();
-    db.write(
-      catalog({ fetchedAt: "2026-08-13T00:00:00.000Z", sections: { c1: payload("fresh") } }),
-    );
-    db.write(
-      catalog({ fetchedAt: "2026-08-01T00:00:00.000Z", sections: { c1: payload("stale") } }),
-    );
+    db.replace(catalog());
+    db.replace(catalog({ fetchedAt: "2026-08-13T00:00:00.000Z", sections: [section("s1")] }));
 
-    const read = db.read("26/FA");
-    expect(read.sections.c1?.SectionsRetrieved.Course).toMatchObject({ CourseName: "fresh" });
-    db.close();
-  });
-
-  test("a course that starts being offered leaves the not-offered list", () => {
-    const db = store();
-    db.write(catalog({ sections: {}, notOffered: ["c1"] }));
-    db.write(
-      catalog({
-        fetchedAt: "2026-08-13T00:00:00.000Z",
-        sections: { c1: payload("now taught") },
-        notOffered: [],
-      }),
-    );
-
-    const read = db.read("26/FA");
-    expect(read.notOffered).toEqual([]);
-    expect(Object.keys(read.sections)).toEqual(["c1"]);
+    expect(db.read("2026FA").sections.map((s) => s.Id)).toEqual(["s1"]);
     db.close();
   });
 
   test("an empty term reads as empty rather than throwing", () => {
     const db = store();
-    expect(db.read("99/XX")).toMatchObject({ sections: {}, notOffered: [] });
+    expect(db.read("9999XX")).toMatchObject({ sections: [] });
     expect(db.stats()).toEqual([]);
     db.close();
   });
 
   test("stats summarise what is cached", () => {
     const db = store();
-    db.write(catalog());
+    db.replace(catalog());
     expect(db.stats()).toEqual([
-      { term: "26/FA", courses: 2, offered: 1, oldest: "2026-08-12T00:00:00.000Z" },
+      { term: "2026FA", sections: 2, courses: 2, fetchedAt: "2026-08-12T00:00:00.000Z" },
     ]);
     db.close();
   });

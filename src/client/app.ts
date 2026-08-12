@@ -12,14 +12,14 @@ import type { Capture } from "../content";
 import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
 import {
   capture,
+  catalogStatus,
   dumpForDev,
-  fetchCached,
+  fetchCatalog,
   installed,
   programs,
-  publishCached,
+  refreshCatalog,
   terms,
 } from "./bridge";
-import { Cancelled, crawl, type Progress } from "./crawl";
 import { $ } from "./dom";
 import * as overlap from "./views/overlap";
 import * as schedule from "./views/schedule";
@@ -93,63 +93,60 @@ function candidateCourseIds(): string[] {
   return [...ids];
 }
 
-let crawling: AbortController | null = null;
-
-function showProgress(p: Progress | null) {
-  const box = $("#progress-bar");
-  box.hidden = p === null;
-  $("#cancel").hidden = p === null;
-  if (!p) return;
-
-  const bar = $<HTMLProgressElement>("#bar");
-  bar.value = p.done;
-  bar.max = Math.max(p.total, 1);
-  $("#progress-text").textContent =
-    `${p.done}/${p.total}${p.current ? `  ${p.current}` : ""}` +
-    (p.cached ? `  ·  ${p.cached} already cached` : "");
+/** The server crawls the catalog; this only asks for it. */
+async function loadTerm(term: string) {
+  const courseIds = candidateCourseIds();
+  sectionData = await fetchCatalog(term, courseIds.length ? courseIds : undefined);
+  localStorage.setItem(SECTIONS, JSON.stringify(sectionData));
+  void dumpForDev("catalog", sectionData);
 }
 
-$("#cancel").addEventListener("click", () => crawling?.abort());
+/** Waits out a running crawl, reporting how far along it is. */
+async function awaitCrawl(term: string) {
+  const bar = $<HTMLProgressElement>("#bar");
+  $("#progress-bar").hidden = false;
+  try {
+    for (let tick = 0; tick < 600; tick++) {
+      const status = await catalogStatus();
+      const row = status.terms.find((t) => t.term === term);
+      $("#progress-text").textContent = row
+        ? `${row.sections} sections cached${status.refreshing.includes(term) ? ", still fetching" : ""}`
+        : "fetching the catalog…";
+      // Sections arrive in pages, so the count itself is the progress.
+      bar.removeAttribute("value");
+      if (!status.refreshing.includes(term)) return;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  } finally {
+    $("#progress-bar").hidden = true;
+  }
+}
 
 $("#load-sections").addEventListener("click", async () => {
   const button = $<HTMLButtonElement>("#load-sections");
   const term = $<HTMLSelectElement>("#term").value;
   if (!term) return say("pick a term first", true);
 
-  const courseIds = candidateCourseIds();
-  if (courseIds.length === 0) return say("capture your requirements first", true);
-
   button.disabled = true;
-  crawling = new AbortController();
-  say("checking the shared cache…");
-
   try {
-    // Anything another student already fetched costs this one nothing.
-    const have = (await fetchCached(term, courseIds)) ?? undefined;
-    const catalog = await crawl({
-      courseIds,
-      term,
-      have,
-      signal: crawling.signal,
-      onProgress: showProgress,
-    });
+    const status = await catalogStatus();
+    const cached = status.terms.find((t) => t.term === term);
 
-    sectionData = catalog;
-    localStorage.setItem(SECTIONS, JSON.stringify(catalog));
-    void publishCached(catalog);
-    void dumpForDev("catalog", catalog);
+    if (!cached || cached.sections === 0) {
+      say(`asking the server to fetch ${term}…`);
+      await refreshCatalog(term);
+      await awaitCrawl(term);
+    } else if (status.refreshing.includes(term)) {
+      await awaitCrawl(term);
+    }
+
+    await loadTerm(term);
     showView("schedule");
-
-    const offered = Object.keys(catalog.sections).length;
-    say(`${offered} courses offered in ${term}, ${catalog.notOffered.length} not taught`);
+    const age = sectionData ? new Date(sectionData.fetchedAt).toLocaleTimeString() : "";
+    say(`${sectionData?.sections.length ?? 0} sections for ${term}, fetched ${age}`);
   } catch (err) {
-    say(
-      err instanceof Cancelled ? "cancelled" : String(err instanceof Error ? err.message : err),
-      err instanceof Cancelled ? false : true,
-    );
+    say(err instanceof Error ? err.message : String(err), true);
   } finally {
-    showProgress(null);
-    crawling = null;
     button.disabled = false;
   }
 });

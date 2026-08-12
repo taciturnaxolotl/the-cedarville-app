@@ -8,12 +8,7 @@
  */
 
 import { SelfService, UnauthorizedError } from "./client";
-import type {
-  CatalogVocabulary,
-  EvaluationResponse,
-  ProgramSummary,
-  SectionsResponse,
-} from "./types";
+import type { CatalogVocabulary, EvaluationResponse, ProgramSummary } from "./types";
 
 const api = new SelfService();
 
@@ -63,42 +58,11 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
   };
 }
 
-/**
- * Which sections each course has in a term. One request, no crawl.
- *
- * The crawl loop itself lives in the app: pacing, ordering, cancellation and
- * progress are decisions about user experience, not about fetching, and this
- * side stays small enough to audit.
- */
-async function sectionIdsFor(courseIds: string[], term: string): Promise<CourseSections[]> {
-  const wanted = [...new Set(courseIds)];
-  const search = await api.searchCourses({
-    courseIds: wanted,
-    terms: [term],
-    quantityPerPage: Math.max(wanted.length, 1),
-  });
-
-  return (search.Courses ?? []).map((course) => ({
-    courseId: course.Id,
-    courseName: `${course.SubjectCode}-${course.Number}`,
-    sectionIds: course.MatchingSectionIds ?? [],
-  }));
-}
-
-export interface CourseSections {
-  courseId: string;
-  courseName: string;
-  /** Empty when the course is not taught this term. */
-  sectionIds: string[];
-}
-
 export type Request =
   | { type: "ping" }
   | { type: "programs" }
   | { type: "terms" }
-  | { type: "capture"; whatIf?: string[] }
-  | { type: "section-ids"; courseIds: string[]; term: string }
-  | { type: "sections"; courseId: string; sectionIds: string[] };
+  | { type: "capture"; whatIf?: string[] };
 
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string; signedOut?: boolean };
 
@@ -107,8 +71,6 @@ export interface ReplyMap {
   programs: ProgramSummary[];
   terms: { code: string; description: string }[];
   capture: Capture;
-  "section-ids": CourseSections[];
-  sections: SectionsResponse;
 }
 
 chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
@@ -131,10 +93,6 @@ chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
         }
         case "capture":
           return { ok: true, data: await capture(msg.whatIf) };
-        case "section-ids":
-          return { ok: true, data: await sectionIdsFor(msg.courseIds, msg.term) };
-        case "sections":
-          return { ok: true, data: await api.sections(msg.courseId, msg.sectionIds) };
       }
     } catch (err) {
       return {

@@ -8,54 +8,40 @@
  * browser.
  */
 
-import type { SectionsResponse } from "./types";
+import type { Section } from "./types";
+
+/**
+ * A section as the search endpoint returns it: fields flat on the entry, with
+ * faculty names alongside. Kept raw so a normalizer bug stays diagnosable
+ * from the cache alone.
+ */
+export type ListingSection = Section & { FacultyDisplay?: string[] | string };
 
 export interface TermCatalog {
   term: string;
   /** When these sections were fetched from Self-Service. */
   fetchedAt: string;
-  /** Raw responses keyed by course id, so a normalizer bug stays diagnosable. */
-  sections: Record<string, SectionsResponse>;
-  /** Course ids confirmed to have no section this term. Worth caching too. */
-  notOffered: string[];
+  sections: ListingSection[];
 }
 
 export const emptyCatalog = (term: string): TermCatalog => ({
   term,
-  fetchedAt: new Date().toISOString(),
-  sections: {},
-  notOffered: [],
+  fetchedAt: new Date(0).toISOString(),
+  sections: [],
 });
-
-/** Course ids the catalog can already answer for, offered or not. */
-export function known(catalog: TermCatalog): Set<string> {
-  return new Set([...Object.keys(catalog.sections), ...catalog.notOffered]);
-}
-
-/**
- * Later data wins, since the only reason to refetch a course is that the
- * cached copy went stale.
- */
-export function mergeCatalogs(base: TermCatalog, incoming: TermCatalog): TermCatalog {
-  const notOffered = new Set(base.notOffered);
-  for (const id of incoming.notOffered) notOffered.add(id);
-
-  const sections = { ...base.sections, ...incoming.sections };
-  // A course that now has sections is no longer "not offered".
-  for (const id of Object.keys(incoming.sections)) notOffered.delete(id);
-
-  return {
-    term: base.term,
-    fetchedAt: incoming.fetchedAt > base.fetchedAt ? incoming.fetchedAt : base.fetchedAt,
-    sections,
-    notOffered: [...notOffered],
-  };
-}
 
 /**
  * Seat counts move hourly during registration while meeting times do not, so
- * age is only a reason to refetch availability, never the whole catalog.
+ * age is a reason to refresh availability, never to distrust the timetable.
  */
 export function ageInHours(catalog: TermCatalog, now = Date.now()): number {
   return (now - Date.parse(catalog.fetchedAt)) / 3_600_000;
+}
+
+export const isStale = (catalog: TermCatalog, maxAgeHours = 6, now = Date.now()) =>
+  catalog.sections.length === 0 || ageInHours(catalog, now) > maxAgeHours;
+
+/** Sections whose course is in the given set, for narrowing to a degree plan. */
+export function forCourses(catalog: TermCatalog, courseIds: Set<string>): ListingSection[] {
+  return catalog.sections.filter((s) => courseIds.has(s.CourseId));
 }

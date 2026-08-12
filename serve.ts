@@ -1,26 +1,57 @@
 /**
- * Serves the planner and the shared section cache.
+ * Serves the planner and the shared section catalog.
  *
- * The split that matters: the catalog is school-wide public data and lives in
- * SQLite here, so one student's crawl spares everyone else's; a student's
+ * The split that matters: the catalog is public course data, fetched here
+ * anonymously and cached in SQLite, so nobody's session is spent on it and
+ * the registrar sees one crawl instead of one per student. A student's
  * evaluation is their record and never leaves their browser. There is no
  * account system because there is nothing here to attach to a person.
  *
- * POST /dev/capture is the exception, and it is localhost-only and
- * gitignored: it drops the last capture on disk so an agent working on this
- * repo can read a real Colleague response instead of guessing at the schema.
+ * POST /dev/capture is the exception, localhost-only and gitignored: it drops
+ * a capture on disk so an agent working on this repo can read a real
+ * Colleague response instead of guessing at the schema.
  */
 
 import { mkdir } from "node:fs/promises";
-import type { TermCatalog } from "./src/catalog";
+import { isStale } from "./src/catalog";
+import { availableTerms, refreshTerm } from "./src/server/crawler";
 import { CatalogStore } from "./src/server/store";
 
 const PORT = 5173;
 const ROOT = "public";
+const REFRESH_EVERY_MS = 6 * 60 * 60 * 1000;
 const dev = process.env.NODE_ENV !== "production";
 
 await mkdir(".data", { recursive: true });
 const store = new CatalogStore();
+
+/** Terms already being fetched, so a reload cannot start a second crawl. */
+const running = new Map<string, Promise<number>>();
+
+function refresh(term: string): Promise<number> {
+  const existing = running.get(term);
+  if (existing) return existing;
+
+  const job = refreshTerm(term, store, {
+    onProgress: ({ page, pages, sections }) => {
+      if (page % 10 === 0 || page === pages) {
+        console.log(`  ${term}: page ${page}/${pages}, ${sections} sections`);
+      }
+    },
+  })
+    .then((n) => {
+      console.log(n ? `${term}: cached ${n} sections` : `${term}: crawl empty, keeping old data`);
+      return n;
+    })
+    .catch((err) => {
+      console.warn(`${term}: crawl failed — ${err instanceof Error ? err.message : err}`);
+      return 0;
+    })
+    .finally(() => running.delete(term));
+
+  running.set(term, job);
+  return job;
+}
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -29,22 +60,22 @@ const json = (body: unknown, status = 200) =>
   });
 
 async function api(request: Request, pathname: string): Promise<Response | null> {
-  const term = /^\/catalog\/([^/]+)$/.exec(pathname)?.[1];
+  if (pathname === "/catalog" && request.method === "GET") {
+    return json({ terms: store.stats(), refreshing: [...running.keys()] });
+  }
 
+  const refreshTermCode = /^\/catalog\/([^/]+)\/refresh$/.exec(pathname)?.[1];
+  if (refreshTermCode && request.method === "POST") {
+    const term = decodeURIComponent(refreshTermCode);
+    void refresh(term);
+    return json({ refreshing: term }, 202);
+  }
+
+  const term = /^\/catalog\/([^/]+)$/.exec(pathname)?.[1];
   if (term && request.method === "GET") {
     const wanted = new URL(request.url).searchParams.get("courses");
     return json(store.read(decodeURIComponent(term), wanted ? wanted.split(",") : undefined));
   }
-
-  if (term && request.method === "PUT") {
-    const body = (await request.json()) as TermCatalog;
-    if (body.term !== decodeURIComponent(term)) return json({ error: "term mismatch" }, 400);
-    const written = store.write(body);
-    console.log(`cached ${written} courses for ${body.term}`);
-    return json({ written });
-  }
-
-  if (pathname === "/catalog" && request.method === "GET") return json(store.stats());
 
   if (dev && pathname === "/dev/capture" && request.method === "POST") {
     // Named, because evaluations and the catalog are different artifacts and
@@ -79,7 +110,23 @@ Bun.serve({
   },
 });
 
-for (const row of store.stats()) {
-  console.log(`  cached ${row.term}: ${row.courses} courses, ${row.offered} offered`);
-}
 console.log(`planner on http://localhost:${PORT}`);
+for (const row of store.stats()) {
+  console.log(`  ${row.term}: ${row.sections} sections, ${row.courses} courses, ${row.fetchedAt}`);
+}
+
+/** Refresh anything stale on boot, then keep it warm. */
+async function keepWarm() {
+  try {
+    for (const { code } of await availableTerms()) {
+      if (isStale(store.read(code))) await refresh(code);
+    }
+  } catch (err) {
+    console.warn(`term list unavailable — ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+if (process.env.CRAWL !== "off") {
+  void keepWarm();
+  setInterval(keepWarm, REFRESH_EVERY_MS);
+}

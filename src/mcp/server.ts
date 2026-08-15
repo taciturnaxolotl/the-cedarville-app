@@ -10,8 +10,9 @@
  * sees them in tools/list: there is nothing to call, not merely something
  * that refuses.
  *
- * Everything is read-only. There is no tool here that registers for a class,
- * drops one, or writes anything back to Colleague.
+ * Nothing here writes to Colleague. There is no tool that registers for a
+ * class or drops one; the only writes are into the local catalog cache, which
+ * is a copy of public data we were going to fetch anyway.
  */
 
 import { McpServer } from "@modelcontextprotocol/server";
@@ -39,6 +40,7 @@ import {
   type ProgramTree,
 } from "../requirements";
 import { conflicts, DAY_NAMES, formatTime, offeringsFromListing } from "../schedule";
+import { liveSeats, refreshTerm } from "../server/crawler";
 import { CatalogStore } from "../server/store";
 
 const store = new CatalogStore();
@@ -56,6 +58,17 @@ function graphFor(term: string) {
     requisites: (c.CourseRequisites ?? []).map(parseRequisite),
   }));
   return { catalog, graph: buildGraph(nodes) };
+}
+
+/** Crawls in flight, so two calls a minute apart do not crawl twice. */
+const running = new Map<string, Promise<number>>();
+
+function refresh(term: string): Promise<number> {
+  const held = running.get(term);
+  if (held) return held;
+  const job = refreshTerm(term, store).finally(() => running.delete(term));
+  running.set(term, job);
+  return job;
 }
 
 // ---- catalog tools, always available -----------------------------------
@@ -262,6 +275,77 @@ function registerCatalog(server: McpServer) {
             return `  ${c.a.courseName}-${c.a.number} vs ${c.b.courseName}-${c.b.number}: ${DAY_NAMES[day]} ${formatTime(Math.max(x.start, y.start))}-${formatTime(Math.min(x.end, y.end))}`;
           }),
         ].join("\n"),
+      );
+    },
+  );
+
+  server.registerTool(
+    "live_seats",
+    {
+      description:
+        "Seat counts fetched from Colleague right now, for a few named courses, next to what the last crawl recorded. Every other tool here serves cached data; seats are the one field that moves by the minute during registration, so ask this before telling anyone a seat exists.",
+      inputSchema: z.object({
+        term: z.string(),
+        codes: z
+          .array(z.string())
+          .min(1)
+          .max(20)
+          .describe('Course codes, e.g. ["CS-2210", "HON-1010"]. One request covers them all.'),
+      }),
+    },
+    async ({ term, codes }) => {
+      const wanted = new Set(codes.map((c) => c.toUpperCase()));
+      const catalog = store.read(term);
+      const mine = catalog.sections.filter((s) => wanted.has(String(s.CourseName).toUpperCase()));
+      if (mine.length === 0) return fail(`No sections of ${[...wanted].join(", ")} in ${term}.`);
+
+      const seats = await liveSeats(term, [...new Set(mine.map((s) => s.CourseId))]);
+      if (Object.keys(seats).length === 0) {
+        return fail(`Colleague returned nothing for ${term}; the cached counts still stand.`);
+      }
+
+      const rows = mine
+        .map((s) => ({ s, live: seats[s.Id] }))
+        .sort((a, b) =>
+          `${a.s.CourseName}-${a.s.Number}`.localeCompare(`${b.s.CourseName}-${b.s.Number}`),
+        )
+        .map(({ s, live }) => {
+          const name = `${s.CourseName}-${s.Number}`;
+          // A section can vanish between crawls — cancelled, or merged into
+          // another. Saying so is more useful than printing the stale count.
+          if (!live)
+            return `${name.padEnd(13)} no longer listed  (cached: ${s.Available}/${s.Capacity})`;
+          const moved = live.available !== s.Available ? `  was ${s.Available}` : "";
+          const wait = live.waitlisted ? `  ${live.waitlisted} waitlisted` : "";
+          return `${name.padEnd(13)} ${live.available}/${live.capacity} open  ${live.status}${moved}${wait}`;
+        });
+
+      return text([...rows, "", `cached crawl: ${catalog.fetchedAt}`].join("\n"));
+    },
+  );
+
+  server.registerTool(
+    "refresh_catalog",
+    {
+      description:
+        "Re-crawl a whole term into the local cache: sections, meeting times and course records. Takes about a minute and is paced out of courtesy to the registrar, so for a seat count on a handful of courses use live_seats instead.",
+      inputSchema: z.object({
+        term: z.string().describe('Term code, e.g. "2026FA".'),
+      }),
+    },
+    async ({ term }) => {
+      const before = store.stats().find((s) => s.term === term);
+      const sections = await refresh(term);
+      // refreshTerm keeps the old catalog when a crawl comes back empty, which
+      // is the right call but would otherwise read here as a silent success.
+      if (sections === 0) {
+        return fail(`Crawl of ${term} came back empty. The previous catalog is untouched.`);
+      }
+      const after = store.stats().find((s) => s.term === term);
+      const delta = before ? sections - before.sections : 0;
+      return text(
+        `${term}: ${sections} sections, ${after?.courses ?? 0} courses, fetched ${after?.fetchedAt}.` +
+          (before ? `  (${delta >= 0 ? "+" : ""}${delta} since ${before.fetchedAt})` : ""),
       );
     },
   );

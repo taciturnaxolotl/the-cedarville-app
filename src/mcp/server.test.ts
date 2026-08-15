@@ -143,6 +143,8 @@ const CATALOG = [
   "course_details",
   "list_sections",
   "check_conflicts",
+  "live_seats",
+  "refresh_catalog",
 ];
 const PERSONAL = ["my_requirements", "my_eligibility", "compare_programs"];
 
@@ -324,5 +326,25 @@ describe("catalog tools", () => {
     const reply = replies.get(6)?.result;
     expect(reply?.isError).toBe(true);
     expect(reply?.content?.[0]?.text).toContain("nope");
+  }, 20_000);
+
+  // Both live tools reach the registrar, so the assertions here are about the
+  // paths that must not: a course we hold no sections for is answerable from
+  // the cache alone, and answering it over the network would be a bug.
+  test("live_seats needs no network to reject a course it has never seen", async () => {
+    const replies = await session(
+      [],
+      [
+        {
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: { name: "live_seats", arguments: { term: "2026FA", codes: ["ZZZZ-9999"] } },
+        },
+      ],
+    );
+    const reply = replies.get(7)?.result;
+    expect(reply?.isError).toBe(true);
+    expect(reply?.content?.[0]?.text).toContain("ZZZZ-9999");
   }, 20_000);
 });

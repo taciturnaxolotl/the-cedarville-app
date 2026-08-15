@@ -115,9 +115,15 @@ tools. Add it to Claude Code with:
 claude mcp add cedarville -- bun /abs/path/to/the-cedarville-app/src/mcp/server.ts
 ```
 
-Five tools are always available, over public catalog data:
+Seven tools are always available, over public catalog data:
 `list_terms`, `search_courses`, `course_details`, `list_sections`,
-`check_conflicts`.
+`check_conflicts`, `live_seats`, `refresh_catalog`.
+
+Those last two are the ones that touch the network. `live_seats` asks the
+registrar for current seat counts on a handful of named courses and prints
+them beside what the last crawl saw, which is what you want during
+registration; `refresh_catalog` re-crawls a whole term and takes about a
+minute.
 
 Five more read a captured evaluation, and are **only registered when the
 server is started with `--personal`** (or `CEDARVILLE_MCP_PERSONAL=1`):
@@ -126,8 +132,9 @@ server is started with `--personal`** (or `CEDARVILLE_MCP_PERSONAL=1`):
 
 The opt-in is structural, not a runtime check. Without the flag those tools do
 not appear in `tools/list` and calling one returns "tool not found" — there is
-nothing to refuse, because nothing is registered. Every tool is read-only;
-none of them can register for a class or write anything back to Colleague.
+nothing to refuse, because nothing is registered. Nothing writes to Colleague;
+no tool can register for a class or drop one, and the only writes are into the
+local catalog cache.
 
 The server reads `.data/catalog.sqlite` directly, so the planner server does
 not need to be running, but a crawl must have happened at least once.

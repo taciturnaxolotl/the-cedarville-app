@@ -43,10 +43,11 @@ export interface PlanRequest {
   /** Codes that count as a given course, for transcripts from older catalogs. */
   aliases?: (code: string) => string[];
   /**
-   * Hold work back from a summer when taking it would leave the semester
-   * behind it under its minimum. On by default: a part-time semester costs a
-   * student their status, their aid and often their insurance, and a light
-   * summer costs nothing. Turn it off to fill every term as early as it fits.
+   * Keep every semester at or above its minimum: hold work back from a summer
+   * that would strand one, and move courses between terms when that is what it
+   * takes. On by default. A part-time semester costs a student their status,
+   * their aid and often their insurance, where an even spread costs nothing at
+   * all. Turn it off to fill every term as early as it fits.
    */
   keepSemestersFull?: boolean;
   slots: TermSlot[];
@@ -171,6 +172,10 @@ export function projectPlan(request: PlanRequest): Plan {
     terms.push({ slot, courses, credits: used, ...(short ? { short: true } : {}) });
   }
 
+  // The greedy pass is right term by term and can still be wrong across them,
+  // leaving a semester below full time behind three at their cap.
+  if (keepSemestersFull) redistribute(terms, graph, offeredIn);
+
   const unscheduled = [...remaining].map((code) => ({
     code,
     // A course no slot would accept was never schedulable; one every slot
@@ -223,6 +228,91 @@ function summerRation(
     available += credits(code);
   }
   return { allowance: Math.max(0, available - next.minimum), contested };
+}
+
+/**
+ * Fills a part-time semester out of the terms before it.
+ *
+ * Packing each term to its cap in turn is right until it leaves one semester
+ * at nine credits behind three at sixteen. The cap is a budget and the minimum
+ * is a cliff, so a student would rather carry thirteen twice than be part time
+ * once — and the same courses in a different order costs nothing.
+ *
+ * Only whole moves count. A semester lifted from nine to eleven is still part
+ * time, so a redistribution that cannot reach the minimum is not made at all;
+ * shuffling a plan to no end is worse than leaving it legible.
+ */
+function redistribute(
+  terms: PlannedTerm[],
+  graph: Graph,
+  offeredIn: PlanRequest["offeredIn"],
+): void {
+  const where = new Map<string, number>();
+  terms.forEach((term, at) => {
+    for (const c of term.courses) where.set(c.code, at);
+  });
+
+  for (const [at, term] of terms.entries()) {
+    const minimum = term.slot.minimum;
+    if (minimum === undefined || term.courses.length === 0 || term.credits >= minimum) continue;
+
+    const lent = new Map<number, number>();
+    const moving: { from: number; course: PlannedCourse }[] = [];
+    let held = term.credits;
+
+    while (held < minimum) {
+      const room = term.slot.capacity - held;
+      let best: { from: number; course: PlannedCourse } | null = null;
+
+      for (const [from, source] of terms.slice(0, at).entries()) {
+        const after = source.credits - (lent.get(from) ?? 0);
+        for (const course of source.courses) {
+          if (course.credits > room) continue;
+          if (moving.some((m) => m.course === course)) continue;
+          // A term may empty entirely, but it may not go part time to spare
+          // another one: that trades the problem rather than solving it.
+          const left = after - course.credits;
+          if (left > 0 && left < (source.slot.minimum ?? 0)) continue;
+          if (!offeredIn(course.code, term.slot)) continue;
+          // Whatever waits on this course must still wait on it.
+          const waiting = graph.unlocks.get(course.code) ?? [];
+          if ([...waiting].some((d) => (where.get(d) ?? Number.POSITIVE_INFINITY) <= at)) continue;
+          // Nearest term first, then the biggest course in it: a plan the
+          // student may already have in mind should change as little as it can,
+          // and borrowing from next autumn beats borrowing from two years ago.
+          const better =
+            best === null ||
+            from > best.from ||
+            (from === best.from && course.credits > best.course.credits);
+          if (better) best = { from, course };
+        }
+      }
+
+      if (!best) break;
+      moving.push(best);
+      lent.set(best.from, (lent.get(best.from) ?? 0) + best.course.credits);
+      held += best.course.credits;
+    }
+
+    if (held < minimum) continue;
+
+    for (const { from, course } of moving) {
+      const source = terms[from] as PlannedTerm;
+      source.courses = source.courses.filter((c) => c !== course);
+      source.credits -= course.credits;
+      term.courses.push(course);
+      term.credits += course.credits;
+      where.set(course.code, at);
+    }
+  }
+
+  for (const term of terms) {
+    if (term.slot.minimum !== undefined && term.credits > 0 && term.credits < term.slot.minimum) {
+      term.short = true;
+    } else {
+      delete term.short;
+    }
+  }
 }
 
 function countDownstream(graph: Graph, code: string): number {

@@ -141,8 +141,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   full.type = "checkbox";
   full.checked = store.get().load.fullSemesters;
   full.title =
-    "Holds work back from a summer rather than leaving the semester after it part time. " +
-    "A course that unlocks others still goes as early as it fits.";
+    "Keeps every semester at twelve credits or more, holding work back from a summer and " +
+    "moving courses between terms to do it. Better an even thirteen twice than sixteen " +
+    "and then nine.";
   full.addEventListener("change", () => set({ fullSemesters: full.checked }));
   const fullLabel = el("label", "toggle");
   fullLabel.append(full, el("span", undefined, "keep semesters full"));

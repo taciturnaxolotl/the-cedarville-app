@@ -303,3 +303,74 @@ describe("keeping the semesters full", () => {
     expect(p.finishes).toBe("SU27");
   });
 });
+
+describe("filling a part-time semester from the terms before it", () => {
+  const eight = ["AA", "BB", "CC", "DD", "EE", "FF", "GG", "HH"].map((s) => `${s}-1000`);
+  const flat = buildGraph(eight.map((code) => ({ code, title: "", requisites: [] })));
+
+  const two = (capacity: number, minimum = 12) => [
+    { name: "FA27", season: "fall" as const, year: 2027, capacity, minimum },
+    { name: "SP28", season: "spring" as const, year: 2028, capacity, minimum },
+  ];
+
+  const project = (over: Partial<Parameters<typeof projectPlan>[0]> = {}) =>
+    projectPlan({
+      need: eight,
+      completed: new Set(),
+      graph: flat,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: two(18),
+      ...over,
+    });
+
+  test("carries twelve twice rather than eighteen and then six", () => {
+    expect(project({ keepSemestersFull: false }).terms.map((t) => t.credits)).toEqual([18, 6]);
+    expect(project().terms.map((t) => t.credits)).toEqual([12, 12]);
+    expect(project().terms.some((t) => t.short)).toBe(false);
+  });
+
+  test("leaves the plan alone when no move can clear the minimum", () => {
+    // Five courses in twelve-credit terms: every redistribution still strands
+    // one below full time, and a shuffle to no end is worse than a plan the
+    // student can read.
+    const p = projectPlan({
+      need: eight.slice(0, 5),
+      completed: new Set(),
+      graph: flat,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: two(12),
+    });
+    expect(p.terms.map((t) => t.credits)).toEqual([12, 3]);
+    expect(p.terms[1]?.short).toBe(true);
+  });
+
+  test("never lends a course the later term does not run", () => {
+    const p = project({
+      offeredIn: (code, slot) => slot.season === "fall" || code === "AA-1000",
+    });
+    // One movable course cannot close a six-credit gap, so nothing moves.
+    expect(p.terms[0]?.credits).toBe(18);
+  });
+
+  test("keeps a course ahead of whatever waits on it", () => {
+    const chained = buildGraph([
+      { code: "AA-1000", title: "", requisites: [] },
+      { code: "BB-1000", title: "", requisites: [req("Take AA-1000")] },
+      ...eight.slice(2).map((code) => ({ code, title: "", requisites: [] })),
+    ]);
+    const p = projectPlan({
+      need: eight,
+      completed: new Set(),
+      graph: chained,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: two(18),
+    });
+    // BB-1000 sits in the first term, so AA-1000 cannot follow it into the
+    // second however much the second wants the credits.
+    expect(p.terms[0]?.courses.map((c) => c.code)).toContain("AA-1000");
+    expect(p.terms.map((t) => t.credits)).toEqual([12, 12]);
+  });
+});

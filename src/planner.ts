@@ -16,14 +16,18 @@ import { eligibility, type Graph, type Standing } from "./prereqs";
 /**
  * Credits a student must hold to count as each standing.
  *
- * Cedarville publishes these in the catalog rather than through any API, so
- * they are stated here and overridable per plan. Wrong numbers move a course
- * a term, they do not invent or lose one.
+ * Cedarville publishes these in the catalog and nowhere an API can reach:
+ * "Freshman 0-30.99, Sophomore 31-60.99, Junior 61-90.99, Senior 91+", the
+ * same table in every catalog from 2020-21 forward. The thresholds are the
+ * lower bound of each band, so a student is a senior at 91 rather than 90.
+ *
+ * Overridable per plan, because this is one school's policy sitting in code
+ * that otherwise only repeats what Colleague said.
  */
 export const STANDING_CREDITS: Record<Standing, number> = {
-  sophomore: 30,
-  junior: 60,
-  senior: 90,
+  sophomore: 31,
+  junior: 61,
+  senior: 91,
 };
 
 export type Season = "fall" | "spring" | "summer";
@@ -217,14 +221,22 @@ export function projectPlan(request: PlanRequest): Plan {
   // leaving a semester below full time behind three at their cap.
   if (keepSemestersFull) redistribute(terms, graph, offeredIn);
 
-  const unscheduled = [...remaining].map((code) => ({
-    code,
+  const unscheduled = [...remaining].map((code) => {
     // A course no slot would accept was never schedulable; one every slot
-    // would accept simply never came up.
-    why: slots.some((slot) => offeredIn(code, slot))
-      ? "ran out of terms"
-      : "not taught in any term this plan covers",
-  }));
+    // would accept simply never came up. And a standing the plan never
+    // reaches is neither: it is a course waiting on credits nothing here
+    // earns, which reads as "ran out of terms" and is not.
+    const standing = graph.courses.get(code)?.standing;
+    if (standing && earned < standingCredits[standing]) {
+      return { code, why: `needs ${standing} standing, which this plan never reaches` };
+    }
+    return {
+      code,
+      why: slots.some((slot) => offeredIn(code, slot))
+        ? "ran out of terms"
+        : "not taught in any term this plan covers",
+    };
+  });
 
   const lastWithWork = [...terms].reverse().find((t) => t.courses.length);
   return {

@@ -379,12 +379,13 @@ describe("a course that wants class standing", () => {
   const seminar = buildGraph([
     { code: "AA-1000", title: "", requisites: [] },
     { code: "BB-1000", title: "", requisites: [] },
+    { code: "DD-1000", title: "", requisites: [] },
     { code: "CC-4010", title: "", requisites: [], standing: "senior" as const },
   ]);
 
   const project = (earnedCredits: number) =>
     projectPlan({
-      need: ["AA-1000", "BB-1000", "CC-4010"],
+      need: ["AA-1000", "BB-1000", "DD-1000", "CC-4010"],
       completed: new Set(),
       graph: seminar,
       credits: () => 15,
@@ -397,8 +398,11 @@ describe("a course that wants class standing", () => {
     plan.terms.find((t) => t.courses.some((c) => c.code === code))?.slot.name;
 
   test("waits for the credits that standing takes", () => {
-    // 60 earned, 90 needed: two fifteen-credit terms of planned work get there.
-    expect(at(project(60), "CC-4010")).toBe("SP28");
+    // The catalog makes a senior at 91 hours. Starting at 61, two fifteen
+    // credit terms get there, and the third is the first that may have it.
+    expect(at(project(61), "CC-4010")).toBe("SP28");
+    // One credit short is short: the same plan waits another term.
+    expect(at(project(60), "CC-4010")).toBe("FA28");
   });
 
   test("goes straight in when the student is already a senior", () => {
@@ -408,10 +412,27 @@ describe("a course that wants class standing", () => {
       graph: seminar,
       credits: () => 15,
       offeredIn: () => true,
-      earnedCredits: 90,
+      earnedCredits: 91,
       slots: termsFrom({ year: 2027, season: "spring" }, 6, { capacity: 15, summers: 0 }),
     });
     expect(at(p, "CC-4010")).toBe("SP27");
+  });
+
+  test("says so rather than blaming the horizon", () => {
+    // Nothing else is left to earn credits with, so the standing never comes.
+    // "Ran out of terms" would send a student looking for a longer plan.
+    const p = projectPlan({
+      need: ["CC-4010"],
+      completed: new Set(),
+      graph: seminar,
+      credits: () => 15,
+      offeredIn: () => true,
+      earnedCredits: 60,
+      slots: termsFrom({ year: 2027, season: "spring" }, 6, { capacity: 15, summers: 0 }),
+    });
+    expect(p.unscheduled).toEqual([
+      { code: "CC-4010", why: "needs senior standing, which this plan never reaches" },
+    ]);
   });
 
   test("thresholds are the caller's to set", () => {

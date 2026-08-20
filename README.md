@@ -100,8 +100,9 @@ Seminar has no requisites at all, and the whole of its condition is the
 sentence "Prerequisite: senior status in engineering". Read literally, it is
 open to a freshman, and the plan put it in one. Standing is now parsed out of
 that prose and checked against the credits a student will hold when the term
-starts. The thresholds are the school's, not Colleague's, so they live in
-`STANDING_CREDITS` where one edit fixes them.
+starts, against the catalog's own table: sophomore at 31 hours, junior at 61,
+senior at 91. That table is printed in the catalog and reachable by no API, so
+it lives in `STANDING_CREDITS` where one edit follows a policy change.
 
 The rest of those descriptions were left alone on purpose: only ten of the 261
 name a course code, and the other 251 are admissions and permissions that no

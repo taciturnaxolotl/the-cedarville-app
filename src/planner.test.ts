@@ -374,3 +374,57 @@ describe("filling a part-time semester from the terms before it", () => {
     expect(p.terms.map((t) => t.credits)).toEqual([12, 12]);
   });
 });
+
+describe("a course that wants class standing", () => {
+  const seminar = buildGraph([
+    { code: "AA-1000", title: "", requisites: [] },
+    { code: "BB-1000", title: "", requisites: [] },
+    { code: "CC-4010", title: "", requisites: [], standing: "senior" as const },
+  ]);
+
+  const project = (earnedCredits: number) =>
+    projectPlan({
+      need: ["AA-1000", "BB-1000", "CC-4010"],
+      completed: new Set(),
+      graph: seminar,
+      credits: () => 15,
+      offeredIn: () => true,
+      earnedCredits,
+      slots: termsFrom({ year: 2027, season: "spring" }, 6, { capacity: 15, summers: 0 }),
+    });
+
+  const at = (plan: ReturnType<typeof projectPlan>, code: string) =>
+    plan.terms.find((t) => t.courses.some((c) => c.code === code))?.slot.name;
+
+  test("waits for the credits that standing takes", () => {
+    // 60 earned, 90 needed: two fifteen-credit terms of planned work get there.
+    expect(at(project(60), "CC-4010")).toBe("SP28");
+  });
+
+  test("goes straight in when the student is already a senior", () => {
+    const p = projectPlan({
+      need: ["CC-4010"],
+      completed: new Set(),
+      graph: seminar,
+      credits: () => 15,
+      offeredIn: () => true,
+      earnedCredits: 90,
+      slots: termsFrom({ year: 2027, season: "spring" }, 6, { capacity: 15, summers: 0 }),
+    });
+    expect(at(p, "CC-4010")).toBe("SP27");
+  });
+
+  test("thresholds are the caller's to set", () => {
+    const p = projectPlan({
+      need: ["CC-4010"],
+      completed: new Set(),
+      graph: seminar,
+      credits: () => 15,
+      offeredIn: () => true,
+      earnedCredits: 0,
+      standingCredits: { sophomore: 0, junior: 0, senior: 0 },
+      slots: termsFrom({ year: 2027, season: "spring" }, 6, { capacity: 15, summers: 0 }),
+    });
+    expect(at(p, "CC-4010")).toBe("SP27");
+  });
+});

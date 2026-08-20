@@ -5,8 +5,10 @@ import {
   depth,
   downstream,
   eligibility,
+  nodeOf,
   parseRequisite,
   prerequisitesOf,
+  standingIn,
 } from "./prereqs";
 
 const BEFORE = "- Must be completed prior to taking this course.";
@@ -443,5 +445,46 @@ describe("choosing between alternative prerequisites", () => {
       { code: "CS-1220", title: "", requisites: [] },
     ]);
     expect([...prerequisitesOf(both, "CS-4000", new Set(["CS-1210"]))]).toEqual(["CS-1220"]);
+  });
+});
+
+describe("class standing, which is prose and nowhere else", () => {
+  test("reads the standing a description demands", () => {
+    // EGGN-4010 Senior Seminar, verbatim. It carries no requisite record at
+    // all, so this sentence is the whole of its condition.
+    expect(standingIn("Required weekly meeting. Prerequisite: senior status in engineering")).toBe(
+      "senior",
+    );
+    expect(standingIn("Take BIO-2600, junior status, and permission of instructor.")).toBe(
+      "junior",
+    );
+    expect(standingIn("Open only to seniors in business administration.")).toBe("senior");
+    expect(standingIn("An introduction to mathematical foundations.")).toBeNull();
+  });
+
+  test("a node carries it, from the description or the requisite text", () => {
+    const node = nodeOf({
+      Id: "1",
+      SubjectCode: "EGGN",
+      Number: "4010",
+      Title: "Senior Seminar",
+      Description: "Prerequisite: senior status in engineering",
+    });
+    expect(node).toMatchObject({ code: "EGGN-4010", standing: "senior", requisites: [] });
+
+    const fromRequisite = nodeOf({
+      Id: "2",
+      SubjectCode: "BIO",
+      Number: "4910",
+      Title: "Research",
+      CourseRequisites: [{ DisplayText: "Take BIO-2600, junior status.", IsRequired: true }],
+    });
+    expect(fromRequisite.standing).toBe("junior");
+  });
+
+  test("says nothing when the catalog says nothing", () => {
+    expect(
+      nodeOf({ Id: "3", SubjectCode: "CS", Number: "1210", Title: "Intro" }).standing,
+    ).toBeUndefined();
   });
 });

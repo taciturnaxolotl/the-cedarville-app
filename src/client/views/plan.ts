@@ -13,7 +13,7 @@
  */
 
 import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from "../../planner";
-import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
+import { buildGraph, nodeOf } from "../../prereqs";
 import {
   completedCourses,
   coursesNeededAcross,
@@ -52,16 +52,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
   );
   const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-  const graph = buildGraph(
-    records.map(
-      (c) =>
-        ({
-          code: `${c.SubjectCode}-${c.Number}`,
-          title: c.Title,
-          requisites: (c.CourseRequisites ?? []).map(parseRequisite),
-        }) as CourseNode,
-    ),
-  );
+  const graph = buildGraph(records.map(nodeOf));
 
   // We hold one term's catalog, so seasons are a guess: a course seen in this
   // term is assumed to recur, and anything else is assumed to be elsewhere.
@@ -77,6 +68,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   // Every program the student is in, solved as one cover: a course bought for
   // the major that also closes the minor is bought once.
   const have = new Set([...completedCourses(trees), ...inProgressCourses(trees)]);
+  const earned = Math.max(...trees.map((t) => t.credits.completed + t.credits.inProgress));
   const price = (c: string) => credits.get(c) ?? 3;
 
   // First pass names the groups the evaluation will not enumerate; the server
@@ -200,6 +192,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           credits: price,
           offeredIn,
           keepSemestersFull: load.fullSemesters,
+          earnedCredits: earned,
           slots: termsFrom({ year: 2027, season: "spring" }, 12, {
             capacity: load.perTerm,
             summerCapacity: load.summer,

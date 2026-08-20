@@ -16,7 +16,7 @@
 import { runsIn, seasonsOffered, yearsOffered } from "../../catalog";
 import { type Candidate, type RankedChoice, rankChoices } from "../../choices";
 import { type Season, type TermSlot, termsFrom } from "../../planner";
-import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
+import { buildGraph, nodeOf } from "../../prereqs";
 import {
   completedCourses,
   expectedCredits,
@@ -201,16 +201,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     ),
   );
   const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-  const graph = buildGraph(
-    records.map(
-      (c) =>
-        ({
-          code: `${c.SubjectCode}-${c.Number}`,
-          title: c.Title,
-          requisites: (c.CourseRequisites ?? []).map(parseRequisite),
-        }) as CourseNode,
-    ),
-  );
+  const graph = buildGraph(records.map(nodeOf));
 
   /**
    * Which seasons a course runs in, as the registrar states it.
@@ -256,6 +247,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     min: credits.get(c) ?? 3,
     max: maxima.get(c) ?? credits.get(c) ?? 3,
   }));
+
+  // What class standing is measured against. Each evaluation counts the same
+  // transcript, so the fullest reading of it is the true one.
+  const earned = Math.max(...trees.map((t) => t.credits.completed + t.credits.inProgress));
 
   const passed = completedCourses(trees);
   const running = inProgressCourses(trees);
@@ -310,6 +305,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       graph,
       offeredIn,
       keepSemestersFull: store.get().load.fullSemesters,
+      earnedCredits: earned,
       slots: termsFrom({ year: 2027, season: "spring" }, 12, {
         capacity: store.get().load.perTerm,
         summerCapacity: store.get().load.summer,

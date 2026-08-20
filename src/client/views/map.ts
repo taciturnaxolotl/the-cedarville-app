@@ -13,7 +13,7 @@
 import { runsIn, seasonsOffered, yearsOffered } from "../../catalog";
 import { buildMap, type CourseMap } from "../../map";
 import { projectPlan, type Season, type TermSlot, termsFrom } from "../../planner";
-import { buildGraph, type CourseNode, parseRequisite, prerequisitesOf } from "../../prereqs";
+import { buildGraph, nodeOf, prerequisitesOf } from "../../prereqs";
 import {
   completedCourses,
   coursesNeededAcross,
@@ -81,16 +81,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     ),
   );
   const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-  const graph = buildGraph(
-    records.map(
-      (c) =>
-        ({
-          code: `${c.SubjectCode}-${c.Number}`,
-          title: c.Title,
-          requisites: (c.CourseRequisites ?? []).map(parseRequisite),
-        }) as CourseNode,
-    ),
-  );
+  const graph = buildGraph(records.map(nodeOf));
 
   // Which seasons a course runs in, as the registrar states it rather than as
   // one term's section listing implies. See the note in the build view.
@@ -114,6 +105,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   }));
   const price = (c: string) => stretched.get(c) ?? credits.get(c) ?? 3;
   const have = new Set([...completedCourses(trees), ...inProgressCourses(trees)]);
+  const earned = Math.max(...trees.map((t) => t.credits.completed + t.credits.inProgress));
 
   const pinned = new Set(read<string[]>(PINS, []));
   const tracks = new Map(
@@ -181,6 +173,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       offeredIn,
       slots,
       keepSemestersFull: load.fullSemesters,
+      earnedCredits: earned,
     });
     const map = buildMap(plan, {
       graph,

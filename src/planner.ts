@@ -11,7 +11,20 @@
  * the next term or two.
  */
 
-import { eligibility, type Graph } from "./prereqs";
+import { eligibility, type Graph, type Standing } from "./prereqs";
+
+/**
+ * Credits a student must hold to count as each standing.
+ *
+ * Cedarville publishes these in the catalog rather than through any API, so
+ * they are stated here and overridable per plan. Wrong numbers move a course
+ * a term, they do not invent or lose one.
+ */
+export const STANDING_CREDITS: Record<Standing, number> = {
+  sophomore: 30,
+  junior: 60,
+  senior: 90,
+};
 
 export type Season = "fall" | "spring" | "summer";
 
@@ -50,6 +63,15 @@ export interface PlanRequest {
    * all. Turn it off to fill every term as early as it fits.
    */
   keepSemestersFull?: boolean;
+  /**
+   * Credits already on the transcript. Standing is measured against this plus
+   * whatever the plan has scheduled by then, so a senior seminar lands in a
+   * senior year. Falls back to pricing the completed set, which is close but
+   * blind to a course priced differently in an older catalog.
+   */
+  earnedCredits?: number;
+  /** Overrides the credits each standing takes. */
+  standingCredits?: Record<Standing, number>;
   slots: TermSlot[];
 }
 
@@ -90,7 +112,15 @@ export interface Plan {
  * longest chain, and putting gates first is exactly how you shorten it.
  */
 export function projectPlan(request: PlanRequest): Plan {
-  const { graph, credits, offeredIn, slots, aliases, keepSemestersFull = true } = request;
+  const {
+    graph,
+    credits,
+    offeredIn,
+    slots,
+    aliases,
+    keepSemestersFull = true,
+    standingCredits = STANDING_CREDITS,
+  } = request;
   const taken = new Set(request.completed);
   // Callers assemble `need` from requirement pools, which happily list work
   // already done; scheduling it again would invent terms out of nothing.
@@ -101,6 +131,10 @@ export function projectPlan(request: PlanRequest): Plan {
   for (const code of remaining) leverage.set(code, countDownstream(graph, code));
 
   const terms: PlannedTerm[] = [];
+
+  // Standing is read at the start of a term: a course finished in it does not
+  // make a student a senior partway through.
+  let earned = request.earnedCredits ?? [...taken].reduce((n, code) => n + credits(code), 0);
 
   for (const [at, slot] of slots.entries()) {
     if (remaining.size === 0) break;
@@ -137,6 +171,12 @@ export function projectPlan(request: PlanRequest): Plan {
       }
 
       const node = graph.courses.get(code) ?? { code, title: "", requisites: [] };
+
+      // "Senior status in engineering" is the whole of some courses' condition
+      // and appears in no requisite record, so it is checked here rather than
+      // by `eligibility`.
+      if (node.standing && earned < standingCredits[node.standing]) continue;
+
       // Courses chosen earlier this term satisfy a corequisite but not a
       // prerequisite, which `eligibility` already distinguishes.
       // The graph knows every course the catalog lists, so it is also the
@@ -169,6 +209,7 @@ export function projectPlan(request: PlanRequest): Plan {
       taken.add(c.code);
       remaining.delete(c.code);
     }
+    earned += used;
     terms.push({ slot, courses, credits: used, ...(short ? { short: true } : {}) });
   }
 

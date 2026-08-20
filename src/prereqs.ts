@@ -11,6 +11,8 @@
  * five distinct extension phrasings cover every one of them.
  */
 
+import type { CatalogCourseRecord } from "./catalog";
+
 /** How the requisite relates in time, from DisplayTextExtension. */
 export type Timing =
   /** Must be finished first. */
@@ -94,6 +96,54 @@ export interface CourseNode {
   code: string;
   title: string;
   requisites: Requisite[];
+  /**
+   * Class standing the course demands. Stated in prose and nowhere else, so it
+   * is not a requisite record and never appears in `requisites`.
+   */
+  standing?: Standing;
+}
+
+/**
+ * How far through a degree a student must be. Cedarville states these as
+ * prose — "Prerequisite: senior status in engineering" — usually in the
+ * description rather than in any requisite the API returns.
+ */
+export type Standing = "sophomore" | "junior" | "senior";
+
+const STANDING =
+  /\b(sophomore|junior|senior)s?\s+(?:status|standing)\b|\bonly to (sophomore|junior|senior)s\b/i;
+
+/**
+ * The standing a piece of catalog prose demands, if any.
+ *
+ * 58 courses gate on this and nothing else. `EGGN-4010` Senior Seminar carries
+ * no requisite record at all: the whole of its condition is one sentence of
+ * description. Read literally that course is open to a freshman, and a plan
+ * that believes it will put the senior seminar in a student's first autumn.
+ */
+export function standingIn(text: string): Standing | null {
+  const found = STANDING.exec(text);
+  const word = found?.[1] ?? found?.[2];
+  return word ? (word.toLowerCase() as Standing) : null;
+}
+
+/**
+ * A catalog record as the graph wants it.
+ *
+ * Five call sites built this by hand, so none of them could learn a new field
+ * without the other four going stale.
+ */
+export function nodeOf(record: CatalogCourseRecord): CourseNode {
+  const requisites = record.CourseRequisites ?? [];
+  const standing = standingIn(
+    `${record.Description ?? ""} ${requisites.map((r) => r.DisplayText ?? "").join(" ")}`,
+  );
+  return {
+    code: `${record.SubjectCode}-${record.Number}`,
+    title: record.Title,
+    requisites: requisites.map(parseRequisite),
+    ...(standing ? { standing } : {}),
+  };
 }
 
 export interface Graph {

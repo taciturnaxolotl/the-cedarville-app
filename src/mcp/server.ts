@@ -22,14 +22,7 @@ import { runsIn, seasonsOffered, yearsOffered } from "../catalog";
 import { aliasesOf, buildEquivalences } from "../equivalence";
 import { merge } from "../merge";
 import { criticalPath, projectPlan, type TermSlot, termsFrom } from "../planner";
-import {
-  buildGraph,
-  type CourseNode,
-  depth,
-  downstream,
-  eligibility,
-  parseRequisite,
-} from "../prereqs";
+import { buildGraph, depth, downstream, eligibility, nodeOf } from "../prereqs";
 import {
   completedCourses,
   coursesNeeded,
@@ -52,12 +45,7 @@ const fail = (body: string) => ({
 
 function graphFor(term: string) {
   const catalog = store.read(term);
-  const nodes: CourseNode[] = (catalog.courses ?? []).map((c) => ({
-    code: `${c.SubjectCode}-${c.Number}`,
-    title: c.Title,
-    requisites: (c.CourseRequisites ?? []).map(parseRequisite),
-  }));
-  return { catalog, graph: buildGraph(nodes) };
+  return { catalog, graph: buildGraph((catalog.courses ?? []).map(nodeOf)) };
 }
 
 /** Crawls in flight, so two calls a minute apart do not crawl twice. */
@@ -382,13 +370,7 @@ function planningContext() {
     records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
   );
   const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-  const graph = buildGraph(
-    records.map((c) => ({
-      code: `${c.SubjectCode}-${c.Number}`,
-      title: c.Title,
-      requisites: (c.CourseRequisites ?? []).map(parseRequisite),
-    })),
-  );
+  const graph = buildGraph(records.map(nodeOf));
 
   // Colleague publishes course equivalence on section records, not on the
   // catalog view, so a transcript from an earlier catalog year still matches.

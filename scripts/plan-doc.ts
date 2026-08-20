@@ -11,7 +11,7 @@
 import { absorbed, creditCeiling, impliedOverlap, matchProgram, totalCredits } from "../src/book";
 import { compareTerms, runsIn, seasonsOffered, yearsOffered } from "../src/catalog";
 import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from "../src/planner";
-import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src/prereqs";
+import { buildGraph, eligibility, nodeOf } from "../src/prereqs";
 import {
   completedCourses,
   coursesNeeded,
@@ -57,16 +57,7 @@ const credits = new Map(
 );
 const price = (c: string) => credits.get(c) ?? 3;
 const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-const graph = buildGraph(
-  records.map(
-    (c) =>
-      ({
-        code: `${c.SubjectCode}-${c.Number}`,
-        title: c.Title,
-        requisites: (c.CourseRequisites ?? []).map(parseRequisite),
-      }) as CourseNode,
-  ),
-);
+const graph = buildGraph(records.map(nodeOf));
 
 const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseName));
 const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));

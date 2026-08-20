@@ -137,6 +137,8 @@ export interface RankOptions extends NeedOptions {
   aliases?: PlanRequest["aliases"];
   /** Passed through: every price here is a re-solve under the same policy. */
   keepSemestersFull?: PlanRequest["keepSemestersFull"];
+  /** Credits already earned, which is what class standing is measured against. */
+  earnedCredits?: PlanRequest["earnedCredits"];
   /**
    * Cap on how many courses in a pool get priced. Pools run to 168 courses and
    * each price is a full re-solve, so the long tail is trimmed — but only
@@ -191,6 +193,7 @@ function planFor(need: Iterable<string>, options: RankOptions): Plan {
     ...(options.keepSemestersFull === undefined
       ? {}
       : { keepSemestersFull: options.keepSemestersFull }),
+    ...(options.earnedCredits === undefined ? {} : { earnedCredits: options.earnedCredits }),
   });
 }
 

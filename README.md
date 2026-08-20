@@ -86,6 +86,27 @@ course now, which courses it would unlock, and how deep its chain runs. A
 course gating eleven others belongs earlier in a degree than one gating none,
 and the schedule view sorts on exactly that.
 
+### the gates that are only prose
+
+Of 906 requisites in the catalog, 82 say something no parser should pretend to
+understand: "acceptance into the PA program", "permission of instructor",
+"undergraduate course or equivalent competency in microeconomics". Those stay
+`unknown`, which is the honest answer.
+
+One kind is worth reading, though, because it decides *when* rather than
+whether. 58 courses gate on class standing, and 261 name a prerequisite in
+their description that no requisite record carries — `EGGN-4010` Senior
+Seminar has no requisites at all, and the whole of its condition is the
+sentence "Prerequisite: senior status in engineering". Read literally, it is
+open to a freshman, and the plan put it in one. Standing is now parsed out of
+that prose and checked against the credits a student will hold when the term
+starts. The thresholds are the school's, not Colleague's, so they live in
+`STANDING_CREDITS` where one edit fixes them.
+
+The rest of those descriptions were left alone on purpose: only ten of the 261
+name a course code, and the other 251 are admissions and permissions that no
+amount of parsing turns into a date.
+
 ### two traps in the timetable
 
 Meeting times arrive as UTC pinned to an arbitrary reference date: an 11:00 AM

@@ -15,14 +15,7 @@
  * DOM from an event handler.
  */
 
-import {
-  buildGraph,
-  type CourseNode,
-  depth,
-  downstream,
-  eligibility,
-  parseRequisite,
-} from "../../prereqs";
+import { buildGraph, depth, downstream, eligibility, nodeOf } from "../../prereqs";
 import {
   completedCourses,
   enumeratedCourseIds,
@@ -87,12 +80,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   // ---- what blocks what ------------------------------------------------
 
-  const nodes: CourseNode[] = (catalog.courses ?? []).map((c) => ({
-    code: `${c.SubjectCode}-${c.Number}`,
-    title: c.Title,
-    requisites: (c.CourseRequisites ?? []).map(parseRequisite),
-  }));
-  const graph = buildGraph(nodes);
+  const graph = buildGraph((catalog.courses ?? []).map(nodeOf));
   const nodeFor = (offering: Offering) => graph.courses.get(offering.courseName);
 
   const completed = new Set<string>();

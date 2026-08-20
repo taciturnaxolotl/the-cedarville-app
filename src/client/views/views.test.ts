@@ -1518,6 +1518,20 @@ describe("build view — how heavy a term", () => {
       ]),
     );
 
+  test("names a second major once, however many enrolments claim it", () => {
+    // BS.CYOPR records the computer science major; BS.CMPSC is what answers
+    // it. Both trees name it, and the student is doing it once.
+    const cyber = normalize(program("BS.CYOPR", []));
+    cyber.majors = ["Cyber Operations", "Computer Science"];
+    cyber.minors = ["Honors Program"];
+    const comp = normalize(program("BS.CMPSC", []));
+    comp.majors = ["Computer Science"];
+
+    build.mount(root, { trees: [cyber, comp], enrolled: ["BS.CYOPR", "BS.CMPSC"] });
+    const names = Array.from(root.querySelectorAll(".chips .tag")).map((t) => t.textContent);
+    expect(names).toEqual(["Cyber Operations", "Computer Science", "Honors Program"]);
+  });
+
   test("offers the term, summer and semester knobs, within the school's own limits", () => {
     build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
     const dials = Array.from(root.querySelectorAll(".dial input")) as unknown as HTMLInputElement[];

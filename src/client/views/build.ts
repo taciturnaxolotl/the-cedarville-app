@@ -347,9 +347,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           // operations major and the honors program, and the code says
           // neither. Showing what Colleague named is what makes a student
           // recognise their own degree.
-          for (const t of mine) {
-            for (const name of namesOf(t)) chips.append(tag(name, "on"));
-          }
+          //
+          // Deduped, because a second major is named twice: once by the
+          // enrolment that records it and once by the program evaluated to
+          // answer it. That is one thing the student is doing.
+          for (const name of new Set(mine.flatMap(namesOf))) chips.append(tag(name, "on"));
         }
         if (theirs.length) {
           chips.append(el("span", "muted", "trying"));

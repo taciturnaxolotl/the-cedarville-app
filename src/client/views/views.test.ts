@@ -496,11 +496,25 @@ describe("plan view", () => {
     const before = terms();
 
     const slider = root.querySelector("input[type=range]") as HTMLInputElement;
-    slider.value = "21";
+    slider.value = "18.5";
     // A range has no click() equivalent, and happy-dom's Event is structurally
     // different from the DOM one, so the cast is the honest way through.
     slider.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
     expect(terms()).toBeGreaterThanOrEqual(before);
+    // The knobs are shared with the build view, and so is the storage.
+    localStorage.removeItem("cedarville:load");
+  });
+
+  test("plans one fewer summer when asked for one fewer", () => {
+    plan.mount(root, ctxWith(CHAIN));
+    const summers = () => root.querySelectorAll(".term.summer").length;
+    expect(summers()).toBeGreaterThan(0);
+
+    const [, count] = Array.from(root.querySelectorAll("input[type=range]")) as HTMLInputElement[];
+    count!.value = "0";
+    count!.dispatchEvent(new window.Event("input", { bubbles: true }) as unknown as Event);
+    expect(summers()).toBe(0);
+    localStorage.removeItem("cedarville:load");
   });
 
   test("destroy clears the outlet", () => {
@@ -1504,14 +1518,31 @@ describe("build view — how heavy a term", () => {
       ]),
     );
 
-  test("offers a term and a summer dial, within the school's own limits", () => {
+  test("offers the term, summer and semester knobs, within the school's own limits", () => {
     build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
     const dials = Array.from(root.querySelectorAll(".dial input")) as unknown as HTMLInputElement[];
-    expect(dials).toHaveLength(2);
+    expect(dials).toHaveLength(4);
     // 12 is full time and 18.5 the ceiling advisor approval alone can reach.
     expect(dials[0]?.min).toBe("12");
     expect(dials[0]?.max).toBe("18.5");
+    // How many summers, then how heavy each one is.
     expect(dials[1]?.min).toBe("0");
+    expect(dials[1]?.max).toBe("4");
+    expect(dials[2]?.min).toBe("0");
+    expect(dials[3]?.type).toBe("checkbox");
+  });
+
+  test("counts the summers it will plan", () => {
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    expect(root.querySelector(".dials")?.textContent).toContain("4 of 4");
+
+    const [, summers] = Array.from(
+      root.querySelectorAll(".dial input"),
+    ) as unknown as HTMLInputElement[];
+    summers!.value = "0";
+    summers!.dispatchEvent(new window.Event("input") as unknown as Event);
+    expect(root.querySelector(".dials")?.textContent).toContain("none");
+    localStorage.removeItem("cedarville:load");
   });
 
   test("says what the school would call a load of that size", () => {

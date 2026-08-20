@@ -527,14 +527,26 @@ function registerPersonal(server: McpServer) {
           .optional()
           .describe("Program code. Defaults to the first captured evaluation."),
         credits_per_term: z.number().int().min(6).max(21).default(15),
-        include_summers: z.boolean().default(true),
+        summers: z
+          .number()
+          .int()
+          .min(0)
+          .max(4)
+          .default(4)
+          .describe("How many summers to plan, earliest first. Zero plans none."),
+        keep_semesters_full: z
+          .boolean()
+          .default(true)
+          .describe(
+            "Hold work back from a summer rather than leave the semester behind it part time.",
+          ),
         start: z
           .string()
           .default("SP27")
           .describe('First term to plan, e.g. "SP27". The term in progress is excluded.'),
       }),
     },
-    async ({ program, credits_per_term, include_summers, start }) => {
+    async ({ program, credits_per_term, summers, keep_semesters_full, start }) => {
       const trees = await loadTrees();
       const tree = program ? trees[program] : Object.values(trees)[0];
       if (!tree)
@@ -554,16 +566,19 @@ function registerPersonal(server: McpServer) {
         credits,
         offeredIn,
         aliases,
+        keepSemestersFull: keep_semesters_full,
         slots: termsFrom({ year, season: season as "spring" | "fall" }, 12, {
           capacity: credits_per_term,
-          includeSummers: include_summers,
+          summers,
+          minimum: 12,
         }),
       });
 
       const toGo = tree.credits.minimum - tree.credits.completed - tree.credits.inProgress;
       const lines = [
         `${tree.code}: ${toGo} credits remain; this plan schedules ${plan.totalCredits} across named requirements.`,
-        `Finishes ${plan.finishes ?? "never within the horizon"} at ${credits_per_term}/term${include_summers ? " with summers" : ""}.`,
+        `Finishes ${plan.finishes ?? "never within the horizon"} at ${credits_per_term}/term` +
+          `${summers ? ` with ${summers} summer${summers === 1 ? "" : "s"}` : " without summers"}.`,
         "",
       ];
       for (const term of plan.terms) {

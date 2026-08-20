@@ -37,7 +37,7 @@ import {
 } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
-import { CEILING, FULL_TIME, type Load, readLoad, verdictOf, writeLoad } from "../load";
+import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
 import { createStore, Subscriptions } from "../store";
 
 interface State {
@@ -309,10 +309,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       tracks: new Map(Object.entries(store.get().tracks).map(([k, v]) => [k, [v]])),
       graph,
       offeredIn,
+      keepSemestersFull: store.get().load.fullSemesters,
       slots: termsFrom({ year: 2027, season: "spring" }, 12, {
         capacity: store.get().load.perTerm,
         summerCapacity: store.get().load.summer,
-        includeSummers: store.get().load.summer > 0,
+        summers: store.get().load.summers,
         minimum: FULL_TIME,
       }),
     });
@@ -450,11 +451,25 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     return wrap;
   }
 
+  /** A labelled checkbox, shaped like a dial so the row reads as one. */
+  function switchOf(label: string, value: boolean, why: string, onChange: (on: boolean) => void) {
+    const wrap = el("label", "dial");
+    wrap.title = why;
+    const input = el("input");
+    input.type = "checkbox";
+    input.checked = value;
+    input.addEventListener("change", () => onChange(input.checked));
+    wrap.append(input, el("span", "dial-label", label));
+    return wrap;
+  }
+
   subs.add(
     store.watch(
-      (s) => `${s.load.perTerm}:${s.load.summer}`,
+      (s) => `${s.load.perTerm}:${s.load.summer}:${s.load.summers}:${s.load.fullSemesters}`,
       () => {
         const { load } = store.get();
+        const set = (patch: Partial<Load>) =>
+          store.set({ load: { ...store.get().load, ...patch } });
         dials.replaceChildren();
         dials.append(
           dial(
@@ -462,16 +477,34 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             load.perTerm,
             { min: FULL_TIME, max: CEILING, step: 0.5 },
             verdictOf,
-            (perTerm) => store.set({ load: { ...store.get().load, perTerm } }),
+            (perTerm) => set({ perTerm }),
           ),
-          exporter(),
+          dial(
+            "summers",
+            load.summers,
+            { min: 0, max: SUMMERS, step: 1 },
+            (n) =>
+              n === 0
+                ? { text: "none", kind: "cheap" }
+                : { text: `${n} of ${SUMMERS}`, kind: "free" },
+            (summers) => set({ summers }),
+          ),
           dial(
             "credits a summer",
             load.summer,
             { min: 0, max: 12, step: 0.5 },
-            (n) => (n === 0 ? { text: "no summers", kind: "cheap" } : { text: "", kind: "" }),
-            (summer) => store.set({ load: { ...store.get().load, summer } }),
+            () => ({ text: "", kind: "" }),
+            (summer) => set({ summer }),
           ),
+          switchOf(
+            "keep semesters full",
+            load.fullSemesters,
+            "Holds work back from a summer rather than leaving the semester after it " +
+              "part time. A course that unlocks others still goes as early as it fits; " +
+              "only the leaves wait. Turn it off to fill every term as soon as it can be filled.",
+            (fullSemesters) => set({ fullSemesters }),
+          ),
+          exporter(),
         );
       },
     ),

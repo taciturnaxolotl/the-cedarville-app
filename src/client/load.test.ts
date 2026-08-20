@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
-import { CEILING, DEFAULT_LOAD, FULL_TIME, readLoad, verdictOf, writeLoad } from "./load";
+import { CEILING, DEFAULT_LOAD, FULL_TIME, readLoad, SUMMERS, verdictOf, writeLoad } from "./load";
 
 const window = new Window();
 Object.assign(globalThis, { localStorage: window.localStorage });
@@ -29,9 +29,11 @@ describe("what the school calls a term of this size", () => {
 });
 
 describe("remembering a load", () => {
+  const load = { perTerm: 16.5, summer: 4, summers: 2, fullSemesters: false };
+
   test("round trips", () => {
-    writeLoad({ perTerm: 16.5, summer: 4 });
-    expect(readLoad()).toEqual({ perTerm: 16.5, summer: 4 });
+    writeLoad(load);
+    expect(readLoad()).toEqual(load);
   });
 
   test("falls back when nothing has been stored", () => {
@@ -41,8 +43,21 @@ describe("remembering a load", () => {
 
   test("clamps a stored value that is out of range", () => {
     // Written by an older build, or by hand.
-    localStorage.setItem("cedarville:load", JSON.stringify({ perTerm: 40, summer: -3 }));
-    expect(readLoad()).toEqual({ perTerm: CEILING, summer: 0 });
+    localStorage.setItem(
+      "cedarville:load",
+      JSON.stringify({ perTerm: 40, summer: -3, summers: 9 }),
+    );
+    expect(readLoad()).toMatchObject({ perTerm: CEILING, summer: 0, summers: SUMMERS });
+  });
+
+  test("a load written before summers were countable keeps its answer", () => {
+    // Zero credits a summer was the only way to say "no summers", and a
+    // student who said it should not find four of them planned.
+    localStorage.setItem("cedarville:load", JSON.stringify({ perTerm: 15, summer: 0 }));
+    expect(readLoad().summers).toBe(0);
+
+    localStorage.setItem("cedarville:load", JSON.stringify({ perTerm: 15, summer: 7 }));
+    expect(readLoad().summers).toBe(SUMMERS);
   });
 
   test("survives a corrupt entry rather than throwing", () => {

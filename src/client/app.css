@@ -563,6 +563,7 @@ label.section.clashes:not(:has(input:checked)) .when {
 
 .plan-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding-bottom: 14px;
@@ -570,7 +571,7 @@ label.section.clashes:not(:has(input:checked)) .when {
 }
 
 .plan-controls input[type="range"] {
-  width: 190px;
+  width: 150px;
   accent-color: var(--lavender);
 }
 

@@ -19,8 +19,16 @@
 export interface Load {
   /** Credits per autumn and spring term. */
   perTerm: number;
-  /** Credits per summer. Zero means no summers at all. */
+  /** Credits per summer. */
   summer: number;
+  /** How many summers to give up. Zero plans none. */
+  summers: number;
+  /**
+   * Hold work back from a summer rather than leave the semester behind it part
+   * time. On by default, and worth being able to turn off: a student who has
+   * already decided to finish early would rather see the earlier date.
+   */
+  fullSemesters: boolean;
 }
 
 export const FULL_TIME = 12;
@@ -28,7 +36,15 @@ export const NORMAL = [15, 17] as const;
 export const OVERBLOCK = 17;
 export const CEILING = 18.5;
 
-export const DEFAULT_LOAD: Load = { perTerm: 15, summer: 7 };
+/** Four summers is every one the twelve-term horizon holds. */
+export const SUMMERS = 4;
+
+export const DEFAULT_LOAD: Load = {
+  perTerm: 15,
+  summer: 7,
+  summers: SUMMERS,
+  fullSemesters: true,
+};
 
 const KEY = "cedarville:load";
 
@@ -38,6 +54,14 @@ export function readLoad(): Load {
     return {
       perTerm: clamp(stored.perTerm ?? DEFAULT_LOAD.perTerm, FULL_TIME, CEILING),
       summer: clamp(stored.summer ?? DEFAULT_LOAD.summer, 0, 12),
+      // A load saved before summers were countable said only how heavy one
+      // was, and zero credits meant none at all.
+      summers: clamp(
+        stored.summers ?? (stored.summer === 0 ? 0 : DEFAULT_LOAD.summers),
+        0,
+        SUMMERS,
+      ),
+      fullSemesters: stored.fullSemesters ?? DEFAULT_LOAD.fullSemesters,
     };
   } catch {
     return DEFAULT_LOAD;

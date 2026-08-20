@@ -25,7 +25,7 @@ const graph = buildGraph(CHAIN);
 
 const plan = (
   need: string[],
-  slots = termsFrom({ year: 2027, season: "spring" }, 6, { includeSummers: false }),
+  slots = termsFrom({ year: 2027, season: "spring" }, 6, { summers: 0 }),
   everywhere = true,
 ) =>
   projectPlan({
@@ -73,7 +73,7 @@ describe("projecting terms", () => {
       graph: messy,
       credits: () => 3,
       offeredIn: () => true,
-      slots: termsFrom({ year: 2027, season: "spring" }, 4, { includeSummers: false }),
+      slots: termsFrom({ year: 2027, season: "spring" }, 4, { summers: 0 }),
     });
     expect(p.terms.map((t) => t.courses.map((c) => c.code))).toEqual([["CC-1000"], ["CC-2000"]]);
     // And the doubt is carried through rather than silently dropped.
@@ -100,7 +100,7 @@ describe("projecting terms", () => {
       graph,
       credits: () => 3,
       offeredIn: () => true,
-      slots: termsFrom({ year: 2027, season: "spring" }, 3, { includeSummers: false }),
+      slots: termsFrom({ year: 2027, season: "spring" }, 3, { summers: 0 }),
     });
     expect(p.terms).toHaveLength(1);
     expect(p.terms[0]!.courses.map((c) => c.code)).toEqual(["AA-2000"]);
@@ -127,7 +127,7 @@ describe("projecting terms", () => {
       graph,
       credits: () => 3,
       offeredIn: () => true,
-      slots: termsFrom({ year: 2027, season: "spring" }, 2, { includeSummers: false }),
+      slots: termsFrom({ year: 2027, season: "spring" }, 2, { summers: 0 }),
     });
     expect(p.unscheduled.map((u) => u.code)).toEqual(["AA-3000", "AA-4000"]);
     expect(p.unscheduled[0]!.why).toBe("ran out of terms");
@@ -164,10 +164,17 @@ describe("term sequences", () => {
 
   test("summers can be left out, and carry a smaller load", () => {
     expect(
-      termsFrom({ year: 2027, season: "spring" }, 3, { includeSummers: false }).map((s) => s.name),
+      termsFrom({ year: 2027, season: "spring" }, 3, { summers: 0 }).map((s) => s.name),
     ).toEqual(["SP27", "FA27", "SP28"]);
     const withSummer = termsFrom({ year: 2027, season: "spring" }, 2);
     expect(withSummer.find((s) => s.season === "summer")?.capacity).toBe(7);
+  });
+
+  test("opens as many summers as asked for, earliest first", () => {
+    // A student willing to give up one summer has not agreed to give up four.
+    expect(
+      termsFrom({ year: 2027, season: "spring" }, 8, { summers: 1 }).map((s) => s.name),
+    ).toEqual(["SP27", "SU27", "FA27", "SP28", "FA28", "SP29", "FA29", "SP30"]);
   });
 });
 
@@ -208,7 +215,7 @@ describe("a term below full time", () => {
       offeredIn: () => true,
       slots: termsFrom({ year: 2027, season: "spring" }, 2, {
         capacity: 17,
-        includeSummers: false,
+        summers: 0,
         minimum: 12,
       }),
     });
@@ -225,7 +232,7 @@ describe("a term below full time", () => {
       offeredIn: () => true,
       slots: termsFrom({ year: 2027, season: "spring" }, 2, {
         capacity: 17,
-        includeSummers: false,
+        summers: 0,
         minimum: 12,
       }),
     });
@@ -241,9 +248,58 @@ describe("a term below full time", () => {
       offeredIn: () => true,
       slots: termsFrom({ year: 2027, season: "spring" }, 2, {
         capacity: 17,
-        includeSummers: false,
+        summers: 0,
       }),
     });
     expect(p.terms[0]?.short).toBeUndefined();
+  });
+});
+
+describe("keeping the semesters full", () => {
+  const five = ["AA", "BB", "CC", "DD", "EE"].map((s) => `${s}-1000`);
+  const flat = buildGraph(five.map((code) => ({ code, title: "", requisites: [] })));
+
+  /** Fifteen credits left, a seven-credit summer, a twelve-credit semester. */
+  const tail = (keepSemestersFull: boolean) =>
+    projectPlan({
+      need: five,
+      completed: new Set(),
+      graph: flat,
+      credits: () => 3,
+      offeredIn: () => true,
+      keepSemestersFull,
+      slots: [
+        { name: "SU27", season: "summer", year: 2027, capacity: 7 },
+        { name: "FA27", season: "fall", year: 2027, capacity: 18, minimum: 12 },
+      ],
+    });
+
+  test("holds work back rather than leave the semester behind it part time", () => {
+    const p = tail(true);
+    expect(p.terms.map((t) => t.credits)).toEqual([3, 12]);
+    expect(p.terms.some((t) => t.short)).toBe(false);
+  });
+
+  test("fills the summer first when told to", () => {
+    const p = tail(false);
+    expect(p.terms.map((t) => t.credits)).toEqual([6, 9]);
+    expect(p.terms[1]?.short).toBe(true);
+  });
+
+  test("still takes a summer that finishes the degree outright", () => {
+    // Holding work back to protect a semester that has no work left in it
+    // would push the date out for nothing.
+    const p = projectPlan({
+      need: ["AA-1000"],
+      completed: new Set(),
+      graph: flat,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: [
+        { name: "SU27", season: "summer", year: 2027, capacity: 7 },
+        { name: "FA27", season: "fall", year: 2027, capacity: 18, minimum: 12 },
+      ],
+    });
+    expect(p.finishes).toBe("SU27");
   });
 });

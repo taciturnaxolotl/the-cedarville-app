@@ -42,6 +42,13 @@ export interface PlanRequest {
   offeredIn: (code: string, slot: TermSlot) => boolean;
   /** Codes that count as a given course, for transcripts from older catalogs. */
   aliases?: (code: string) => string[];
+  /**
+   * Hold work back from a summer when taking it would leave the semester
+   * behind it under its minimum. On by default: a part-time semester costs a
+   * student their status, their aid and often their insurance, and a light
+   * summer costs nothing. Turn it off to fill every term as early as it fits.
+   */
+  keepSemestersFull?: boolean;
   slots: TermSlot[];
 }
 
@@ -82,7 +89,7 @@ export interface Plan {
  * longest chain, and putting gates first is exactly how you shorten it.
  */
 export function projectPlan(request: PlanRequest): Plan {
-  const { graph, credits, offeredIn, slots, aliases } = request;
+  const { graph, credits, offeredIn, slots, aliases, keepSemestersFull = true } = request;
   const taken = new Set(request.completed);
   // Callers assemble `need` from requirement pools, which happily list work
   // already done; scheduling it again would invent terms out of nothing.
@@ -94,11 +101,24 @@ export function projectPlan(request: PlanRequest): Plan {
 
   const terms: PlannedTerm[] = [];
 
-  for (const slot of slots) {
+  for (const [at, slot] of slots.entries()) {
     if (remaining.size === 0) break;
 
     const courses: PlannedCourse[] = [];
     let used = 0;
+
+    // What this summer may take out of the semester behind it, if anything.
+    const ration =
+      keepSemestersFull && slot.season === "summer"
+        ? summerRation(
+            slot,
+            slots.slice(at + 1).find((s) => s.minimum !== undefined),
+            remaining,
+            credits,
+            offeredIn,
+          )
+        : null;
+    let rationed = 0;
 
     const candidates = [...remaining]
       .filter((code) => offeredIn(code, slot))
@@ -107,6 +127,13 @@ export function projectPlan(request: PlanRequest): Plan {
     for (const code of candidates) {
       const price = credits(code);
       if (used + price > slot.capacity) continue;
+
+      // A course that gates another belongs as early as it fits, whatever it
+      // costs the term after; only the leaves are held back.
+      if (ration?.contested.has(code) && (leverage.get(code) ?? 0) === 0) {
+        if (rationed + price > ration.allowance) continue;
+        rationed += price;
+      }
 
       const node = graph.courses.get(code) ?? { code, title: "", requisites: [] };
       // Courses chosen earlier this term satisfy a corequisite but not a
@@ -162,6 +189,42 @@ export function projectPlan(request: PlanRequest): Plan {
   };
 }
 
+/**
+ * What a summer may take out of the semester behind it.
+ *
+ * A summer filled to the brim can leave the semester after it half empty, and
+ * the two are not equally cheap: a light summer costs nothing, where a part
+ * time semester costs a student their status and their aid. So the summer may
+ * take everything the semester cannot use, plus whatever the semester can
+ * spare above its minimum, and no more.
+ *
+ * Null means take what you like: either there is no semester to protect, or
+ * the work all fits in this summer and the degree ends here.
+ */
+function summerRation(
+  slot: TermSlot,
+  next: TermSlot | undefined,
+  remaining: ReadonlySet<string>,
+  credits: (code: string) => number,
+  offeredIn: PlanRequest["offeredIn"],
+): { allowance: number; contested: Set<string> } | null {
+  if (!next?.minimum) return null;
+
+  const left = [...remaining].reduce((n, code) => n + credits(code), 0);
+  if (left <= slot.capacity) return null;
+
+  // Only work the next semester could actually take is contested; a course
+  // taught in summer alone is nobody else's to lose.
+  const contested = new Set<string>();
+  let available = 0;
+  for (const code of remaining) {
+    if (!offeredIn(code, next)) continue;
+    contested.add(code);
+    available += credits(code);
+  }
+  return { allowance: Math.max(0, available - next.minimum), contested };
+}
+
 function countDownstream(graph: Graph, code: string): number {
   const seen = new Set<string>();
   const queue = [code];
@@ -185,13 +248,24 @@ export function termsFrom(
   options: {
     capacity?: number;
     summerCapacity?: number;
-    includeSummers?: boolean;
+    /**
+     * How many summers to open, earliest first. Zero plans none. A student
+     * willing to give up one summer is not thereby willing to give up five,
+     * and the difference is a year of their life either way.
+     */
+    summers?: number;
     /** Applied to autumn and spring only; a summer is part time by nature. */
     minimum?: number;
   } = {},
 ): TermSlot[] {
-  const { capacity = 18, summerCapacity = 7, includeSummers = true, minimum } = options;
+  const {
+    capacity = 18,
+    summerCapacity = 7,
+    summers = Number.POSITIVE_INFINITY,
+    minimum,
+  } = options;
   const slots: TermSlot[] = [];
+  let opened = 0;
   let { year, season } = start;
 
   while (slots.length < count) {
@@ -204,7 +278,8 @@ export function termsFrom(
       ...(minimum ? { minimum } : {}),
     });
     if (season === "spring") {
-      if (includeSummers) {
+      if (opened < summers) {
+        opened++;
         slots.push({
           name: `SU${yy}`,
           season: "summer",

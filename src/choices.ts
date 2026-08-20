@@ -135,6 +135,8 @@ export interface RankOptions extends NeedOptions {
   offeredIn: PlanRequest["offeredIn"];
   slots: TermSlot[];
   aliases?: PlanRequest["aliases"];
+  /** Passed through: every price here is a re-solve under the same policy. */
+  keepSemestersFull?: PlanRequest["keepSemestersFull"];
   /**
    * Cap on how many courses in a pool get priced. Pools run to 168 courses and
    * each price is a full re-solve, so the long tail is trimmed — but only
@@ -186,6 +188,9 @@ function planFor(need: Iterable<string>, options: RankOptions): Plan {
     offeredIn: options.offeredIn,
     slots: options.slots,
     ...(options.aliases ? { aliases: options.aliases } : {}),
+    ...(options.keepSemestersFull === undefined
+      ? {}
+      : { keepSemestersFull: options.keepSemestersFull }),
   });
 }
 

@@ -182,7 +182,7 @@ describe("pricing a choice", () => {
         node("DEEP-2000", ["DEEP-1000"]),
         node("DEEP-1000"),
       ]),
-      slots: termsFrom({ year: 2027, season: "spring" }, 2, { capacity: 6, includeSummers: false }),
+      slots: termsFrom({ year: 2027, season: "spring" }, 2, { capacity: 6, summers: 0 }),
     });
     const deep = ranking.choices[0]!.candidates.find((c) => c.code === "DEEP-4000")!;
     expect(deep.addedTerms).toBeNull();
@@ -525,7 +525,7 @@ describe("when a course would actually be taken", () => {
     );
     const ranking = rankChoices([crowded], {
       ...base([...graph, node("LATE-4000")]),
-      slots: termsFrom({ year: 2027, season: "spring" }, 2, { capacity: 3, includeSummers: false }),
+      slots: termsFrom({ year: 2027, season: "spring" }, 2, { capacity: 3, summers: 0 }),
     });
     const deep = ranking.choices.flatMap((c) => c.candidates).find((c) => c.code === "DEEP-4000")!;
     expect(deep.addedTerms).toBeNull();

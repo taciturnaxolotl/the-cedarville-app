@@ -146,7 +146,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const slots = termsFrom({ year: 2027, season: "spring" }, 12, {
     capacity: load.perTerm,
     summerCapacity: load.summer,
-    includeSummers: load.summer > 0,
+    summers: load.summers,
     minimum: FULL_TIME,
   });
   const legend = el("p", "credits");
@@ -173,7 +173,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       for (const p of prerequisitesOf(graph, code, have, need)) need.add(p);
     }
 
-    const plan = projectPlan({ need, completed: have, graph, credits: price, offeredIn, slots });
+    const plan = projectPlan({
+      need,
+      completed: have,
+      graph,
+      credits: price,
+      offeredIn,
+      slots,
+      keepSemestersFull: load.fullSemesters,
+    });
     const map = buildMap(plan, {
       graph,
       have,

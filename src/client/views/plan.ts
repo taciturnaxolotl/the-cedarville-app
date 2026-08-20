@@ -25,11 +25,12 @@ import { offeringsFromListing } from "../../schedule";
 import { resolveRules } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
+import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
 import { createStore, Subscriptions } from "../store";
 
 interface State {
-  perTerm: number;
-  summers: boolean;
+  /** The same knobs the build view sets, so the two never disagree. */
+  load: Load;
   /** Bumped when rule groups come back, to reproject with their courses. */
   resolvedAt: number;
 }
@@ -105,27 +106,61 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     },
   );
 
-  const store = createStore<State>({ perTerm: 15, summers: true, resolvedAt: 0 });
+  const store = createStore<State>({ load: readLoad(), resolvedAt: 0 });
 
   // ---- chrome ----------------------------------------------------------
 
+  const set = (patch: Partial<Load>) => {
+    const load = { ...store.get().load, ...patch };
+    writeLoad(load);
+    store.set({ load });
+  };
+
+  /** A slider that reports as it moves, and remembers where it was left. */
+  function slider(
+    label: string,
+    value: number,
+    range: { min: number; max: number; step: number },
+    onChange: (n: number) => void,
+  ) {
+    const input = el("input");
+    input.type = "range";
+    input.min = String(range.min);
+    input.max = String(range.max);
+    input.step = String(range.step);
+    input.value = String(value);
+    input.addEventListener("input", () => onChange(Number(input.value)));
+    return [el("label", undefined, label), input] as const;
+  }
+
   const controls = el("div", "plan-controls");
-  const perTerm = el("input");
-  perTerm.type = "range";
-  perTerm.min = "9";
-  perTerm.max = "21";
-  perTerm.value = "15";
   const perTermLabel = el("span", "cr");
-  perTerm.addEventListener("input", () => store.set({ perTerm: Number(perTerm.value) }));
+  const summersLabel = el("span", "cr");
 
-  const summers = el("input");
-  summers.type = "checkbox";
-  summers.checked = true;
-  summers.addEventListener("change", () => store.set({ summers: summers.checked }));
-  const summerLabel = el("label", "toggle");
-  summerLabel.append(summers, el("span", undefined, "use summers"));
+  const full = el("input");
+  full.type = "checkbox";
+  full.checked = store.get().load.fullSemesters;
+  full.title =
+    "Holds work back from a summer rather than leaving the semester after it part time. " +
+    "A course that unlocks others still goes as early as it fits.";
+  full.addEventListener("change", () => set({ fullSemesters: full.checked }));
+  const fullLabel = el("label", "toggle");
+  fullLabel.append(full, el("span", undefined, "keep semesters full"));
 
-  controls.append(el("label", undefined, "credits per term"), perTerm, perTermLabel, summerLabel);
+  controls.append(
+    ...slider(
+      "credits per term",
+      store.get().load.perTerm,
+      { min: FULL_TIME, max: CEILING, step: 0.5 },
+      (perTerm) => set({ perTerm }),
+    ),
+    perTermLabel,
+    ...slider("summers", store.get().load.summers, { min: 0, max: SUMMERS, step: 1 }, (summers) =>
+      set({ summers }),
+    ),
+    summersLabel,
+    fullLabel,
+  );
 
   const verdict = el("p", "credits");
   const chain = el("div", "chain");
@@ -150,10 +185,12 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   subs.add(
     store.watch(
-      (s) => `${s.perTerm}:${s.summers}:${s.resolvedAt}`,
+      (s) => `${JSON.stringify(s.load)}:${s.resolvedAt}`,
       () => {
-        const { perTerm: cap, summers: useSummers } = store.get();
-        perTermLabel.textContent = `${cap}`;
+        const { load } = store.get();
+        perTermLabel.textContent = `${load.perTerm}`;
+        perTermLabel.title = verdictOf(load.perTerm).text;
+        summersLabel.textContent = load.summers === 0 ? "none" : `${load.summers}`;
 
         const plan = projectPlan({
           need,
@@ -161,9 +198,12 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           graph,
           credits: price,
           offeredIn,
+          keepSemestersFull: load.fullSemesters,
           slots: termsFrom({ year: 2027, season: "spring" }, 12, {
-            capacity: cap,
-            includeSummers: useSummers,
+            capacity: load.perTerm,
+            summerCapacity: load.summer,
+            summers: load.summers,
+            minimum: FULL_TIME,
           }),
         });
 

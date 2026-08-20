@@ -113,10 +113,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     max: maxima.get(c) ?? credits.get(c) ?? 3,
   }));
   const price = (c: string) => stretched.get(c) ?? credits.get(c) ?? 3;
-  const have = new Set([
-    ...completedCourses(trees[0] as ProgramTree),
-    ...inProgressCourses(trees[0] as ProgramTree),
-  ]);
+  const have = new Set([...completedCourses(trees), ...inProgressCourses(trees)]);
 
   const pinned = new Set(read<string[]>(PINS, []));
   const tracks = new Map(
@@ -180,7 +177,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     const map = buildMap(plan, {
       graph,
       have,
-      history: coursesTaken(trees[0] as ProgramTree),
+      history: coursesTaken(trees),
       title: (c) => titles.get(c) ?? "",
     });
     const { focus } = store.get();

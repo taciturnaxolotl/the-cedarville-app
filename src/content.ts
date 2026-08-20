@@ -8,6 +8,7 @@
  */
 
 import { SelfService, UnauthorizedError } from "./client";
+import { normalize, programFor, unservedCredentials } from "./requirements";
 import type { CatalogVocabulary, EvaluationResponse, ProgramSummary } from "./types";
 
 const api = new SelfService();
@@ -44,8 +45,29 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
   for (const code of enrolled) {
     evaluations[code] = await api.programEvaluation(id, code, false);
   }
+
+  // A second major is recorded against the first one's enrolment and never
+  // evaluated alongside it, so it has to be asked for by name. What comes back
+  // is a what-if by mechanism only; the registrar has the student in it, so it
+  // is reported as enrolled.
+  const also: { code: string; title: string }[] = [];
+  const unserved = new Map(
+    Object.values(evaluations)
+      .map(normalize)
+      .flatMap((tree) => unservedCredentials(tree).map((name) => [name, tree] as const)),
+  );
+  if (unserved.size) {
+    const catalog = await api.activePrograms();
+    for (const [name, tree] of unserved) {
+      const program = programFor(name, catalog, tree);
+      if (!program || evaluations[program.Code]) continue;
+      evaluations[program.Code] = await api.programEvaluation(id, program.Code, true);
+      also.push({ code: program.Code, title: program.Title });
+    }
+  }
+
   for (const code of whatIf) {
-    if (!enrolled.includes(code)) {
+    if (!evaluations[code]) {
       evaluations[code] = await api.programEvaluation(id, code, true);
     }
   }
@@ -53,7 +75,7 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
   return {
     capturedAt: new Date().toISOString(),
     studentId: id,
-    enrolled: plan.StudentPrograms.map((p) => ({ code: p.Code, title: p.Title })),
+    enrolled: [...plan.StudentPrograms.map((p) => ({ code: p.Code, title: p.Title })), ...also],
     evaluations,
   };
 }

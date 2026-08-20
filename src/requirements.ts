@@ -13,6 +13,7 @@ import type {
   AppliedCredit,
   CourseRef,
   EvaluationResponse,
+  ProgramSummary,
   RawGroup,
   RawRequirement,
   RawSubrequirement,
@@ -273,6 +274,59 @@ export function normalize(res: EvaluationResponse): ProgramTree {
   };
 }
 
+/**
+ * The credential a requirement block serves, as Colleague words its heading.
+ *
+ * "Cyber Operations Major Requirements" and "Honors Program Minor
+ * Requirements" name theirs outright, and that heading is the only place an
+ * evaluation says which of a student's credentials it has actually answered.
+ */
+const SERVES = /^(.+?)\s+(?:Major|Minor)\s+Requirements$/i;
+
+/**
+ * Majors and minors the registrar records but this evaluation never answers.
+ *
+ * A second major rides on the first one's enrolment: a student in BS.CYOPR who
+ * adds computer science is listed under both majors and gets requirement
+ * blocks for cyber operations alone. Nothing in the response says so, so a
+ * planner reading it at face value quietly plans half a degree. Colleague will
+ * evaluate the other half, but only when asked for by its own program code.
+ *
+ * A school that words its headings differently loses the check rather than the
+ * requirements: the credential reads as unserved and is fetched again, which
+ * costs a request and dedupes away.
+ */
+export function unservedCredentials(tree: ProgramTree): string[] {
+  const served = new Set(tree.requirements.map((r) => SERVES.exec(r.text)?.[1]).filter(Boolean));
+  return [...tree.majors, ...tree.minors].filter((name) => !served.has(name));
+}
+
+/**
+ * The program code that would evaluate a credential named this way.
+ *
+ * One name maps to several codes as often as not — computer science is a BA
+ * and a BS — so the enrolment the name arrived on breaks the tie: first on the
+ * degree it reads for, then on its code family, since the second major of a
+ * BS.CYOPR student is BS.CMPSC and not BA.CMPSC. The catalog and the
+ * evaluation do not always spell a degree the same way, which is why the code
+ * is asked as well and neither is trusted alone.
+ */
+export function programFor(
+  name: string,
+  catalog: readonly ProgramSummary[],
+  like?: { code: string; degree: string },
+): ProgramSummary | undefined {
+  const matches = catalog
+    .filter((p) => p.IsActive && [...list(p.Majors), ...list(p.Minors)].includes(name))
+    .sort((a, b) => a.Code.localeCompare(b.Code));
+  const family = like?.code.split(".")[0];
+  return (
+    matches.find((p) => p.Degree === like?.degree) ??
+    matches.find((p) => p.Code.split(".")[0] === family) ??
+    matches[0]
+  );
+}
+
 // ---- querying ----------------------------------------------------------
 
 export function* walkGroups(
@@ -420,6 +474,18 @@ export function groupCoverage(
 }
 
 /**
+ * One program or several.
+ *
+ * A transcript belongs to the student, not to a program, but Colleague reports
+ * it per evaluation and each evaluation only shows the credit its own
+ * requirements consumed. A course bought for the second major is missing from
+ * the first major's tree, so anything reading history takes every tree.
+ */
+export type Trees = ProgramTree | readonly ProgramTree[];
+
+const each = (trees: Trees): readonly ProgramTree[] => ("code" in trees ? [trees] : trees);
+
+/**
  * Course names the student has actually finished, e.g. "CS-1220".
  *
  * Colleague reports these per group rather than as a transcript, so the same
@@ -427,11 +493,13 @@ export function groupCoverage(
  * that. In-progress credit is excluded on purpose: a prerequisite is not met
  * until it is passed.
  */
-export function completedCourses(tree: ProgramTree): Set<string> {
+export function completedCourses(trees: Trees): Set<string> {
   const done = new Set<string>();
-  for (const { group } of walkGroups(tree)) {
-    for (const credit of group.applied) {
-      if (credit.IsCompletedCredit && !credit.IsWithdrawn) done.add(credit.CourseName);
+  for (const tree of each(trees)) {
+    for (const { group } of walkGroups(tree)) {
+      for (const credit of group.applied) {
+        if (credit.IsCompletedCredit && !credit.IsWithdrawn) done.add(credit.CourseName);
+      }
     }
   }
   return done;
@@ -538,40 +606,44 @@ const broughtIn = (credit: AppliedCredit) =>
 /** Sorts before any real term, since `termKey` reads the year first. */
 const TRANSFER = "0000TR";
 
-export function coursesTaken(tree: ProgramTree): TakenTerm[] {
+export function coursesTaken(trees: Trees): TakenTerm[] {
   const byTerm = new Map<string, TakenTerm>();
   const seen = new Set<string>();
 
-  for (const { group } of walkGroups(tree)) {
-    for (const credit of group.applied) {
-      if (credit.IsWithdrawn || seen.has(credit.CourseName)) continue;
-      seen.add(credit.CourseName);
+  for (const tree of each(trees)) {
+    for (const { group } of walkGroups(tree)) {
+      for (const credit of group.applied) {
+        if (credit.IsWithdrawn || seen.has(credit.CourseName)) continue;
+        seen.add(credit.CourseName);
 
-      const transfer = broughtIn(credit);
-      const code = transfer ? TRANSFER : credit.Term;
-      const term = byTerm.get(code) ?? {
-        name: transfer ? "transfer" : shortTerm(code),
-        code,
-        ...(transfer ? { transfer: true } : {}),
-        courses: [],
-      };
-      term.courses.push({
-        code: credit.CourseName,
-        credits: credit.Credit ?? 0,
-        done: credit.IsCompletedCredit,
-      });
-      byTerm.set(code, term);
+        const transfer = broughtIn(credit);
+        const code = transfer ? TRANSFER : credit.Term;
+        const term = byTerm.get(code) ?? {
+          name: transfer ? "transfer" : shortTerm(code),
+          code,
+          ...(transfer ? { transfer: true } : {}),
+          courses: [],
+        };
+        term.courses.push({
+          code: credit.CourseName,
+          credits: credit.Credit ?? 0,
+          done: credit.IsCompletedCredit,
+        });
+        byTerm.set(code, term);
+      }
     }
   }
   return [...byTerm.values()].sort((a, b) => compareTerms(a.code, b.code));
 }
 
 /** Courses the student is enrolled in now, which satisfy a corequisite. */
-export function inProgressCourses(tree: ProgramTree): Set<string> {
+export function inProgressCourses(trees: Trees): Set<string> {
   const now = new Set<string>();
-  for (const { group } of walkGroups(tree)) {
-    for (const credit of group.applied) {
-      if (!credit.IsCompletedCredit && !credit.IsWithdrawn) now.add(credit.CourseName);
+  for (const tree of each(trees)) {
+    for (const { group } of walkGroups(tree)) {
+      for (const credit of group.applied) {
+        if (!credit.IsCompletedCredit && !credit.IsWithdrawn) now.add(credit.CourseName);
+      }
     }
   }
   return now;

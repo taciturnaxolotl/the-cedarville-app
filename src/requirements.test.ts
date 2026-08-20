@@ -3,6 +3,7 @@ import { merge, type Significance } from "./merge";
 import {
   absorbInto,
   accepts,
+  completedCourses,
   coursesNeeded,
   coursesNeededAcross,
   coursesTaken,
@@ -14,13 +15,16 @@ import {
   gaps,
   groupCoverage,
   groupKey,
+  inProgressCourses,
   levelOf,
   normalize,
   openGroups,
+  programFor,
   sharedCredits,
+  unservedCredentials,
   walkGroups,
 } from "./requirements";
-import type { CourseRef, EvaluationResponse, RawGroup } from "./types";
+import type { CourseRef, EvaluationResponse, ProgramSummary, RawGroup } from "./types";
 
 const RANK: Record<Significance, number> = { guaranteed: 0, elective: 1, "catch-all": 2 };
 const rank = (s: Significance) => RANK[s];
@@ -1550,5 +1554,148 @@ describe("credit that arrived rather than being earned", () => {
   test("a course earned here is not marked as transfer", () => {
     const terms = taken([credit("CS-1210", { Term: "2025FA" })]);
     expect(terms[0]?.transfer).toBeUndefined();
+  });
+});
+
+describe("credentials the evaluation never answers", () => {
+  const enrolment = (
+    majors: string[],
+    minors: string[],
+    blocks: string[],
+  ): ReturnType<typeof normalize> => {
+    const base = normalize(program("A", [group({})]));
+    const [requirement] = base.requirements;
+    return {
+      ...base,
+      majors,
+      minors,
+      requirements: blocks.map((text) => ({ ...requirement!, text })),
+    };
+  };
+
+  test("a credential with its own block is served", () => {
+    const tree = enrolment(["Cyber Operations"], [], ["Cyber Operations Major Requirements"]);
+    expect(unservedCredentials(tree)).toEqual([]);
+  });
+
+  test("a second major riding on the first one's enrolment is not", () => {
+    const tree = enrolment(
+      ["Cyber Operations", "Computer Science"],
+      ["Honors Program"],
+      [
+        "General Education Requirements (BS)",
+        "Cyber Operations Major Requirements",
+        "Honors Program Minor Requirements",
+        "Upper-Division Hours Requirement",
+      ],
+    );
+    expect(unservedCredentials(tree)).toEqual(["Computer Science"]);
+  });
+
+  test("a program naming nothing asks for nothing", () => {
+    expect(unservedCredentials(enrolment([], [], ["Some Requirements"]))).toEqual([]);
+  });
+});
+
+describe("finding the program that evaluates a credential", () => {
+  const summary = (over: Partial<ProgramSummary>): ProgramSummary => ({
+    Code: "X",
+    Title: "X",
+    Degree: "Bachelor of Science",
+    AcademicLevelCode: "UG",
+    Majors: [],
+    Minors: [],
+    IsActive: true,
+    ...over,
+  });
+
+  const catalog = [
+    summary({ Code: "BA.CMPSC", Degree: "Bachelor of Arts", Majors: ["Computer Science"] }),
+    summary({ Code: "BS.CMPSC", Majors: ["Computer Science"] }),
+    summary({ Code: "OLD.CMPSC", Majors: ["Computer Science"], IsActive: false }),
+    summary({ Code: "MIN.HON", Minors: ["Honors Program"] }),
+  ];
+
+  const like = (code: string, degree: string) => ({ code, degree });
+
+  test("prefers the degree the student is already reading for", () => {
+    const found = programFor("Computer Science", catalog, like("X.X", "Bachelor of Science"));
+    expect(found?.Code).toBe("BS.CMPSC");
+    expect(programFor("Computer Science", catalog, like("X.X", "Bachelor of Arts"))?.Code).toBe(
+      "BA.CMPSC",
+    );
+  });
+
+  test("falls back to the code family when the catalog spells the degree differently", () => {
+    // GetActivePrograms is not obliged to say "Bachelor of Science" the way an
+    // evaluation does, and a silent fall through to BA.CMPSC would plan the
+    // wrong degree.
+    expect(programFor("Computer Science", catalog, like("BS.CYOPR", "BS"))?.Code).toBe("BS.CMPSC");
+  });
+
+  test("falls back to the lowest code when nothing else decides", () => {
+    expect(
+      programFor("Computer Science", catalog, like("BM.MUSIC", "Bachelor of Music"))?.Code,
+    ).toBe("BA.CMPSC");
+  });
+
+  test("never offers a retired program", () => {
+    const retired = catalog.filter((p) => p.Code === "OLD.CMPSC");
+    expect(programFor("Computer Science", retired)).toBeUndefined();
+  });
+
+  test("finds a minor by name", () => {
+    expect(programFor("Honors Program", catalog)?.Code).toBe("MIN.HON");
+  });
+
+  test("returns nothing for a credential no program offers", () => {
+    expect(programFor("Basket Weaving", catalog)).toBeUndefined();
+  });
+});
+
+describe("a transcript spanning several enrolments", () => {
+  const credit = (name: string, done = true) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: 3,
+    VerifiedGrade: done ? "A" : "",
+    Term: "2026FA",
+    IsCompletedCredit: done,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+  });
+
+  // Each evaluation reports only the credit its own requirements consumed, so
+  // a course bought for the second major is absent from the first major's tree.
+  const cyber = normalize(
+    program("BS.CYOPR", [group({ AppliedAcademicCredits: [credit("CY-2100")] })]),
+  );
+  const comp = normalize(
+    program("BS.CMPSC", [
+      group({ AppliedAcademicCredits: [credit("CS-3310"), credit("CS-3610", false)] }),
+    ]),
+  );
+
+  test("counts a course applied to either program as passed", () => {
+    expect([...completedCourses([cyber, comp])].sort()).toEqual(["CS-3310", "CY-2100"]);
+  });
+
+  test("counts a course under way in either program as running", () => {
+    expect([...inProgressCourses([cyber, comp])]).toEqual(["CS-3610"]);
+  });
+
+  test("shows one term holding every enrolment's work", () => {
+    const [term] = coursesTaken([cyber, comp]);
+    expect(term?.courses.map((c) => c.code).sort()).toEqual(["CS-3310", "CS-3610", "CY-2100"]);
+  });
+
+  test("one tree still reads as one tree", () => {
+    expect([...completedCourses(cyber)]).toEqual(["CY-2100"]);
   });
 });

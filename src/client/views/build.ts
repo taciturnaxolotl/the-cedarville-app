@@ -257,8 +257,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     max: maxima.get(c) ?? credits.get(c) ?? 3,
   }));
 
-  const passed = completedCourses(trees[0] as ProgramTree);
-  const running = inProgressCourses(trees[0] as ProgramTree);
+  const passed = completedCourses(trees);
+  const running = inProgressCourses(trees);
   // A plan starts after this term, so a course under way counts as held — but
   // telling a student they "already passed" something they sit for in December
   // is simply untrue, so the two are kept apart for the wording.

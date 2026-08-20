@@ -16,7 +16,7 @@ import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from
 import { buildGraph, type CourseNode, parseRequisite } from "../../prereqs";
 import {
   completedCourses,
-  coursesNeeded,
+  coursesNeededAcross,
   groupKey,
   inProgressCourses,
   type ProgramTree,
@@ -73,15 +73,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const offeredIn = (code: string, slot: TermSlot) =>
     slot.season === thisSeason ? seen.has(code) : true;
 
-  const tree = trees[0] as ProgramTree;
-  const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
+  // Every program the student is in, solved as one cover: a course bought for
+  // the major that also closes the minor is bought once.
+  const have = new Set([...completedCourses(trees), ...inProgressCourses(trees)]);
   const price = (c: string) => credits.get(c) ?? 3;
 
   // First pass names the groups the evaluation will not enumerate; the server
   // asks Colleague what qualifies; the second pass runs one cover over
   // everything, so a course bought for one requirement can pay for a
   // rule-based one too.
-  const first = coursesNeeded(tree, { credits: price, have });
+  const first = coursesNeededAcross(trees, { credits: price, have });
   let need = first.courses;
   let unenumerable = first.unenumerable;
 
@@ -97,7 +98,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       }
       if (resolved.size === 0) return;
 
-      const second = coursesNeeded(tree, { credits: price, have, resolved });
+      const second = coursesNeededAcross(trees, { credits: price, have, resolved });
       need = second.courses;
       unenumerable = second.unenumerable;
       store.set({ resolvedAt: Date.now() });
@@ -166,10 +167,18 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           }),
         });
 
-        const toGo = tree.credits.minimum - tree.credits.completed - tree.credits.inProgress;
+        // Two majors on one bachelor's share a single credit total, so the
+        // requirement is the largest of them and never their sum. Earned
+        // credit reads the same way: an evaluation counts only what its own
+        // requirements consumed.
+        const largest = (pick: (t: ProgramTree) => number) => Math.max(...trees.map(pick));
+        const toGo =
+          largest((t) => t.credits.minimum) -
+          largest((t) => t.credits.completed) -
+          largest((t) => t.credits.inProgress);
         verdict.textContent =
-          `${tree.code}: ${toGo} credits left · finishes ${plan.finishes ?? "beyond the horizon"}` +
-          ` · ${plan.terms.length} terms`;
+          `${trees.map((t) => t.code).join(" + ")}: ${toGo} credits left · ` +
+          `finishes ${plan.finishes ?? "beyond the horizon"} · ${plan.terms.length} terms`;
 
         body.replaceChildren();
         if (plan.totalCredits > toGo) {

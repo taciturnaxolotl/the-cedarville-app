@@ -15,6 +15,7 @@ import { buildGraph, type CourseNode, eligibility, parseRequisite } from "../src
 import {
   completedCourses,
   coursesNeeded,
+  coursesNeededAcross,
   creditOverflow,
   groupCoverage,
   groupKey,
@@ -99,8 +100,10 @@ const trees = Object.values(snapshot.evaluations).map((raw) => normalize(raw as 
 const cy = trees[0];
 if (!cy) throw new Error("no evaluations captured; use the planner's capture button first");
 
-const done = completedCourses(cy);
-const inProgress = inProgressCourses(cy);
+// The transcript belongs to the student, not to one evaluation: a course
+// bought for the second major is absent from the first major's tree.
+const done = completedCourses(trees);
+const inProgress = inProgressCourses(trees);
 const have = new Set([...done, ...inProgress]);
 
 const label = (code: string) => `${code}${titles.has(code) ? ` — ${titles.get(code)}` : ""}`;
@@ -140,8 +143,11 @@ w();
 w("## Where you stand");
 w();
 w(`- completed **${cy.credits.completed}** credits, **${cy.credits.inProgress}** in progress`);
+// Two majors on one bachelor's share a single credit total, so the largest
+// requirement is the requirement, never the sum.
+const needs = Math.max(...trees.map((t) => t.credits.minimum));
 w(
-  `- cyber ops needs **${cy.credits.minimum}**, so **${cy.credits.minimum - cy.credits.completed - cy.credits.inProgress}** remain after this term`,
+  `- ${trees.map((t) => t.code).join(" + ")} needs **${needs}**, so **${needs - cy.credits.completed - cy.credits.inProgress}** remain after this term`,
 );
 w(`- ${done.size} courses passed, ${inProgress.size} running now`);
 w();
@@ -327,7 +333,8 @@ for (const tree of trees) {
   }
 }
 
-const path = criticalPath(graph, coursesNeeded(cy, { credits: price, have }).courses, have);
+const owed = coursesNeededAcross(trees, { credits: price, have }).courses;
+const path = criticalPath(graph, owed, have);
 w("## The critical path");
 w();
 w("The longest chain of prerequisites still ahead. No credit load shortens it.");
@@ -341,7 +348,7 @@ w();
 
 w("## Blocked right now, and by what");
 w();
-for (const code of [...coursesNeeded(cy, { credits: price, have }).courses].sort()) {
+for (const code of [...owed].sort()) {
   const verdict = eligibility(
     graph.courses.get(code) ?? { code, title: "", requisites: [] },
     done,

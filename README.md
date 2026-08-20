@@ -53,6 +53,21 @@ is worse than a shorter honest one. Schools also cap credits shared between
 two majors, and that policy lives in the academic catalog, not the API: pass
 `sharedCreditCap` to `merge` to have it checked.
 
+### the second major nobody evaluates
+
+A student in two majors has one enrolment. `BS.CYOPR` lists both cyber
+operations and computer science under `Majors`, ships requirement blocks for
+cyber operations alone, and says nothing about the omission — so a planner
+reading the response at face value quietly plans half a degree. The headings
+give it away: every block is named "<credential> Major Requirements", so a
+credential with no block of its own is one Colleague never answered. Those are
+evaluated separately by program code and reported as enrolled, because the
+registrar has the student in them.
+
+The same asymmetry runs through the transcript. Each evaluation reports only
+the credit its own requirements consumed, so anything reading history reads
+every tree, or it offers to buy a course the second major already paid for.
+
 ### what blocks what
 
 Colleague states requisites as a rule id it never expands, but it also ships

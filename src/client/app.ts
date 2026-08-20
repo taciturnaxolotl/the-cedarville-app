@@ -44,6 +44,8 @@ interface Shell {
   trees: ProgramTree[];
   /** Codes the registrar has the student in, as opposed to what-if additions. */
   enrolled: string[];
+  /** Credentials named but never evaluated, so the build view can say so. */
+  unmatched: string[];
   sections?: TermCatalog;
   allCourses?: TermCatalog["courses"];
   view: ViewName;
@@ -57,6 +59,7 @@ interface Shell {
 const store = createStore<Shell>({
   trees: [],
   enrolled: [],
+  unmatched: [],
   allCourses: [],
   view: "build",
   status: "",
@@ -75,11 +78,18 @@ let mounted: { destroy(): void } | null = null;
 /** Remount when the view changes or the data under it does. */
 store.watch(
   (s) =>
-    `${s.view}:${s.trees.map((t) => t.code).join(",")}:${s.sections?.fetchedAt ?? ""}:${s.allCourses?.length ?? 0}`,
+    `${s.view}:${s.trees.map((t) => t.code).join(",")}:${s.unmatched.join(",")}:${s.sections?.fetchedAt ?? ""}:${s.allCourses?.length ?? 0}`,
   () => {
-    const { view, trees, enrolled, sections, allCourses } = store.get();
+    const { view, trees, enrolled, unmatched, sections, allCourses } = store.get();
     mounted?.destroy();
-    mounted = VIEWS[view].mount($("#outlet"), { trees, enrolled, sections, allCourses, adopt });
+    mounted = VIEWS[view].mount($("#outlet"), {
+      trees,
+      enrolled,
+      unmatched,
+      sections,
+      allCourses,
+      adopt,
+    });
     for (const button of Array.from($("#tabs").querySelectorAll("button"))) {
       button.classList.toggle("on", button.dataset.view === view);
     }
@@ -132,6 +142,7 @@ function adopt(snapshot: Capture) {
   store.set({
     trees: Object.values(snapshot.evaluations).map(normalize),
     enrolled: (snapshot.enrolled ?? []).map((p) => p.code),
+    unmatched: snapshot.unmatched ?? [],
     who: `student ${snapshot.studentId} · captured ${new Date(snapshot.capturedAt).toLocaleString()}`,
   });
 }

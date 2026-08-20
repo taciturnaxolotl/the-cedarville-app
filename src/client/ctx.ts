@@ -14,6 +14,8 @@ export interface Ctx {
   trees: ProgramTree[];
   /** Program codes the registrar has the student enrolled in. */
   enrolled?: string[];
+  /** Credentials the registrar names that no program code matched. */
+  unmatched?: string[];
   sections?: TermCatalog;
   /**
    * Every course in the catalog, offered this term or not. Prerequisites

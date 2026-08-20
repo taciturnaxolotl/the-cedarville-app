@@ -373,6 +373,20 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         }
         picker.append(chips);
 
+        // A credential the registrar names and no program code matches would
+        // otherwise vanish silently, which is the failure this whole view
+        // exists to prevent.
+        for (const name of ctx.unmatched ?? []) {
+          picker.append(
+            el(
+              "p",
+              "muted",
+              `the registrar lists ${name}, and no active program code matches that name — ` +
+                "add it below to plan against it.",
+            ),
+          );
+        }
+
         if (!available.length) {
           picker.append(
             el("p", "muted", "connect the extension to add programs you are not enrolled in."),

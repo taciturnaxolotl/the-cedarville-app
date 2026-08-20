@@ -17,6 +17,13 @@ export interface Capture {
   capturedAt: string;
   studentId: string;
   enrolled: { code: string; title: string }[];
+  /**
+   * Majors and minors the registrar names that no active program code matches,
+   * so nothing evaluated them. Always present, empty when there are none: a
+   * capture missing the field came from an older build of the extension, which
+   * is worth being able to tell apart from a capture that found nothing.
+   */
+  unmatched: string[];
   /** Raw evaluations, keyed by program code. The app normalizes them. */
   evaluations: Record<string, EvaluationResponse>;
 }
@@ -51,6 +58,7 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
   // is a what-if by mechanism only; the registrar has the student in it, so it
   // is reported as enrolled.
   const also: { code: string; title: string }[] = [];
+  const unmatched: string[] = [];
   const unserved = new Map(
     Object.values(evaluations)
       .map(normalize)
@@ -60,7 +68,11 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
     const catalog = await api.activePrograms();
     for (const [name, tree] of unserved) {
       const program = programFor(name, catalog, tree);
-      if (!program || evaluations[program.Code]) continue;
+      if (!program) {
+        unmatched.push(name);
+        continue;
+      }
+      if (evaluations[program.Code]) continue;
       evaluations[program.Code] = await api.programEvaluation(id, program.Code, true);
       also.push({ code: program.Code, title: program.Title });
     }
@@ -76,6 +88,7 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
     capturedAt: new Date().toISOString(),
     studentId: id,
     enrolled: [...plan.StudentPrograms.map((p) => ({ code: p.Code, title: p.Title })), ...also],
+    unmatched,
     evaluations,
   };
 }

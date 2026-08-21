@@ -33,6 +33,7 @@ import {
   type ProgramTree,
 } from "../requirements";
 import { conflicts, DAY_NAMES, formatTime, offeringsFromListing } from "../schedule";
+import { capturePath, readCapture, serveCompanion } from "../server/companion";
 import { liveSeats, refreshTerm } from "../server/crawler";
 import { CatalogStore } from "../server/store";
 
@@ -342,10 +343,13 @@ function registerCatalog(server: McpServer) {
 // ---- personal tools, only when opted in --------------------------------
 
 async function loadTrees(): Promise<Record<string, ProgramTree>> {
-  const file = Bun.file(".data/evaluations.json");
-  if (!(await file.exists()))
-    throw new Error("no .data/evaluations.json; capture from the planner first");
-  const snapshot = (await file.json()) as { evaluations: Record<string, never> };
+  const snapshot = await readCapture<{ evaluations: Record<string, never> }>();
+  if (!snapshot) {
+    throw new Error(
+      `no capture yet at ${capturePath()} — open the planner and press capture ` +
+        `while this server is running, and the extension will hand one over`,
+    );
+  }
   return Object.fromEntries(
     Object.entries(snapshot.evaluations).map(([code, raw]) => [code, normalize(raw)]),
   );
@@ -689,6 +693,23 @@ function registerPersonal(server: McpServer) {
 // ---- start -------------------------------------------------------------
 
 const personal = process.argv.includes("--personal") || process.env.CEDARVILLE_MCP_PERSONAL === "1";
+
+// The intake belongs to the personal half and opens with it: a server nobody
+// opted into has no business holding a port open for a transcript. Logged to
+// stderr, because stdout is the protocol.
+// `CEDARVILLE_COMPANION=0` turns it off: a listener is a reasonable thing to
+// decline, and a test that spawns this server must not hold a real port or
+// write to a real home directory.
+if (personal && process.env.CEDARVILLE_COMPANION !== "0") {
+  const companion = serveCompanion((path) =>
+    console.error(`companion: capture written to ${path}`),
+  );
+  console.error(
+    companion
+      ? `companion: listening on 127.0.0.1:${companion.port} for the extension`
+      : "companion: another one already holds the port; reading its file",
+  );
+}
 
 serveStdio(() => {
   const server = new McpServer({ name: "cedarville", version: "0.1.0" });

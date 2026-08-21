@@ -7,13 +7,20 @@
  *
  * Only origins listed under `externally_connectable` in the manifest can send
  * anything, and nothing is ever pushed the other way.
+ *
+ * One thing does travel further than the page. A capture is also offered to a
+ * companion on 127.0.0.1, if the student is running one, so their own tools
+ * can read their own record without the planner's server ever seeing it. That
+ * is the only address it is offered to, and the offer fails quietly when
+ * nothing is listening.
  */
 
 import { ORIGIN } from "./client";
-import type { Reply, Request } from "./content";
+import type { Capture, Reply, Request } from "./content";
+import { APP_ORIGIN, COMPANION } from "./where";
 
 const SELF_SERVICE_TAB = `${ORIGIN}/Student/*`;
-const APP_URL = "http://localhost:5173/";
+const APP_URL = `${APP_ORIGIN}/`;
 
 /** Clicking the icon opens the planner rather than a cramped popup. */
 chrome.action.onClicked.addListener(async () => {
@@ -37,10 +44,31 @@ async function selfServiceTab(): Promise<number> {
   return id;
 }
 
+/**
+ * Hands a capture to the student's own machine, and nowhere else.
+ *
+ * Fire and forget on purpose: not running a companion is the ordinary case,
+ * and a planner that failed a capture because a local port was closed would
+ * be broken for almost everybody.
+ */
+async function offerToCompanion(capture: Capture): Promise<void> {
+  try {
+    await fetch(`${COMPANION}/capture`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(capture),
+    });
+  } catch {
+    /* No companion is running, which is fine and usual. */
+  }
+}
+
 chrome.runtime.onMessageExternal.addListener((msg: Request, _sender, reply) => {
   (async (): Promise<Reply<unknown>> => {
     try {
-      return await chrome.tabs.sendMessage(await selfServiceTab(), msg);
+      const answer: Reply<unknown> = await chrome.tabs.sendMessage(await selfServiceTab(), msg);
+      if (msg.type === "capture" && answer.ok) void offerToCompanion(answer.data as Capture);
+      return answer;
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       // A missing receiver means the tab exists but predates the extension.

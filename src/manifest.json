@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "cedarville self-service bridge",
   "version": "0.1.0",
-  "description": "Lets the course planner read your own Self-Service data using your own session. Fetches only; stores and sends nothing.",
+  "description": "Lets the course planner read your own Self-Service data using your own session. Fetches from the school; hands the result to the planner page and, if you run one, to a companion on your own machine. Nothing is sent anywhere else.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx1BsH4cqveK0002i0h+e/r+Omln9ohbOaiGn2wMMqXhlRrUGSYduxZisEU1patc5a7svr9RyHXP8tYNHS0lTH5EKtD5EyqEmMMWpeO0O3uUF19jG/ZYGPe3P4+02IB2BNWPuMSczdjfxiQtzeTgK8l3cRUugMzRpLcaXf9KOLe6c9uvSsvTXmr3ycwKz9uabQ3YNd4tDwKzeQd6Mg4+MfKkyyJKkxZpr3TjM0nZlciSzDM0u8ERQ4wHmcifjNCE3/IvzAD6oAqHpSV1F6mJRhFTmHgGYvXWJ806QC4Sng5/Swh6S9oaBzQ6RJlArp2recojbYQiudPeuafx5jUqElwIDAQAB",
   "host_permissions": ["https://selfservice.cedarville.edu/*"],
   "background": {

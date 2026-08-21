@@ -50,8 +50,36 @@ halves share only `types.ts`.
 Two kinds of data, and only one of them is yours. Section times, seats and
 instructors are identical for every student, so they are cached in SQLite on
 the server and one student's crawl spares everyone else's. An evaluation is a
-student record and never leaves their browser. There is no account system
-because there is nothing here to attach to a person.
+student record and never leaves the machine it was fetched on. There is no
+account system because there is nothing here to attach to a person.
+
+### deploying without deploying anyone's transcript
+
+That promise used to be kept by accident: the planner only ran on localhost,
+so a capture had nowhere else to go. Hosting the page would have broken it
+quietly, which is the worst way for a promise like that to break.
+
+So the halves are split by what they may hold, not by where they run.
+
+    catalog server   public, deployable   sections, courses, rules
+    companion        127.0.0.1 only       one capture, on your machine
+    extension        the only bridge      fetches, then hands over
+
+`APP_ORIGIN=https://plan.example.edu bun run build` writes the manifest with
+that origin allowed to talk to the extension, alongside localhost so a
+development build keeps working. The extension posts each capture to a
+companion on `127.0.0.1:7749` — started by the MCP server under `--personal`,
+and by nothing else. It accepts `POST /capture` and only from
+`chrome-extension://<the pinned id>`; a page cannot set its own `Origin`, so no
+other tab can reach it. There is no way to read a capture back out over the
+port: it takes, it never gives.
+
+Nothing is lost when no companion runs. The post fails, the planner carries on
+in the browser, and the MCP server says which file it was looking for.
+
+    CEDARVILLE_CAPTURE   where a capture is kept (default: XDG data dir)
+    CEDARVILLE_PORT      the companion's port
+    CEDARVILLE_COMPANION 0 to decline the listener entirely
 
 ### what it refuses to guess
 

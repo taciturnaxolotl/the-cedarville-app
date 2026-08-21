@@ -116,8 +116,15 @@ async function session(args: string[], calls: object[]): Promise<Map<number, Rpc
     stdout: "pipe",
     stderr: "pipe",
     cwd: ROOT,
-    // Explicit, because the preload's pin does not cross a spawn.
-    env: { ...process.env, CATALOG_DB: DB },
+    // Explicit, because the preload's pin does not cross a spawn. The
+    // companion is off for the same reason the database is pinned: a test may
+    // not hold a real port, and it may not read or write a real transcript.
+    env: {
+      ...process.env,
+      CATALOG_DB: DB,
+      CEDARVILLE_COMPANION: "0",
+      CEDARVILLE_CAPTURE: "/nonexistent/cedarville-tests/evaluations.json",
+    },
   });
 
   const out = await new Response(child.stdout).text();

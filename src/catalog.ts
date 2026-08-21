@@ -43,6 +43,21 @@ export function termKey(code: string): number {
 export const compareTerms = (a: string, b: string) => termKey(a) - termKey(b);
 
 /**
+ * The first term a plan may use: the one after whichever is under way.
+ *
+ * Naming it literally is how a planner goes stale without anything looking
+ * broken — "SP27" was written into two files and would have quietly kept
+ * projecting a plan that started in the past. Cedarville's autumn runs from
+ * August, so from August the next term to plan is the spring after it, and
+ * before that it is the autumn of the same year. Summers are never a starting
+ * point: nothing about a degree begins in one.
+ */
+export function nextPlannableTerm(now: Date): { year: number; season: "spring" | "fall" } {
+  const year = now.getFullYear();
+  return now.getMonth() >= 7 ? { year: year + 1, season: "spring" } : { year, season: "fall" };
+}
+
+/**
  * The seasons a course is taught, as the registrar states them.
  *
  * `TermsOffered` is prose but a closed set of it: seven spellings cover all

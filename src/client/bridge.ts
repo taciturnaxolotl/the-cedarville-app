@@ -49,6 +49,13 @@ export const capture = (whatIf: string[] = []): Promise<Capture> =>
   send({ type: "capture", whatIf });
 
 /**
+ * Hands the student's choices to their own machine, through the one channel
+ * that is allowed to reach it. Rejects when no companion is listening, which
+ * is the ordinary case and worth saying out loud rather than swallowing.
+ */
+export const sendPicks = (picks: unknown): Promise<true> => send({ type: "picks", picks });
+
+/**
  * Hands a capture to the local dev server, which writes it to .data/ so the
  * agent working on this code can read a real response instead of guessing at
  * the schema. Localhost only, gitignored, and a no-op anywhere else.

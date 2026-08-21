@@ -77,6 +77,11 @@ port: it takes, it never gives.
 Nothing is lost when no companion runs. The post fails, the planner carries on
 in the browser, and the MCP server says which file it was looking for.
 
+The same channel carries what the student decided. "Copy my plan" sends the
+pins, tracks and credit load through the extension to `POST /picks`, so the
+planning tools answer about the degree you chose rather than the cheapest one
+that fits — and say which of the two they did.
+
     CEDARVILLE_CAPTURE   where a capture is kept (default: XDG data dir)
     CEDARVILLE_PORT      the companion's port
     CEDARVILLE_COMPANION 0 to decline the listener entirely

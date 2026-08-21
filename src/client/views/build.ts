@@ -22,7 +22,7 @@ import {
   unreadModifications,
 } from "../../requirements";
 import type { ProgramSummary } from "../../types";
-import { capture, dumpForDev, installed, programs } from "../bridge";
+import { capture, dumpForDev, installed, programs, sendPicks } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
@@ -485,12 +485,18 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       };
       const text = JSON.stringify(picks, null, 2);
       void dumpForDev("picks", picks);
+      // Also to the student's own machine, if they run a companion, so their
+      // own tools plan the degree they chose rather than the cheapest one.
+      const local = await sendPicks(picks).then(
+        () => true,
+        () => false,
+      );
       try {
         await navigator.clipboard.writeText(text);
-        button.textContent = "copied";
+        button.textContent = local ? "copied, and sent to your tools" : "copied";
       } catch {
-        // Clipboard access is not always granted; the file is written anyway.
-        button.textContent = "written to .data/picks.json";
+        // Clipboard access is not always granted; the rest still happened.
+        button.textContent = local ? "sent to your tools" : "could not copy";
       }
       setTimeout(() => {
         button.textContent = "copy my plan";

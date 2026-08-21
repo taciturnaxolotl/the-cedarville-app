@@ -97,12 +97,19 @@ export type Request =
   | { type: "ping" }
   | { type: "programs" }
   | { type: "terms" }
-  | { type: "capture"; whatIf?: string[] };
+  | { type: "capture"; whatIf?: string[] }
+  /**
+   * What the student chose, on its way to their own machine. Never reaches
+   * this file: the background answers it without troubling Self-Service,
+   * which has no opinion about anybody's pins.
+   */
+  | { type: "picks"; picks: unknown };
 
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string; signedOut?: boolean };
 
 export interface ReplyMap {
   ping: true;
+  picks: true;
   programs: ProgramSummary[];
   terms: { code: string; description: string }[];
   capture: Capture;
@@ -128,6 +135,9 @@ chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
         }
         case "capture":
           return { ok: true, data: await capture(msg.whatIf) };
+        default:
+          // "picks" never gets this far; the background answers it.
+          return { ok: false, error: `this half does not answer ${(msg as Request).type}` };
       }
     } catch (err) {
       return {

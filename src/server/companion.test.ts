@@ -25,6 +25,22 @@ afterAll(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
+/**
+ * The capture, once it has landed.
+ *
+ * A 200 says the companion took it, not that the disk has caught up, and a
+ * test that assumes otherwise is testing the scheduler. The write is renamed
+ * into place, so this either sees the whole file or waits for it.
+ */
+async function landed(): Promise<unknown> {
+  for (let tries = 0; tries < 50; tries++) {
+    const found = await readCapture();
+    if (found) return found;
+    await Bun.sleep(10);
+  }
+  return null;
+}
+
 const post = (body: string, origin?: string) =>
   fetch(`${base}/capture`, {
     method: "POST",
@@ -51,9 +67,13 @@ describe("where a capture is kept", () => {
 
 describe("the loopback intake", () => {
   test("takes a capture from the extension and writes it", async () => {
+    // Whole or not at all: the write is staged beside the file and renamed
+    // over it, so a reader never catches half a transcript. And no callback
+    // is passed on purpose — `onCapture?.(await write(...))` skipped the
+    // write entirely when nobody was listening, and still answered "ok".
     const res = await post(CAPTURE, EXTENSION_ORIGIN);
-    expect(res.status).toBe(200);
-    expect(await readCapture()).toMatchObject({ studentId: "1" });
+    expect([res.status, await res.text()]).toEqual([200, "ok"]);
+    expect(await landed()).toMatchObject({ studentId: "1" });
   });
 
   test("refuses every other origin", async () => {
@@ -88,5 +108,13 @@ describe("the loopback intake", () => {
   test("a second companion yields the port rather than crashing the server", () => {
     const second = serveCompanion(undefined, running?.port);
     expect(second).toBeNull();
+  });
+
+  test("a write that fails is not reported as ok", async () => {
+    const named = process.env.CEDARVILLE_CAPTURE as string;
+    process.env.CEDARVILLE_CAPTURE = "/nonexistent/nowhere/evaluations.json";
+    const res = await post(CAPTURE, EXTENSION_ORIGIN);
+    process.env.CEDARVILLE_CAPTURE = named;
+    expect(res.status).toBe(500);
   });
 });

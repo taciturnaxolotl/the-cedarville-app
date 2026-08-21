@@ -310,6 +310,51 @@ export function unservedCredentials(tree: ProgramTree): string[] {
 }
 
 /**
+ * One tree per credential the enrolment covers.
+ *
+ * A second major recorded against the first one's program is a single
+ * evaluation, so anything that compares two programs — the overlap between a
+ * major and a minor, most obviously — had nothing to compare. But the blocks
+ * say whose they are: "Cyber Operations Major Requirements" belongs to one
+ * credential and "General Education Requirements (BS)" belongs to all of them,
+ * so a tree can be cut along that line.
+ *
+ * Shared blocks are copied into every part rather than dropped. They are
+ * genuinely required by each credential, and a comparison that omitted them
+ * would report that two majors share no general education, which is the
+ * opposite of true.
+ */
+export function splitByCredential(tree: ProgramTree): ProgramTree[] {
+  const named = [...tree.majors, ...tree.minors];
+  if (named.length < 2) return [tree];
+
+  const owner = new Map<string, string>();
+  for (const requirement of tree.requirements) {
+    const serves = SERVES.exec(requirement.text)?.[1];
+    if (serves && named.includes(serves)) {
+      owner.set(requirement.code, serves);
+      continue;
+    }
+    // Not every block is titled "<credential> Major Requirements". "Computer
+    // Science Technical Electives and Tracks" is one major's business too, and
+    // it says so in the only way it can: by leading with the name.
+    const leads = named.find((name) =>
+      requirement.text.toLowerCase().startsWith(name.toLowerCase()),
+    );
+    if (leads) owner.set(requirement.code, leads);
+  }
+
+  return named.map((credential) => ({
+    ...tree,
+    code: credential,
+    title: credential,
+    majors: tree.majors.includes(credential) ? [credential] : [],
+    minors: tree.minors.includes(credential) ? [credential] : [],
+    requirements: tree.requirements.filter((r) => (owner.get(r.code) ?? credential) === credential),
+  }));
+}
+
+/**
  * The program code that would evaluate a credential named this way.
  *
  * One name maps to several codes as often as not — computer science is a BA

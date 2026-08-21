@@ -51,23 +51,33 @@ async function selfServiceTab(): Promise<number> {
  * and a planner that failed a capture because a local port was closed would
  * be broken for almost everybody.
  */
-async function offerToCompanion(capture: Capture): Promise<void> {
+async function offerToCompanion(path: "capture" | "picks", body: unknown): Promise<boolean> {
   try {
-    await fetch(`${COMPANION}/capture`, {
+    const res = await fetch(`${COMPANION}/${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(capture),
+      body: JSON.stringify(body),
     });
+    return res.ok;
   } catch {
     /* No companion is running, which is fine and usual. */
+    return false;
   }
 }
 
 chrome.runtime.onMessageExternal.addListener((msg: Request, _sender, reply) => {
   (async (): Promise<Reply<unknown>> => {
     try {
+      // Picks never leave for Self-Service; they are only passing through on
+      // the way to the student's own machine.
+      if (msg.type === "picks") {
+        const sent = await offerToCompanion("picks", msg.picks);
+        return sent ? { ok: true, data: true } : { ok: false, error: "no companion is running" };
+      }
+
       const answer: Reply<unknown> = await chrome.tabs.sendMessage(await selfServiceTab(), msg);
-      if (msg.type === "capture" && answer.ok) void offerToCompanion(answer.data as Capture);
+      if (msg.type === "capture" && answer.ok)
+        void offerToCompanion("capture", answer.data as Capture);
       return answer;
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);

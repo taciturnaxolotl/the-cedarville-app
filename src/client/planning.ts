@@ -13,7 +13,13 @@
  * does not decide what is true.
  */
 
-import { runsIn, seasonsOffered, type TermCatalog, yearsOffered } from "../catalog";
+import {
+  nextPlannableTerm,
+  runsIn,
+  seasonsOffered,
+  type TermCatalog,
+  yearsOffered,
+} from "../catalog";
 import {
   type Plan,
   type PlanRequest,
@@ -41,7 +47,7 @@ export const PINS = "cedarville:pins";
 export const TRACKS = "cedarville:tracks";
 
 /** The first term a plan may use. Everything before it is history or now. */
-const START = { year: 2027, season: "spring" } as const;
+const START = nextPlannableTerm(new Date());
 /** Terms to project. Twelve is six years without summers, and four with. */
 const HORIZON = 12;
 

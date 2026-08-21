@@ -15,7 +15,7 @@
  * extension's post fails and the planner carries on in the browser.
  */
 
-import { mkdir } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { COMPANION_PORT, EXTENSION_ORIGIN } from "../where";
@@ -36,6 +36,26 @@ export function capturePath(): string {
 }
 
 /**
+ * What the student decided, beside what the registrar recorded.
+ *
+ * A plan built without the pins and tracks is the cheapest degree rather than
+ * the chosen one, and answering "when do I graduate" about a degree nobody is
+ * doing is worse than not answering.
+ */
+export const picksPath = () => join(capturePath(), "..", "picks.json");
+
+export interface Picks {
+  load?: { perTerm: number; summer: number; summers: number; fullSemesters: boolean };
+  tracks?: Record<string, string>;
+  pinned?: string[];
+}
+
+export async function readPicks(): Promise<Picks | null> {
+  const file = Bun.file(picksPath());
+  return (await file.exists()) ? ((await file.json()) as Picks) : null;
+}
+
+/**
  * The capture, wherever it is. Null when none has been handed over yet.
  *
  * The repo's own `.data` is consulted only when no path was named, so naming
@@ -53,12 +73,20 @@ export async function readCapture<T = unknown>(): Promise<T | null> {
   return null;
 }
 
-export async function writeCapture(body: string): Promise<string> {
-  const path = capturePath();
+/**
+ * Written beside and renamed over, so a reader sees the whole thing or the
+ * previous one. A transcript half on disk is worse than yesterday's: the MCP
+ * would parse it, fail, and report a capture that does not exist.
+ */
+async function write(path: string, body: string): Promise<string> {
   await mkdir(join(path, ".."), { recursive: true });
-  await Bun.write(path, body);
+  const staged = `${path}.writing`;
+  await Bun.write(staged, body);
+  await rename(staged, path);
   return path;
 }
+
+export const writeCapture = (body: string) => write(capturePath(), body);
 
 const CORS = {
   "access-control-allow-origin": EXTENSION_ORIGIN,
@@ -91,11 +119,13 @@ export function serveCompanion(
         const origin = request.headers.get("origin");
 
         if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-        if (pathname !== "/capture" || request.method !== "POST") {
+        const target =
+          pathname === "/capture" ? capturePath() : pathname === "/picks" ? picksPath() : null;
+        if (!target || request.method !== "POST") {
           return new Response("not found", { status: 404 });
         }
         if (origin !== EXTENSION_ORIGIN) {
-          return new Response("only the extension may post a capture", { status: 403 });
+          return new Response("only the extension may post here", { status: 403 });
         }
 
         const body = await request.text();
@@ -104,8 +134,18 @@ export function serveCompanion(
         } catch {
           return new Response("not json", { status: 400, headers: CORS });
         }
-        const path = await writeCapture(body);
-        onCapture?.(path);
+        try {
+          // Not `onCapture?.(await write(...))`: an optional call skips its
+          // own arguments when the callback is absent, so the write never
+          // happened and the response still said "ok".
+          const written = await write(target, body);
+          onCapture?.(written);
+        } catch (err) {
+          // Answering "ok" to a write that failed would leave the student
+          // planning against whatever was there before, silently.
+          const why = err instanceof Error ? err.message : String(err);
+          return new Response(`could not write ${target}: ${why}`, { status: 500, headers: CORS });
+        }
         return new Response("ok", { headers: CORS });
       },
     });

@@ -6,6 +6,7 @@ import {
   emptyCatalog,
   forCourses,
   isStale,
+  nextPlannableTerm,
   runsIn,
   seasonsOffered,
   shortTerm,
@@ -136,5 +137,21 @@ describe("courses that run in alternate years", () => {
   test("a course taught every year runs whenever", () => {
     expect(runsIn("all", 2028, "spring")).toBe(true);
     expect(runsIn("all", 2029, "fall")).toBe(true);
+  });
+});
+
+describe("where a plan starts", () => {
+  test("the term after the one under way", () => {
+    // August is already autumn here, so the next thing to plan is the spring.
+    expect(nextPlannableTerm(new Date("2026-08-20"))).toEqual({ year: 2027, season: "spring" });
+    expect(nextPlannableTerm(new Date("2026-12-31"))).toEqual({ year: 2027, season: "spring" });
+    expect(nextPlannableTerm(new Date("2027-01-02"))).toEqual({ year: 2027, season: "fall" });
+    expect(nextPlannableTerm(new Date("2027-05-30"))).toEqual({ year: 2027, season: "fall" });
+  });
+
+  test("never a summer, because no degree begins in one", () => {
+    for (const day of ["2026-06-15", "2026-07-04", "2026-08-01"]) {
+      expect(nextPlannableTerm(new Date(day)).season).not.toBe("summer");
+    }
   });
 });

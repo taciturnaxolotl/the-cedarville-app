@@ -18,10 +18,10 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
-import { runsIn, seasonsOffered, yearsOffered } from "../catalog";
+import { nextPlannableTerm, runsIn, seasonsOffered, yearsOffered } from "../catalog";
 import { aliasesOf, buildEquivalences } from "../equivalence";
 import { merge } from "../merge";
-import { criticalPath, projectPlan, type TermSlot, termsFrom } from "../planner";
+import { criticalPath, projectPlan, STANDING_CREDITS, type TermSlot, termsFrom } from "../planner";
 import { buildGraph, depth, downstream, eligibility, nodeOf } from "../prereqs";
 import {
   completedCourses,
@@ -31,9 +31,13 @@ import {
   normalize,
   openGroups,
   type ProgramTree,
+  splitByCredential,
+  stillRequiring,
+  substitutionsIn,
+  unreadModifications,
 } from "../requirements";
 import { conflicts, DAY_NAMES, formatTime, offeringsFromListing } from "../schedule";
-import { capturePath, readCapture, serveCompanion } from "../server/companion";
+import { capturePath, readCapture, readPicks, serveCompanion } from "../server/companion";
 import { liveSeats, refreshTerm } from "../server/crawler";
 import { CatalogStore } from "../server/store";
 
@@ -483,11 +487,19 @@ function registerPersonal(server: McpServer) {
       const done = completedCourses(trees);
       const now = inProgressCourses(trees);
 
-      const { graph } = graphFor(term);
+      // Listed from the term, judged on everything we hold. A requisite names
+      // courses nobody is teaching this term, and asking a one-term graph
+      // whether they exist gets the answer "no" and calls the course open.
+      const offered = graphFor(term).graph;
+      const { graph, aliases } = planningContext();
       const rows: string[] = [];
-      for (const [code, node] of [...graph.courses].sort()) {
+      for (const [code, listed] of [...offered.courses].sort()) {
         if (subject && !code.toUpperCase().startsWith(`${subject.toUpperCase()}-`)) continue;
-        const verdict = eligibility(node, done, now, { exists: (c) => graph.courses.has(c) });
+        const node = graph.courses.get(code) ?? listed;
+        const verdict = eligibility(node, done, now, {
+          exists: (c) => graph.courses.has(c),
+          aliases,
+        });
         if (state !== "all" && verdict.state !== state) continue;
         rows.push(
           `${code.padEnd(11)} ${verdict.state.padEnd(8)} ` +
@@ -515,24 +527,32 @@ function registerPersonal(server: McpServer) {
           .string()
           .optional()
           .describe("Program code. Defaults to the first captured evaluation."),
-        credits_per_term: z.number().int().min(6).max(21).default(15),
+        credits_per_term: z
+          .number()
+          .int()
+          .min(6)
+          .max(21)
+          .optional()
+          .describe("Defaults to the load set in the planner, or 15."),
         summers: z
           .number()
           .int()
           .min(0)
           .max(4)
-          .default(4)
+          .optional()
           .describe("How many summers to plan, earliest first. Zero plans none."),
         keep_semesters_full: z
           .boolean()
-          .default(true)
+          .optional()
           .describe(
             "Hold work back from a summer rather than leave the semester behind it part time.",
           ),
         start: z
           .string()
-          .default("SP27")
-          .describe('First term to plan, e.g. "SP27". The term in progress is excluded.'),
+          .optional()
+          .describe(
+            'First term to plan, e.g. "SP27". Defaults to the term after the one under way.',
+          ),
       }),
     },
     async ({ program, credits_per_term, summers, keep_semesters_full, start }) => {
@@ -551,9 +571,29 @@ function registerPersonal(server: McpServer) {
       const { graph, credits, offeredIn, titles, aliases } = planningContext();
       const have = new Set([...completedCourses(chosen), ...inProgressCourses(chosen)]);
       const pursuing = new Set(chosen.flatMap((t) => [...t.majors, ...t.minors]));
-      const solved = coursesNeededAcross(chosen, { credits, have, pursuing });
-      const season = start.startsWith("SP") ? "spring" : "fall";
-      const year = 2000 + Number(start.slice(2));
+
+      // The degree the student chose, when they have handed their choices
+      // over, and the cheapest one when they have not. Both are real answers;
+      // reporting which is which is the part that matters.
+      const picks = await readPicks();
+      const load = picks?.load;
+      const perTerm = credits_per_term ?? load?.perTerm ?? 15;
+      const useSummers = summers ?? load?.summers ?? 4;
+      const keepFull = keep_semesters_full ?? load?.fullSemesters ?? true;
+
+      const solved = coursesNeededAcross(chosen, {
+        credits,
+        have,
+        pursuing,
+        pinned: new Set(picks?.pinned ?? []),
+        tracks: new Map(Object.entries(picks?.tracks ?? {}).map(([k, v]) => [k, [v]])),
+      });
+      const from = start
+        ? {
+            season: start.startsWith("SP") ? ("spring" as const) : ("fall" as const),
+            year: 2000 + Number(start.slice(2)),
+          }
+        : nextPlannableTerm(new Date());
 
       const plan = projectPlan({
         need: solved.courses,
@@ -565,10 +605,11 @@ function registerPersonal(server: McpServer) {
         credits,
         offeredIn,
         aliases,
-        keepSemestersFull: keep_semesters_full,
-        slots: termsFrom({ year, season: season as "spring" | "fall" }, 12, {
-          capacity: credits_per_term,
-          summers,
+        keepSemestersFull: keepFull,
+        slots: termsFrom(from, 12, {
+          capacity: perTerm,
+          summerCapacity: load?.summer ?? 7,
+          summers: useSummers,
           minimum: 12,
         }),
       });
@@ -583,8 +624,8 @@ function registerPersonal(server: McpServer) {
       const lines = [
         `${chosen.map((t) => t.code).join(" + ")}: ${toGo} credits remain; ` +
           `this plan schedules ${plan.totalCredits} across named requirements.`,
-        `Finishes ${plan.finishes ?? "never within the horizon"} at ${credits_per_term}/term` +
-          `${summers ? ` with ${summers} summer${summers === 1 ? "" : "s"}` : " without summers"}.`,
+        `Finishes ${plan.finishes ?? "never within the horizon"} at ${perTerm}/term` +
+          `${useSummers ? ` with ${useSummers} summer${useSummers === 1 ? "" : "s"}` : " without summers"}.`,
         "",
       ];
       for (const term of plan.terms) {
@@ -608,8 +649,11 @@ function registerPersonal(server: McpServer) {
       }
       lines.push(
         "",
-        "Caveats: this is the cheapest degree rather than the one you have chosen —",
-        "the pins and tracks set in the planner live in that browser, not here.",
+        picks
+          ? `Planned with your own choices: ${picks.pinned?.length ?? 0} courses pinned, ` +
+              `${Object.keys(picks.tracks ?? {}).length} tracks settled.`
+          : "This is the cheapest degree rather than the one you have chosen — press " +
+              '"copy my plan" in the planner to hand your pins and tracks over.',
       );
       return text(lines.join("\n"));
     },
@@ -654,18 +698,93 @@ function registerPersonal(server: McpServer) {
   );
 
   server.registerTool(
+    "my_record",
+    {
+      description:
+        "What the registrar holds: the majors and minors your enrolment covers, credits and class standing, and any substitution an advisor granted by hand. Reads a local file; nothing is fetched.",
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const trees = Object.values(await loadTrees());
+      const out: string[] = [];
+
+      for (const tree of trees) {
+        const held = tree.credits.completed + tree.credits.inProgress;
+        const standing =
+          held >= STANDING_CREDITS.senior
+            ? "senior"
+            : held >= STANDING_CREDITS.junior
+              ? "junior"
+              : held >= STANDING_CREDITS.sophomore
+                ? "sophomore"
+                : "freshman";
+        const next = ["sophomore", "junior", "senior"].find(
+          (name) => held < STANDING_CREDITS[name as keyof typeof STANDING_CREDITS],
+        );
+
+        out.push(
+          `${tree.code}  ${tree.title}  catalog ${tree.catalog}`,
+          `  covers: ${[...tree.majors, ...tree.minors].join(", ") || tree.title}`,
+          `  ${tree.credits.completed} completed, ${tree.credits.inProgress} in progress of ${tree.credits.minimum}`,
+          `  ${standing}` +
+            (next
+              ? `, ${STANDING_CREDITS[next as keyof typeof STANDING_CREDITS] - held} credits to ${next}`
+              : ""),
+        );
+
+        // Colleague applies these and then goes on listing the replaced
+        // course, so the only place they exist is this prose.
+        const applied = new Set(
+          tree.requirements.flatMap((r) =>
+            r.subrequirements.flatMap((s) =>
+              s.groups.flatMap((g) => g.applied.map((a) => a.CourseName)),
+            ),
+          ),
+        );
+        for (const swap of substitutionsIn(tree)) {
+          const asking = stillRequiring(trees, swap.waives, applied).filter(
+            (r) => r.requirement !== swap.requirement,
+          );
+          out.push(
+            `  substitution: ${swap.taken} replaces ${swap.waives} for ${swap.requirement}` +
+              (asking.length
+                ? ` — but ${asking.map((r) => r.requirement).join(" and ")} still lists it`
+                : ""),
+          );
+        }
+        for (const unread of unreadModifications(tree)) {
+          out.push(`  modification (unparsed): ${unread.text}`);
+        }
+        out.push("");
+      }
+      return text(out.join("\n").trimEnd());
+    },
+  );
+
+  server.registerTool(
     "compare_programs",
     {
       description:
         "Where two captured programs overlap: which requirement in one draws on the same courses as a requirement in the other.",
-      inputSchema: z.object({ a: z.string(), b: z.string() }),
+      inputSchema: z.object({
+        a: z.string().describe('A program code or a credential, e.g. "Computer Science".'),
+        b: z.string(),
+      }),
     },
     async ({ a, b }) => {
       const trees = await loadTrees();
-      const left = trees[a];
-      const right = trees[b];
+      // A second major recorded against the first one's program is one
+      // evaluation covering two credentials, so the parts of a tree are
+      // comparable to each other and to any other captured program.
+      const parts: Record<string, ProgramTree> = { ...trees };
+      for (const tree of Object.values(trees)) {
+        for (const part of splitByCredential(tree)) parts[part.code] = part;
+      }
+
+      const left = parts[a];
+      const right = parts[b];
       if (!left || !right) {
-        return fail(`Capture both programs first. Have: ${Object.keys(trees).join(", ")}`);
+        return fail(`Nothing captured for that. Have: ${Object.keys(parts).join(", ")}`);
       }
 
       const result = merge(left, right);

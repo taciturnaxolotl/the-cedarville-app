@@ -11,11 +11,9 @@ import { normalize, type ProgramTree } from "../../requirements";
 import type { EvaluationResponse, RawGroup } from "../../types";
 import type { Ctx } from "../ctx";
 import * as build from "./build";
-import * as map from "./map";
-import * as overlap from "./overlap";
 import * as plan from "./plan";
+import * as record from "./record";
 import * as schedule from "./schedule";
-import * as tree from "./tree";
 
 // The dev dump only fires on localhost, which is where the app runs.
 const window = new Window({ url: "http://localhost:5173/" });
@@ -169,9 +167,9 @@ beforeEach(() => {
 
 const treeOf = (code: string, groups = everyKind): ProgramTree => normalize(program(code, groups));
 
-describe("tree view", () => {
+describe("record view", () => {
   test("renders every constraint kind without throwing", () => {
-    const view = tree.mount(root, { trees: [treeOf("BS.CYOPR")] });
+    const view = record.mount(root, { trees: [treeOf("BS.CYOPR")] });
     expect(root.querySelectorAll(".group")).toHaveLength(everyKind.length);
     expect(root.textContent).toContain("BS.CYOPR");
     view.destroy();
@@ -179,45 +177,35 @@ describe("tree view", () => {
   });
 
   test("shows a rule-based group as advisory rather than hiding it", () => {
-    tree.mount(root, { trees: [treeOf("BS.CYOPR")] });
+    record.mount(root, { trees: [treeOf("BS.CYOPR")] });
     expect(root.textContent).toContain("One lab from the biological sciences");
     expect(root.textContent).toContain("no course list");
   });
 
   test("carries completion on the dot and planning on a tag", () => {
-    tree.mount(root, { trees: [treeOf("BS.CYOPR")] });
+    record.mount(root, { trees: [treeOf("BS.CYOPR")] });
     expect(root.querySelector(".dot.Completed")).toBeTruthy();
     expect(root.querySelector(".dot.NotStarted")).toBeTruthy();
     expect(root.textContent).toContain("on your plan");
   });
 
   test("renders applied credits with their grade", () => {
-    tree.mount(root, { trees: [treeOf("BS.CYOPR")] });
+    record.mount(root, { trees: [treeOf("BS.CYOPR")] });
     expect(root.textContent).toContain("done: BTGE-1725 A");
   });
-});
 
-describe("overlap view", () => {
-  test("asks for a second major when given one tree", () => {
-    overlap.mount(root, { trees: [treeOf("BS.CYOPR")] });
-    expect(root.textContent).toContain("capture a second major");
+  test("opens on what is unfinished", () => {
+    // Six collapsed rows make a student click six times to learn they have
+    // no gaps. A record is read for its gaps.
+    record.mount(root, { trees: [treeOf("BS.CYOPR")] });
+    const top = root.querySelector("details") as unknown as HTMLDetailsElement;
+    expect(top.open).toBe(true);
   });
 
-  test("renders shared pools and the unresolved list", () => {
-    overlap.mount(root, { trees: [treeOf("BS.CYOPR"), treeOf("BS.CMPEG")] });
-    expect(root.textContent).toContain("BS.CYOPR + BS.CMPEG");
-    // MATH-2740 sits in a choose-from pool on both sides.
-    expect(root.querySelectorAll(".pool").length).toBeGreaterThan(0);
-    expect(root.textContent).toContain("MATH-2740");
-    // The rule and department groups must be named, not silently dropped.
-    expect(root.textContent).toContain("cannot be checked automatically");
-    expect(root.textContent).toContain("Colleague rule");
-    expect(root.textContent).toContain("department");
-  });
-
-  test("destroy clears the outlet", () => {
-    overlap.mount(root, { trees: [treeOf("A"), treeOf("B")] }).destroy();
-    expect(root.children).toHaveLength(0);
+  test("says where the catalog puts you, and how far the next rung is", () => {
+    record.mount(root, { trees: [treeOf("BS.CYOPR")] });
+    expect(root.textContent).toMatch(/freshman|sophomore|junior|senior/);
+    expect(root.textContent).toContain("credits to");
   });
 });
 
@@ -433,6 +421,10 @@ describe("schedule view", () => {
 });
 
 describe("plan view", () => {
+  // The tab opens as a graph. These exercise the list rendering, which is the
+  // same projection with the terms written out.
+  const asList = () => localStorage.setItem("cedarville:plan-shape", JSON.stringify("list"));
+
   /**
    * Its own tree as well as its own catalog. The shared fixture declares
    * MinGroups: 1 over eight groups, which `coursesNeeded` now honours — so it
@@ -482,6 +474,7 @@ describe("plan view", () => {
   });
 
   test("projects terms and shows the critical path", () => {
+    asList();
     plan.mount(root, ctxWith(CHAIN));
     expect(root.querySelector(".chain-node")).toBeTruthy();
     expect(root.textContent).toContain("critical path");
@@ -491,6 +484,7 @@ describe("plan view", () => {
   // A chain cannot be compressed by raising the credit cap, which is the
   // whole point of showing the critical path.
   test("the credit slider reprojects but cannot beat the chain", () => {
+    asList();
     plan.mount(root, ctxWith(CHAIN));
     const terms = () => root.querySelectorAll(".term:not(.unplaced)").length;
     const before = terms();
@@ -506,6 +500,7 @@ describe("plan view", () => {
   });
 
   test("plans one fewer summer when asked for one fewer", () => {
+    asList();
     plan.mount(root, ctxWith(CHAIN));
     const summers = () => root.querySelectorAll(".term.summer").length;
     expect(summers()).toBeGreaterThan(0);
@@ -626,7 +621,7 @@ describe("build view", () => {
 
   test("collapses one requirement shared by two programs and names both", () => {
     build.mount(root, { trees: [treeOf("A", elective), treeOf("B", elective)] });
-    expect(root.querySelectorAll(".choice")).toHaveLength(1);
+    expect(root.querySelectorAll(".choice:not(.shared-box)")).toHaveLength(1);
     expect(root.textContent).toContain("counts for A + B");
   });
 
@@ -1450,7 +1445,10 @@ describe("build view — picking does not lock", () => {
   });
 });
 
-describe("map view", () => {
+describe("plan view — drawn as a graph", () => {
+  // The graph is one rendering of the plan tab, so it is exercised through it.
+  const asGraph = () => localStorage.setItem("cedarville:plan-shape", JSON.stringify("graph"));
+
   const allCourses = [
     { SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
     {
@@ -1475,12 +1473,13 @@ describe("map view", () => {
   );
 
   test("asks for a capture before it can draw anything", () => {
-    map.mount(root, { trees: [] });
+    plan.mount(root, { trees: [] });
     expect(root.textContent).toContain("capture your requirements");
   });
 
   test("draws a node per course and an edge per prerequisite", () => {
-    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    asGraph();
+    plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     expect(root.querySelectorAll(".graph .node")).toHaveLength(2);
     expect(root.querySelectorAll(".graph .edge")).toHaveLength(1);
     expect(root.textContent).toContain("prerequisite links");
@@ -1489,13 +1488,15 @@ describe("map view", () => {
   test("counts the chain that sets the finish date without painting it", () => {
     // The number is the part worth quoting to an advisor. Colouring six boxes
     // to say it drowns out the hover trace, which answers a question you asked.
-    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    asGraph();
+    plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     expect(root.textContent).toContain("longest chain");
     expect(root.querySelectorAll(".graph .critical")).toHaveLength(0);
   });
 
   test("hovering a course dims everything off its chain", () => {
-    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    asGraph();
+    plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     const first = root.querySelector(".graph .node") as unknown as HTMLElement;
     first.dispatchEvent(new window.Event("mouseenter") as unknown as Event);
     expect(root.textContent).toContain("tracing");
@@ -1505,7 +1506,8 @@ describe("map view", () => {
     // Redrawing on hover pulled the element out from under the pointer, so the
     // mouseleave that would have cleared the highlight fired on a box that no
     // longer existed and the trace stuck. Same element, before and after.
-    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    asGraph();
+    plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     const box = root.querySelector(".graph .node") as unknown as HTMLElement;
     box.dispatchEvent(new window.Event("mouseenter") as unknown as Event);
     expect(root.querySelector(".graph .node")).toBe(box as never);
@@ -1516,7 +1518,8 @@ describe("map view", () => {
   });
 
   test("destroys cleanly", () => {
-    const view = map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    asGraph();
+    const view = plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     view.destroy();
     expect(root.children).toHaveLength(0);
   });

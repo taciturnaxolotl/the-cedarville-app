@@ -13,28 +13,40 @@
  */
 
 import { criticalPath } from "../../planner";
+import { prerequisitesOf } from "../../prereqs";
 import { groupKey, type ProgramTree } from "../../requirements";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
-import { planningFrom } from "../planning";
+import { planningFrom, read } from "../planning";
 import { createStore, Subscriptions } from "../store";
+import { mountGraph } from "./graph";
+
+type Shape = "graph" | "list";
 
 interface State {
   /** The same knobs the build view sets, so the two never disagree. */
   load: Load;
   /** Bumped when rule groups come back, to reproject with their courses. */
   resolvedAt: number;
+  /**
+   * Drawn or listed. One projection either way: the graph answers what is
+   * holding up what, the list answers what you are taking in spring.
+   */
+  shape: Shape;
 }
 
+const SHAPE = "cedarville:plan-shape";
+
 export function mount(root: HTMLElement, ctx: Ctx) {
-  const { trees, sections: catalog } = ctx;
+  const { trees } = ctx;
   const subs = new Subscriptions();
 
-  if (!catalog || trees.length === 0) {
-    root.replaceChildren(
-      el("p", "muted", "capture your requirements and load a term to project a plan."),
-    );
+  // A projection needs the requirements and the course records, not a term's
+  // section listing: seasons come from the catalog's own statement now, so
+  // making a student load a timetable to see a graduation date was a leftover.
+  if (trees.length === 0) {
+    root.replaceChildren(el("p", "muted", "capture your requirements to project a plan."));
     return { destroy: () => root.replaceChildren() };
   }
 
@@ -47,8 +59,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   // asks Colleague what qualifies; the second pass runs one cover over
   // everything, so a course bought for one requirement can pay for a
   // rule-based one too.
+  /** A pool names what satisfies it, never what that costs to reach. */
+  const closed = (courses: Set<string>) => {
+    for (const code of [...courses]) {
+      for (const p of prerequisitesOf(graph, code, have, courses)) courses.add(p);
+    }
+    return courses;
+  };
+
   const first = planning.solve();
-  let need = first.courses;
+  let need = closed(first.courses);
   let unenumerable = first.unenumerable;
 
   void planning.expandRules(first.unenumerable).then((resolved) => {
@@ -58,12 +78,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       if (pool?.length) u.resolved = pool;
     }
     const second = planning.solve({ resolved });
-    need = second.courses;
+    need = closed(second.courses);
     unenumerable = second.unenumerable;
     store.set({ resolvedAt: Date.now() });
   });
 
-  const store = createStore<State>({ load: readLoad(), resolvedAt: 0 });
+  const store = createStore<State>({
+    load: readLoad(),
+    resolvedAt: 0,
+    shape: read<Shape>(SHAPE, "graph"),
+  });
 
   // ---- chrome ----------------------------------------------------------
 
@@ -105,6 +129,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const fullLabel = el("label", "toggle");
   fullLabel.append(full, el("span", undefined, "keep semesters full"));
 
+  const shape = el("button", "export");
+  shape.type = "button";
+  shape.title = "The same plan, drawn or listed.";
+  shape.addEventListener("click", () => {
+    const next: Shape = store.get().shape === "graph" ? "list" : "graph";
+    localStorage.setItem(SHAPE, JSON.stringify(next));
+    store.set({ shape: next });
+  });
+
   controls.append(
     ...slider(
       "credits per term",
@@ -118,6 +151,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     ),
     summersLabel,
     fullLabel,
+    shape,
   );
 
   const verdict = el("p", "credits");
@@ -141,11 +175,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     chain.append(el("p", "muted", "no credit load shortens this."));
   }
 
+  /** The graph rendering, when it is the one on screen. */
+  let picture: { destroy(): void } | null = null;
+
   subs.add(
     store.watch(
-      (s) => `${JSON.stringify(s.load)}:${s.resolvedAt}`,
+      (s) => `${JSON.stringify(s.load)}:${s.resolvedAt}:${s.shape}`,
       () => {
-        const { load } = store.get();
+        const { load, shape: drawn } = store.get();
+        shape.textContent = drawn === "graph" ? "list it" : "draw it";
         perTermLabel.textContent = `${load.perTerm}`;
         perTermLabel.title = verdictOf(load.perTerm).text;
         summersLabel.textContent = load.summers === 0 ? "none" : `${load.summers}`;
@@ -165,7 +203,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           `${trees.map((t) => t.code).join(" + ")}: ${toGo} credits left · ` +
           `finishes ${plan.finishes ?? "beyond the horizon"} · ${plan.terms.length} terms`;
 
+        picture?.destroy();
+        picture = null;
         body.replaceChildren();
+
+        if (drawn === "graph") {
+          picture = mountGraph(body, plan, planning);
+          return;
+        }
+
         if (plan.totalCredits > toGo) {
           body.append(
             el(
@@ -227,8 +273,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           el(
             "p",
             "muted",
-            "Class standing is not modelled, so senior capstones may land early. " +
-              "Seasons are inferred from the one term of catalog we hold.",
+            "Spring terms are modelled rather than read: Colleague publishes a term or two " +
+              "ahead, so a course is placed on the season the catalog states for it.",
           ),
         );
       },
@@ -237,6 +283,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   return {
     destroy() {
+      picture?.destroy();
       subs.clear();
       root.replaceChildren();
     },

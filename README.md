@@ -32,6 +32,16 @@ another tab, and click capture.
     src/server/crawler.ts    one term per crawl, ~60 pages
     src/server/store.ts      SQLite cache of the section catalog
     src/client/          the planner: no framework, one CSS file, mount/destroy views
+    src/client/planning.ts   one projection, shared by every tab that reads one
+
+Four tabs, one per question a student actually asks. `build` is what is left
+to decide and what each choice costs. `plan` is when it all happens, drawn as
+a graph or listed by term — one computation, two renderings. `schedule` is
+what to register for. `record` is what the registrar holds.
+
+There were six. `map` and `plan` turned out to be the same projection rendered
+two ways, and `overlap` could only compare two enrolments, which a second
+major recorded against the first one's program is not.
 
 The split is by change rate. Auth bridging is stable and security-sensitive;
 the planner changes every time we learn something new about Colleague. The two

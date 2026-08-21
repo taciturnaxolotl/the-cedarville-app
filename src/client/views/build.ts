@@ -616,17 +616,31 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           summary.append(note);
         }
 
+        body.replaceChildren();
+
+        // The dual-major discount, named. This was its own tab, which could
+        // only compare two separate enrolments — and a second major recorded
+        // against the first one's program is not two enrolments. It is a fact
+        // about the solve, so it belongs beside the solve.
         if (ranking.shared.length) {
-          summary.append(
-            el(
-              "span",
-              "shared",
-              ` · ${ranking.shared.length} courses count toward more than one program`,
+          const box = el("div", "choice shared-box");
+          const head = el("h3");
+          head.append(
+            document.createTextNode(
+              `${ranking.shared.length} courses count toward more than one program`,
             ),
           );
+          head.append(tag("bought once", "free"));
+          box.append(head);
+          for (const { code, programs } of ranking.shared) {
+            const row = el("div", "candidate");
+            row.append(el("b", undefined, code));
+            row.append(el("span", "title", label(code)));
+            row.append(tag(programs.join(" + "), "free"));
+            box.append(row);
+          }
+          body.append(box);
         }
-
-        body.replaceChildren();
 
         // Tracks first. Choosing the AI track over technical electives moves
         // more than any single elective inside either of them.

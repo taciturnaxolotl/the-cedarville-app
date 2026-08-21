@@ -29,15 +29,20 @@ import {
 import { $ } from "./dom";
 import { createStore } from "./store";
 import * as build from "./views/build";
-import * as map from "./views/map";
-import * as overlap from "./views/overlap";
 import * as plan from "./views/plan";
+import * as record from "./views/record";
 import * as schedule from "./views/schedule";
-import * as tree from "./views/tree";
 
 const STORE = "cedarville:last-capture";
 const SECTIONS = "cedarville:last-sections";
-const VIEWS = { build, map, requirements: tree, overlap, schedule, plan } as const;
+const VIEWS = { build, plan, schedule, record } as const;
+
+/** Where the tabs that were folded into others went. */
+const MOVED: Record<string, keyof typeof VIEWS> = {
+  map: "plan",
+  overlap: "build",
+  requirements: "record",
+};
 type ViewName = keyof typeof VIEWS;
 
 const isView = (name: string): name is ViewName => name in VIEWS;
@@ -50,7 +55,8 @@ const isView = (name: string): name is ViewName => name in VIEWS;
  */
 const viewInUrl = (): ViewName | null => {
   const asked = decodeURIComponent(location.hash.slice(1));
-  return isView(asked) ? asked : null;
+  // A link written before six tabs became four still lands somewhere true.
+  return isView(asked) ? asked : (MOVED[asked] ?? null);
 };
 
 interface Shell {

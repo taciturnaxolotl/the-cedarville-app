@@ -1,31 +1,26 @@
 /*
- * The plan as a graph: a term to a row, prerequisites drawn between them.
+ * The projection drawn as the graph it actually is.
  *
- * This is the view for a plan you have already made. The build view answers
- * "what should I choose"; this one answers "what is holding up what", which is
- * the question you ask once the choosing is done and you are looking at a
- * five-term chain wondering which end of it to attack.
+ * One of two renderings the plan tab offers, and the one that answers "what is
+ * holding up what" — the question you ask once the choosing is done and you
+ * are looking at a five-term chain wondering which end of it to attack. The
+ * list rendering answers "what am I taking in spring".
  *
- * It reads the same pins and tracks the build view writes, so the picture is
- * of the degree you have actually assembled rather than the cheapest one.
+ * The plan is handed in already solved. This file decides nothing about the
+ * degree; it only draws one.
  */
 
 import { buildMap, type CourseMap, type Flow } from "../../map";
-import { prerequisitesOf } from "../../prereqs";
+import type { Plan } from "../../planner";
 import { coursesTaken } from "../../requirements";
-import { catalogStatus, fetchCatalog } from "../bridge";
-import type { Ctx } from "../ctx";
 import { el } from "../dom";
-import { readLoad } from "../load";
-import { planningFrom, read } from "../planning";
+import { type Planning, read } from "../planning";
 import { createStore, Subscriptions } from "../store";
 
 const FLOW = "cedarville:map-flow";
 const SVG = "http://www.w3.org/2000/svg";
 
 interface State {
-  resolved: Map<string, string[]>;
-  seasonsAt: number;
   /** The course under the pointer, whose chain is lit up. */
   focus: string | null;
   /** Which way time runs. Remembered, because it is a matter of taste. */
@@ -45,34 +40,14 @@ const svg = <K extends keyof SVGElementTagNameMap>(
 const fit = (text: string, chars: number) =>
   text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1)).trimEnd()}…`;
 
-export function mount(root: HTMLElement, ctx: Ctx) {
+export function mountGraph(root: HTMLElement, plan: Plan, planning: Planning) {
   const subs = new Subscriptions();
-  const { trees, sections: catalog } = ctx;
+  const { graph, have, title, trees } = planning;
   const store = createStore<State>({
-    resolved: new Map(),
-    seasonsAt: 0,
     focus: null,
     // Down by default: a degree is long and a term is not, so the picture is
     // tall and thin, and a browser scrolls that way without being asked.
     flow: read<Flow>(FLOW, "down"),
-  });
-
-  if (trees.length === 0) {
-    root.replaceChildren(el("p", "muted", "capture your requirements to see the plan as a graph."));
-    return { destroy: () => root.replaceChildren() };
-  }
-
-  // ---- the same inputs the build view solves with ----------------------
-
-  // The same projection the build and plan tabs read, so no two tabs disagree
-  // about when the degree finishes.
-  const planning = planningFrom(ctx);
-  const { graph, have, price, title } = planning;
-  const load = readLoad();
-
-  const first = planning.solve();
-  void planning.expandRules(first.unenumerable).then((resolved) => {
-    if (resolved.size) store.set({ resolved });
   });
 
   // ---- layout ----------------------------------------------------------
@@ -135,13 +110,6 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   }
 
   function draw() {
-    const solved = planning.solve({ resolved: store.get().resolved });
-    const need = new Set(solved.courses);
-    for (const code of [...need]) {
-      for (const p of prerequisitesOf(graph, code, have, need)) need.add(p);
-    }
-
-    const plan = planning.project(need, load);
     const map = buildMap(plan, {
       graph,
       have,
@@ -152,7 +120,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     legend.replaceChildren();
     legend.append(
       document.createTextNode(
-        `${map.nodes.length} courses across ${map.terms.length} terms · finishes ${plan.finishes ?? "beyond the horizon"} · ` +
+        // The finish date belongs to the tab, which says it above this. Here
+        // it would be the second copy of the same three words.
+        `${map.nodes.length} courses across ${map.terms.length} terms · ` +
           `${map.edges.length} prerequisite links · ${map.nodes.filter((n) => n.past).length} already taken · ` +
           `longest chain ${map.nodes.filter((n) => n.critical).length} courses`,
       ),
@@ -271,7 +241,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   subs.add(
     store.watch(
-      (s) => `${s.resolved.size}:${s.seasonsAt}:${s.flow}`,
+      (s) => s.flow,
       () => draw(),
     ),
     store.watch(

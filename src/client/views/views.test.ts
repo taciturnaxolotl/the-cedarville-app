@@ -1498,6 +1498,20 @@ describe("map view", () => {
     expect(root.textContent).toContain("tracing");
   });
 
+  test("the box under the pointer survives being hovered", () => {
+    // Redrawing on hover pulled the element out from under the pointer, so the
+    // mouseleave that would have cleared the highlight fired on a box that no
+    // longer existed and the trace stuck. Same element, before and after.
+    map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    const box = root.querySelector(".graph .node") as unknown as HTMLElement;
+    box.dispatchEvent(new window.Event("mouseenter") as unknown as Event);
+    expect(root.querySelector(".graph .node")).toBe(box as never);
+
+    box.dispatchEvent(new window.Event("mouseleave") as unknown as Event);
+    expect(root.textContent).not.toContain("tracing");
+    expect(root.querySelectorAll(".graph .node.dim")).toHaveLength(0);
+  });
+
   test("destroys cleanly", () => {
     const view = map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     view.destroy();

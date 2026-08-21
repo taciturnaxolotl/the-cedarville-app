@@ -156,6 +156,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     minimum: FULL_TIME,
   });
   const legend = el("p", "credits");
+  // Kept across highlights: only its text changes, so tracing a chain never
+  // touches the picture itself.
+  const trace = el("span", "shared");
   const board = el("div", "board");
 
   const turn = el("button", "export");
@@ -182,6 +185,33 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     return lit;
   }
 
+  /**
+   * What the last draw produced.
+   *
+   * Tracing a chain used to rebuild the whole picture, which pulled the box
+   * out from under the pointer: the element that would have fired mouseleave
+   * no longer existed, so the highlight stuck until another course was
+   * hovered. Structure is drawn once; the highlight only toggles a class.
+   */
+  let drawn: {
+    map: CourseMap;
+    nodes: Map<string, SVGGElement>;
+    edges: { from: string; to: string; el: SVGPathElement }[];
+  } | null = null;
+
+  function highlight() {
+    if (!drawn) return;
+    const { focus } = store.get();
+    const lit = focus ? related(drawn.map, focus) : null;
+    for (const [code, box] of drawn.nodes) {
+      box.classList.toggle("dim", Boolean(lit && !lit.has(code)));
+    }
+    for (const edge of drawn.edges) {
+      edge.el.classList.toggle("dim", Boolean(lit && !(lit.has(edge.from) && lit.has(edge.to))));
+    }
+    trace.textContent = focus ? ` · tracing ${focus}` : "";
+  }
+
   function draw() {
     const solved = solve(store.get().resolved);
     const need = new Set(solved.courses);
@@ -206,9 +236,6 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       title: (c) => titles.get(c) ?? "",
       flow: store.get().flow,
     });
-    const { focus } = store.get();
-    const lit = focus ? related(map, focus) : null;
-
     legend.replaceChildren();
     legend.append(
       document.createTextNode(
@@ -216,7 +243,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           `${map.edges.length} prerequisite links · ${map.nodes.filter((n) => n.past).length} already taken`,
       ),
     );
-    if (focus) legend.append(el("span", "shared", ` · tracing ${focus}`));
+    legend.append(trace);
     turn.textContent = store.get().flow === "down" ? "lay it across" : "lay it down";
 
     board.replaceChildren();
@@ -239,23 +266,24 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     }
 
     // Edges under the nodes, so a line never crosses a course code.
+    const edges: { from: string; to: string; el: SVGPathElement }[] = [];
     for (const edge of map.edges) {
-      const dim = lit && !(lit.has(edge.from) && lit.has(edge.to));
-      canvas.append(
-        svg("path", {
-          d: edge.path,
-          class: `edge${edge.critical ? " critical" : ""}${dim ? " dim" : ""}`,
-          fill: "none",
-        }),
-      );
+      const el = svg("path", {
+        d: edge.path,
+        class: `edge${edge.critical ? " critical" : ""}`,
+        fill: "none",
+      });
+      edges.push({ from: edge.from, to: edge.to, el });
+      canvas.append(el);
     }
 
+    const boxes = new Map<string, SVGGElement>();
     for (const node of map.nodes) {
-      const dim = lit && !lit.has(node.code);
       const g = svg("g", {
-        class: `node${node.past ? ` ${node.past}` : ""}${node.critical ? " critical" : ""}${dim ? " dim" : ""}`,
+        class: `node${node.past ? ` ${node.past}` : ""}${node.critical ? " critical" : ""}`,
         transform: `translate(${node.x}, ${node.y})`,
       });
+      boxes.set(node.code, g);
       g.append(svg("rect", { width: map.node.width, height: map.node.height, rx: 3 }));
 
       // Two lines, and every one of the four things on them is laid out
@@ -309,7 +337,13 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       canvas.append(g);
     }
 
+    // A pointer can leave the picture without leaving a box: out of the window,
+    // or straight onto the scrollbar. Then no box ever hears mouseleave.
+    canvas.addEventListener("mouseleave", () => store.set({ focus: null }));
+
     board.append(canvas);
+    drawn = { map, nodes: boxes, edges };
+    highlight();
 
     if (plan.unscheduled.length) {
       const box = el("div", "choice");
@@ -323,8 +357,12 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   subs.add(
     store.watch(
-      (s) => `${s.resolved.size}:${s.seasonsAt}:${s.focus ?? ""}:${s.flow}`,
+      (s) => `${s.resolved.size}:${s.seasonsAt}:${s.flow}`,
       () => draw(),
+    ),
+    store.watch(
+      (s) => s.focus,
+      () => highlight(),
     ),
   );
 

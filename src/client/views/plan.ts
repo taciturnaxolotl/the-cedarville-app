@@ -12,20 +12,12 @@
  * shorten, and it is the first thing worth knowing.
  */
 
-import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from "../../planner";
-import { buildGraph, nodeOf } from "../../prereqs";
-import {
-  completedCourses,
-  coursesNeededAcross,
-  groupKey,
-  inProgressCourses,
-  type ProgramTree,
-} from "../../requirements";
-import { offeringsFromListing } from "../../schedule";
-import { resolveRules } from "../bridge";
+import { criticalPath } from "../../planner";
+import { groupKey, type ProgramTree } from "../../requirements";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
+import { planningFrom } from "../planning";
 import { createStore, Subscriptions } from "../store";
 
 interface State {
@@ -46,57 +38,30 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     return { destroy: () => root.replaceChildren() };
   }
 
-  // What exists backs the graph; what is offered decides the seasons.
-  const records = ctx.allCourses?.length ? ctx.allCourses : (catalog.courses ?? []);
-  const credits = new Map(
-    records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
-  );
-  const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-  const graph = buildGraph(records.map(nodeOf));
-
-  // We hold one term's catalog, so seasons are a guess: a course seen in this
-  // term is assumed to recur, and anything else is assumed to be elsewhere.
-  const seen = new Set(offeringsFromListing(catalog.sections).map((o) => o.courseName));
-  const thisSeason: Season = catalog.term.includes("SU")
-    ? "summer"
-    : catalog.term.includes("SP")
-      ? "spring"
-      : "fall";
-  const offeredIn = (code: string, slot: TermSlot) =>
-    slot.season === thisSeason ? seen.has(code) : true;
-
-  // Every program the student is in, solved as one cover: a course bought for
-  // the major that also closes the minor is bought once.
-  const have = new Set([...completedCourses(trees), ...inProgressCourses(trees)]);
-  const earned = Math.max(...trees.map((t) => t.credits.completed + t.credits.inProgress));
-  const price = (c: string) => credits.get(c) ?? 3;
+  // One projection, assembled where every view can share it. This tab used to
+  // build its own and quietly disagreed with the other two about the date.
+  const planning = planningFrom(ctx);
+  const { graph, have, price, title } = planning;
 
   // First pass names the groups the evaluation will not enumerate; the server
   // asks Colleague what qualifies; the second pass runs one cover over
   // everything, so a course bought for one requirement can pay for a
   // rule-based one too.
-  const first = coursesNeededAcross(trees, { credits: price, have });
+  const first = planning.solve();
   let need = first.courses;
   let unenumerable = first.unenumerable;
 
-  void resolveRules(first.unenumerable.filter((u) => !u.bucket).map((u) => u.ids)).then(
-    (answers) => {
-      const resolved = new Map<string, string[]>();
-      for (const u of first.unenumerable) {
-        const pool = answers[groupKey(u.ids)]?.filter((c) => !have.has(c));
-        if (pool?.length) {
-          resolved.set(groupKey(u.ids), pool);
-          u.resolved = pool;
-        }
-      }
-      if (resolved.size === 0) return;
-
-      const second = coursesNeededAcross(trees, { credits: price, have, resolved });
-      need = second.courses;
-      unenumerable = second.unenumerable;
-      store.set({ resolvedAt: Date.now() });
-    },
-  );
+  void planning.expandRules(first.unenumerable).then((resolved) => {
+    if (resolved.size === 0) return;
+    for (const u of first.unenumerable) {
+      const pool = resolved.get(groupKey(u.ids));
+      if (pool?.length) u.resolved = pool;
+    }
+    const second = planning.solve({ resolved });
+    need = second.courses;
+    unenumerable = second.unenumerable;
+    store.set({ resolvedAt: Date.now() });
+  });
 
   const store = createStore<State>({ load: readLoad(), resolvedAt: 0 });
 
@@ -169,7 +134,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     path.forEach((code: string, i: number) => {
       if (i) row.append(el("span", "arrow", "→"));
       const node = el("span", "chain-node", code);
-      node.title = titles.get(code) ?? "";
+      node.title = title(code);
       row.append(node);
     });
     chain.append(row);
@@ -185,21 +150,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         perTermLabel.title = verdictOf(load.perTerm).text;
         summersLabel.textContent = load.summers === 0 ? "none" : `${load.summers}`;
 
-        const plan = projectPlan({
-          need,
-          completed: have,
-          graph,
-          credits: price,
-          offeredIn,
-          keepSemestersFull: load.fullSemesters,
-          earnedCredits: earned,
-          slots: termsFrom({ year: 2027, season: "spring" }, 12, {
-            capacity: load.perTerm,
-            summerCapacity: load.summer,
-            summers: load.summers,
-            minimum: FULL_TIME,
-          }),
-        });
+        const plan = planning.project(need, load);
 
         // Two majors on one bachelor's share a single credit total, so the
         // requirement is the largest of them and never their sum. Earned
@@ -235,7 +186,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           for (const c of term.courses) {
             const row = el("div", "plan-course");
             row.append(el("b", undefined, c.code));
-            row.append(el("span", undefined, titles.get(c.code) ?? ""));
+            row.append(el("span", undefined, title(c.code)));
             if (c.caution) {
               const flag = tag("verify", "rule");
               flag.title = c.caution;

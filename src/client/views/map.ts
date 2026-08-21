@@ -10,27 +10,16 @@
  * of the degree you have actually assembled rather than the cheapest one.
  */
 
-import { runsIn, seasonsOffered, yearsOffered } from "../../catalog";
 import { buildMap, type CourseMap, type Flow } from "../../map";
-import { projectPlan, type Season, type TermSlot, termsFrom } from "../../planner";
-import { buildGraph, nodeOf, prerequisitesOf } from "../../prereqs";
-import {
-  completedCourses,
-  coursesNeededAcross,
-  coursesTaken,
-  expectedCredits,
-  inProgressCourses,
-  type ProgramTree,
-} from "../../requirements";
-import { offeringsFromListing } from "../../schedule";
-import { catalogStatus, fetchCatalog, resolveRules } from "../bridge";
+import { prerequisitesOf } from "../../prereqs";
+import { coursesTaken } from "../../requirements";
+import { catalogStatus, fetchCatalog } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el } from "../dom";
-import { FULL_TIME, readLoad } from "../load";
+import { readLoad } from "../load";
+import { planningFrom, read } from "../planning";
 import { createStore, Subscriptions } from "../store";
 
-const PINS = "cedarville:pins";
-const TRACKS = "cedarville:tracks";
 const FLOW = "cedarville:map-flow";
 const SVG = "http://www.w3.org/2000/svg";
 
@@ -56,14 +45,6 @@ const svg = <K extends keyof SVGElementTagNameMap>(
 const fit = (text: string, chars: number) =>
   text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1)).trimEnd()}…`;
 
-const read = <T>(key: string, fallback: T): T => {
-  try {
-    return JSON.parse(localStorage.getItem(key) ?? "") as T;
-  } catch {
-    return fallback;
-  }
-};
-
 export function mount(root: HTMLElement, ctx: Ctx) {
   const subs = new Subscriptions();
   const { trees, sections: catalog } = ctx;
@@ -83,78 +64,19 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   // ---- the same inputs the build view solves with ----------------------
 
-  const records = ctx.allCourses?.length ? ctx.allCourses : (catalog?.courses ?? []);
-  const credits = new Map(
-    records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
-  );
-  const maxima = new Map<string, number>(
-    records.flatMap((c) =>
-      c.MaximumCredits
-        ? [[`${c.SubjectCode}-${c.Number}`, c.MaximumCredits] as [string, number]]
-        : [],
-    ),
-  );
-  const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-  const graph = buildGraph(records.map(nodeOf));
+  // The same projection the build and plan tabs read, so no two tabs disagree
+  // about when the degree finishes.
+  const planning = planningFrom(ctx);
+  const { graph, have, price, title } = planning;
+  const load = readLoad();
 
-  // Which seasons a course runs in, as the registrar states it rather than as
-  // one term's section listing implies. See the note in the build view.
-  const seasons = new Map<string, ReturnType<typeof seasonsOffered>>(
-    records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]),
-  );
-  const cycles = new Map<string, ReturnType<typeof yearsOffered>>(
-    records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]),
-  );
-  const offeredIn = (code: string, slot: TermSlot) => {
-    const stated = seasons.get(code);
-    if (stated?.length && !stated.includes(slot.season)) return false;
-    // 268 courses run in alternate academic years, and a plan that ignores
-    // that puts a student in a classroom that is not running.
-    return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
-  };
-
-  const stretched = expectedCredits(trees, (c) => ({
-    min: credits.get(c) ?? 3,
-    max: maxima.get(c) ?? credits.get(c) ?? 3,
-  }));
-  const price = (c: string) => stretched.get(c) ?? credits.get(c) ?? 3;
-  const have = new Set([...completedCourses(trees), ...inProgressCourses(trees)]);
-  const earned = Math.max(...trees.map((t) => t.credits.completed + t.credits.inProgress));
-
-  const pinned = new Set(read<string[]>(PINS, []));
-  const tracks = new Map(
-    Object.entries(read<Record<string, string>>(TRACKS, {})).map(([k, v]) => [k, [v]]),
-  );
-  const pursuing = new Set(trees.flatMap((t) => [...t.majors, ...t.minors]));
-
-  const solve = (resolved: Map<string, string[]>) =>
-    coursesNeededAcross(trees, { credits: price, have, resolved, pinned, tracks, pursuing });
-
-  const first = solve(new Map());
-  void resolveRules(first.unenumerable.filter((u) => !u.bucket).map((u) => u.ids))
-    .then((answers) => {
-      const resolved = new Map<string, string[]>();
-      for (const key of Object.keys(answers)) {
-        const pool = answers[key]?.filter((c) => !have.has(c));
-        if (pool?.length) resolved.set(key, pool);
-      }
-      if (resolved.size) store.set({ resolved });
-    })
-    .catch(() => {
-      /* Leave the rule groups out rather than guessing at them. */
-    });
+  const first = planning.solve();
+  void planning.expandRules(first.unenumerable).then((resolved) => {
+    if (resolved.size) store.set({ resolved });
+  });
 
   // ---- layout ----------------------------------------------------------
 
-  // The same load the build view is set to, so the two never disagree about
-  // when the degree finishes.
-  const load = readLoad();
-  const slots = termsFrom({ year: 2027, season: "spring" }, 12, {
-    capacity: load.perTerm,
-    summerCapacity: load.summer,
-    summers: load.summers,
-    minimum: FULL_TIME,
-  });
   const legend = el("p", "credits");
   // Kept across highlights: only its text changes, so tracing a chain never
   // touches the picture itself.
@@ -213,27 +135,18 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   }
 
   function draw() {
-    const solved = solve(store.get().resolved);
+    const solved = planning.solve({ resolved: store.get().resolved });
     const need = new Set(solved.courses);
     for (const code of [...need]) {
       for (const p of prerequisitesOf(graph, code, have, need)) need.add(p);
     }
 
-    const plan = projectPlan({
-      need,
-      completed: have,
-      graph,
-      credits: price,
-      offeredIn,
-      slots,
-      keepSemestersFull: load.fullSemesters,
-      earnedCredits: earned,
-    });
+    const plan = planning.project(need, load);
     const map = buildMap(plan, {
       graph,
       have,
       history: coursesTaken(trees),
-      title: (c) => titles.get(c) ?? "",
+      title,
       flow: store.get().flow,
     });
     legend.replaceChildren();

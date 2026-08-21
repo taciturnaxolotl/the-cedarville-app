@@ -13,34 +13,20 @@
  * an ordered list where the top entry is usually free.
  */
 
-import { runsIn, seasonsOffered, yearsOffered } from "../../catalog";
 import { type Candidate, type RankedChoice, rankChoices } from "../../choices";
-import { type Season, type TermSlot, termsFrom } from "../../planner";
-import { buildGraph, nodeOf } from "../../prereqs";
 import {
-  completedCourses,
-  expectedCredits,
   groupKey,
-  inProgressCourses,
   type ProgramTree,
   stillRequiring,
   substitutionsIn,
   unreadModifications,
 } from "../../requirements";
-import { offeringsFromListing } from "../../schedule";
 import type { ProgramSummary } from "../../types";
-import {
-  capture,
-  catalogStatus,
-  dumpForDev,
-  fetchCatalog,
-  installed,
-  programs,
-  resolveRules,
-} from "../bridge";
+import { capture, dumpForDev, installed, programs } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
+import { PINS, planningFrom, TRACKS } from "../planning";
 import { createStore, Subscriptions } from "../store";
 
 interface State {
@@ -63,9 +49,6 @@ interface State {
   load: Load;
   busy: string;
 }
-
-const PINS = "cedarville:pins";
-const TRACKS = "cedarville:tracks";
 
 /**
  * What a program is, in the student's words.
@@ -192,44 +175,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   // ---- what we know about courses --------------------------------------
 
-  const records = ctx.allCourses?.length ? ctx.allCourses : (catalog?.courses ?? []);
-  const credits = new Map(
-    records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
-  );
-  const maxima = new Map<string, number>(
-    records.flatMap((c) =>
-      c.MaximumCredits
-        ? [[`${c.SubjectCode}-${c.Number}`, c.MaximumCredits] as [string, number]]
-        : [],
-    ),
-  );
-  const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
-  const graph = buildGraph(records.map(nodeOf));
-
-  /**
-   * Which seasons a course runs in, as the registrar states it.
-   *
-   * This was inferred from one term's section listing, and inference got it
-   * wrong for 367 courses — every course absent from the single autumn we hold
-   * was read as never taught in autumn. `TermsOffered` says it outright, and
-   * has been in the crawled course records all along.
-   *
-   * A course that states nothing is treated as available: 82 of them do, and
-   * silence is not a refusal.
-   */
-  const seasons = new Map<string, ReturnType<typeof seasonsOffered>>(
-    records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]),
-  );
-  const cycles = new Map<string, ReturnType<typeof yearsOffered>>(
-    records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]),
-  );
-  const offeredIn = (code: string, slot: TermSlot) => {
-    const stated = seasons.get(code);
-    if (stated?.length && !stated.includes(slot.season)) return false;
-    // 268 courses run in alternate academic years, and a plan that ignores
-    // that puts a student in a classroom that is not running.
-    return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
-  };
+  // Assembled once and shared with the map and plan tabs, so all three price
+  // a course the same way and read the same seasons off the same records.
+  const planning = planningFrom(ctx);
+  const { graph, have, passed, price, running, title } = planning;
 
   // ---- layout ----------------------------------------------------------
 
@@ -244,25 +193,6 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     summary.textContent = "capture your requirements first, then add majors and minors here.";
     return { destroy: () => root.replaceChildren() };
   }
-
-  // A variable-credit course is worth what the requirement asking for it
-  // demands, not its floor.
-  const stretched = expectedCredits(trees, (c) => ({
-    min: credits.get(c) ?? 3,
-    max: maxima.get(c) ?? credits.get(c) ?? 3,
-  }));
-
-  // What class standing is measured against. Each evaluation counts the same
-  // transcript, so the fullest reading of it is the true one.
-  const earned = Math.max(...trees.map((t) => t.credits.completed + t.credits.inProgress));
-
-  const passed = completedCourses(trees);
-  const running = inProgressCourses(trees);
-  // A plan starts after this term, so a course under way counts as held — but
-  // telling a student they "already passed" something they sit for in December
-  // is simply untrue, so the two are kept apart for the wording.
-  const have = new Set([...passed, ...running]);
-  const price = (c: string) => stretched.get(c) ?? credits.get(c) ?? 3;
 
   // ---- what an advisor changed by hand ----------------------------------
 
@@ -314,43 +244,29 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   /** Ask the server to expand the rule groups, then re-rank with their pools. */
   function expandRules(current: ProgramTree[]) {
     const ranking = rank(current, new Map());
-    const ids = ranking.unenumerable.filter((u) => !u.bucket).map((u) => u.ids);
-    if (!ids.length) return;
-    void resolveRules(ids)
-      .then((answers) => {
-        const resolved = new Map<string, string[]>();
-        for (const key of Object.keys(answers)) {
-          const pool = answers[key]?.filter((c) => !have.has(c));
-          if (pool?.length) resolved.set(key, pool);
-        }
-        if (resolved.size) store.set({ resolved });
-      })
-      .catch(() => {
-        /* Leave the group listed as unresolved rather than guessing. */
-      });
+    void planning.expandRules(ranking.unenumerable).then((resolved) => {
+      if (resolved.size) store.set({ resolved });
+    });
   }
 
-  const rank = (current: ProgramTree[], resolved: Map<string, string[]>) =>
-    rankChoices(current, {
+  const rank = (current: ProgramTree[], resolved: Map<string, string[]>) => {
+    const { load, pinned, tracks } = store.get();
+    return rankChoices(current, {
       credits: price,
       have,
       resolved,
-      pinned: new Set(store.get().pinned),
+      pinned: new Set(pinned),
       // Some groups state in prose which course a given combination must
       // take, and only the set of programs on the table can decide that.
       pursuing: new Set(current.flatMap(namesOf)),
-      tracks: new Map(Object.entries(store.get().tracks).map(([k, v]) => [k, [v]])),
+      tracks: new Map(Object.entries(tracks).map(([k, v]) => [k, [v]])),
       graph,
-      offeredIn,
-      keepSemestersFull: store.get().load.fullSemesters,
-      earnedCredits: earned,
-      slots: termsFrom({ year: 2027, season: "spring" }, 12, {
-        capacity: store.get().load.perTerm,
-        summerCapacity: store.get().load.summer,
-        summers: store.get().load.summers,
-        minimum: FULL_TIME,
-      }),
+      offeredIn: planning.offeredIn,
+      keepSemestersFull: load.fullSemesters,
+      earnedCredits: planning.earned,
+      slots: planning.slots(load),
     });
+  };
 
   expandRules(trees);
 
@@ -585,7 +501,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   // ---- the choices -----------------------------------------------------
 
-  const label = (code: string) => titles.get(code) ?? "";
+  const label = title;
 
   /**
    * Courses that already meet this requirement because the degree requires
@@ -691,7 +607,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         // resting on several of them is worth less than one that is not.
         const silent = ranking.baseline.terms
           .flatMap((t) => t.courses)
-          .filter((c) => !seasons.get(c.code)?.length).length;
+          .filter((c) => !planning.seasonsOf(c.code).length).length;
         if (silent) {
           const note = el("span", "guessed", ` · ${silent} courses state no season`);
           note.title =

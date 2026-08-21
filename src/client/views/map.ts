@@ -1,5 +1,5 @@
 /*
- * The plan as a graph: terms across, prerequisites drawn between them.
+ * The plan as a graph: a term to a row, prerequisites drawn between them.
  *
  * This is the view for a plan you have already made. The build view answers
  * "what should I choose"; this one answers "what is holding up what", which is
@@ -11,7 +11,7 @@
  */
 
 import { runsIn, seasonsOffered, yearsOffered } from "../../catalog";
-import { buildMap, type CourseMap } from "../../map";
+import { buildMap, type CourseMap, type Flow } from "../../map";
 import { projectPlan, type Season, type TermSlot, termsFrom } from "../../planner";
 import { buildGraph, nodeOf, prerequisitesOf } from "../../prereqs";
 import {
@@ -31,6 +31,7 @@ import { createStore, Subscriptions } from "../store";
 
 const PINS = "cedarville:pins";
 const TRACKS = "cedarville:tracks";
+const FLOW = "cedarville:map-flow";
 const SVG = "http://www.w3.org/2000/svg";
 
 interface State {
@@ -38,6 +39,8 @@ interface State {
   seasonsAt: number;
   /** The course under the pointer, whose chain is lit up. */
   focus: string | null;
+  /** Which way time runs. Remembered, because it is a matter of taste. */
+  flow: Flow;
 }
 
 const svg = <K extends keyof SVGElementTagNameMap>(
@@ -48,6 +51,10 @@ const svg = <K extends keyof SVGElementTagNameMap>(
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
   return node;
 };
+
+/** SVG has no ellipsis, and a course name is longer than any box. */
+const fit = (text: string, chars: number) =>
+  text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1)).trimEnd()}…`;
 
 const read = <T>(key: string, fallback: T): T => {
   try {
@@ -60,7 +67,14 @@ const read = <T>(key: string, fallback: T): T => {
 export function mount(root: HTMLElement, ctx: Ctx) {
   const subs = new Subscriptions();
   const { trees, sections: catalog } = ctx;
-  const store = createStore<State>({ resolved: new Map(), seasonsAt: 0, focus: null });
+  const store = createStore<State>({
+    resolved: new Map(),
+    seasonsAt: 0,
+    focus: null,
+    // Down by default: a degree is long and a term is not, so the picture is
+    // tall and thin, and a browser scrolls that way without being asked.
+    flow: read<Flow>(FLOW, "down"),
+  });
 
   if (trees.length === 0) {
     root.replaceChildren(el("p", "muted", "capture your requirements to see the plan as a graph."));
@@ -143,7 +157,17 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   });
   const legend = el("p", "credits");
   const board = el("div", "board");
-  root.replaceChildren(legend, board);
+
+  const turn = el("button", "export");
+  turn.type = "button";
+  turn.title = "Turn the picture: a term to a row, or a term to a column.";
+  turn.addEventListener("click", () => {
+    const flow: Flow = store.get().flow === "down" ? "across" : "down";
+    localStorage.setItem(FLOW, JSON.stringify(flow));
+    store.set({ flow });
+  });
+
+  root.replaceChildren(legend, turn, board);
 
   /** Everything the focused course waits on, and everything waiting on it. */
   function related(map: CourseMap, code: string): Set<string> {
@@ -180,6 +204,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       have,
       history: coursesTaken(trees),
       title: (c) => titles.get(c) ?? "",
+      flow: store.get().flow,
     });
     const { focus } = store.get();
     const lit = focus ? related(map, focus) : null;
@@ -192,6 +217,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       ),
     );
     if (focus) legend.append(el("span", "shared", ` · tracing ${focus}`));
+    turn.textContent = store.get().flow === "down" ? "lay it across" : "lay it down";
 
     board.replaceChildren();
     const canvas = svg("svg", { width: map.width, height: map.height, class: "graph" });
@@ -202,7 +228,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         Object.assign(
           svg("text", {
             x: term.x,
-            y: 14,
+            y: term.y,
             class: `term-label${term.past ? " past" : ""}${shortTerms.has(term.name) ? " short" : ""}`,
           }),
           {
@@ -230,13 +256,24 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         class: `node${node.past ? ` ${node.past}` : ""}${node.critical ? " critical" : ""}${dim ? " dim" : ""}`,
         transform: `translate(${node.x}, ${node.y})`,
       });
-      g.append(svg("rect", { width: 168, height: 32, rx: 3 }));
+      g.append(svg("rect", { width: map.node.width, height: map.node.height, rx: 3 }));
       g.append(
-        Object.assign(svg("text", { x: 8, y: 13, class: "code" }), { textContent: node.code }),
+        Object.assign(svg("text", { x: 8, y: 16, class: "code" }), { textContent: node.code }),
       );
       g.append(
-        Object.assign(svg("text", { x: 8, y: 25, class: "sub" }), {
-          textContent: `${node.credits}cr${node.past === "running" ? " · now" : ""}${node.unlocks ? ` · gates ${node.unlocks}` : ""}`,
+        Object.assign(
+          svg("text", { x: map.node.width - 8, y: 16, class: "sub", "text-anchor": "end" }),
+          {
+            textContent: `${node.credits}cr${node.past === "running" ? " · now" : ""}${node.unlocks ? ` · gates ${node.unlocks}` : ""}`,
+          },
+        ),
+      );
+      // The name, which is the whole reason a student recognises the box. SVG
+      // has no ellipsis and the page is monospace throughout, so the cut is
+      // counted rather than measured.
+      g.append(
+        Object.assign(svg("text", { x: 8, y: 31, class: "name" }), {
+          textContent: fit(node.title, Math.floor((map.node.width - 16) / 5.4)),
         }),
       );
       const hint = [
@@ -268,7 +305,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   subs.add(
     store.watch(
-      (s) => `${s.resolved.size}:${s.seasonsAt}:${s.focus ?? ""}`,
+      (s) => `${s.resolved.size}:${s.seasonsAt}:${s.focus ?? ""}:${s.flow}`,
       () => draw(),
     ),
   );

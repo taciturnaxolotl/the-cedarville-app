@@ -93,9 +93,49 @@ describe("laying a plan out as a graph", () => {
     for (const edge of map.edges) {
       const from = map.nodes.find((n) => n.code === edge.from)!;
       const to = map.nodes.find((n) => n.code === edge.to)!;
-      expect(edge.path).toStartWith(`M ${from.x + 168}`);
-      expect(edge.path).toEndWith(`${to.x} ${to.y + 16}`);
+      expect(edge.path).toStartWith(`M ${from.x + map.node.width}`);
+      expect(edge.path).toEndWith(`${to.x} ${to.y + map.node.height / 2}`);
     }
+  });
+});
+
+describe("laying the same plan out downward", () => {
+  const three = plan([
+    ["SP27", ["CS-1210", "ART-1100"]],
+    ["FA27", ["CS-1220"]],
+    ["SP28", ["CS-2210"]],
+  ]);
+  const down = buildMap(three, { graph: chain, have: new Set(), flow: "down" });
+
+  test("gives a term a row rather than a column", () => {
+    const ys = down.terms.map((t) => t.y);
+    expect(ys).toEqual([...ys].sort((a, b) => a - b));
+    expect(new Set(ys).size).toBe(3);
+    // And the headings line up in one gutter down the left.
+    expect(new Set(down.terms.map((t) => t.x)).size).toBe(1);
+  });
+
+  test("courses in a term share a row and run across it", () => {
+    const first = down.nodes.filter((n) => n.term === 0);
+    expect(new Set(first.map((n) => n.y)).size).toBe(1);
+    expect(new Set(first.map((n) => n.x)).size).toBe(2);
+  });
+
+  test("edges leave the bottom of a box and arrive at the top of the next", () => {
+    for (const edge of down.edges) {
+      const from = down.nodes.find((n) => n.code === edge.from)!;
+      const to = down.nodes.find((n) => n.code === edge.to)!;
+      expect(edge.path).toStartWith(
+        `M ${from.x + down.node.width / 2} ${from.y + down.node.height}`,
+      );
+      expect(edge.path).toEndWith(`${to.x + down.node.width / 2} ${to.y}`);
+    }
+  });
+
+  test("is taller than it is wide where a degree is long and a term is not", () => {
+    // Which is the whole reason to offer it: a browser scrolls down for free.
+    const across = buildMap(three, { graph: chain, have: new Set() });
+    expect(down.height / down.width).toBeGreaterThan(across.height / across.width);
   });
 });
 

@@ -840,6 +840,12 @@ label.section.clashes:not(:has(input:checked)) .when {
 
 /* ---- map ---- */
 
+/* The picture turns, so the control that turns it sits above the picture. */
+.board + .export,
+.credits + .export {
+  margin-bottom: 12px;
+}
+
 .board {
   overflow-x: auto;
   padding-bottom: 8px;
@@ -891,6 +897,18 @@ label.section.clashes:not(:has(input:checked)) .when {
 .graph .node .sub {
   fill: var(--overlay);
   font-size: 9px;
+}
+
+/* The course's own name. Dimmer than its code, because you scan for the code
+   and read the name once you have found it. */
+.graph .node .name {
+  fill: var(--subtext);
+  font-size: 9px;
+}
+
+.graph .node.done .name,
+.graph .node.transfer .name {
+  fill: var(--overlay);
 }
 
 .graph .node {

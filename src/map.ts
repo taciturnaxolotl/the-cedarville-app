@@ -49,9 +49,29 @@ export interface CourseMap {
   edges: MapEdge[];
   width: number;
   height: number;
-  /** Terms in order, for the column headings. */
-  terms: { name: string; credits: number; x: number; past?: boolean; transfer?: boolean }[];
+  /** Which way time runs, so a caller draws the boxes the way they were placed. */
+  flow: Flow;
+  /** Box size, computed here so the view never guesses at it. */
+  node: { width: number; height: number };
+  /** Terms in order, with the point their heading is anchored at. */
+  terms: {
+    name: string;
+    credits: number;
+    x: number;
+    y: number;
+    past?: boolean;
+    transfer?: boolean;
+  }[];
 }
+
+/**
+ * Which way time runs.
+ *
+ * "across" gives a term a column, which is how a degree audit is printed.
+ * "down" gives it a row, which is how a schedule is read — and a browser
+ * scrolls down for free where sideways is a thing you have to discover.
+ */
+export type Flow = "across" | "down";
 
 /** A term already on the transcript, drawn to the left of the plan. */
 export interface PastTerm {
@@ -82,8 +102,11 @@ export interface MapOptions {
   nodeWidth?: number;
   nodeHeight?: number;
   padding?: number;
-  /** Room for the term heading above the first row. */
+  /** Room for the term heading above the first row. Unused when flowing down. */
   headerHeight?: number;
+  /** Room for the term heading beside each row. Unused when flowing across. */
+  gutter?: number;
+  flow?: Flow;
 }
 
 /**
@@ -149,37 +172,54 @@ function reach(from: string, out: Map<string, string[]>): number {
 }
 
 export function buildMap(plan: Plan, options: MapOptions): CourseMap {
+  const flow = options.flow ?? "across";
+  const down = flow === "down";
   const {
-    columnWidth = 200,
-    rowHeight = 42,
-    nodeWidth = 168,
-    nodeHeight = 32,
+    // A box holds a course code and its name, so it is two lines tall
+    // whichever way the picture runs.
+    nodeWidth = 176,
+    nodeHeight = 44,
+    // Flowing down, the width is the widest term rather than the whole degree,
+    // so the boxes sit closer and the picture stays inside a page.
+    columnWidth = nodeWidth + (down ? 14 : 32),
+    rowHeight = nodeHeight + (down ? 20 : 10),
     padding = 16,
     headerHeight = 28,
+    gutter = 66,
   } = options;
+
+  /** Where the box for the nth course of a term sits. */
+  const at = (term: number, index: number) =>
+    down
+      ? { x: padding + gutter + index * columnWidth, y: padding + term * rowHeight }
+      : { x: padding + term * columnWidth, y: padding + headerHeight + index * rowHeight };
+
+  /** Where that term's heading hangs: above the column, or beside the row. */
+  const heading = (term: number) =>
+    down
+      ? { x: padding, y: padding + term * rowHeight + nodeHeight / 2 + 3 }
+      : { x: padding + term * columnWidth, y: 14 };
 
   const nodes = new Map<string, MapNode>();
   const terms: CourseMap["terms"] = [];
 
   const history = options.history ?? [];
   history.forEach((term, column) => {
-    const x = padding + column * columnWidth;
     terms.push({
       name: term.name,
       credits: term.courses.reduce((n, c) => n + c.credits, 0),
-      x,
+      ...heading(column),
       past: true,
       ...(term.transfer ? { transfer: true } : {}),
     });
-    term.courses.forEach((course, row) => {
+    term.courses.forEach((course, index) => {
       nodes.set(course.code, {
         code: course.code,
         title: options.title?.(course.code) ?? "",
         credits: course.credits,
         term: column,
         termName: term.name,
-        x,
-        y: padding + headerHeight + row * rowHeight,
+        ...at(column, index),
         critical: false,
         unlocks: 0,
         past: term.transfer ? "transfer" : course.done ? "done" : "running",
@@ -189,17 +229,15 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
 
   plan.terms.forEach((term, index) => {
     const column = history.length + index;
-    const x = padding + column * columnWidth;
-    terms.push({ name: term.slot.name, credits: term.credits, x });
-    term.courses.forEach((course, row) => {
+    terms.push({ name: term.slot.name, credits: term.credits, ...heading(column) });
+    term.courses.forEach((course, at_) => {
       nodes.set(course.code, {
         code: course.code,
         title: options.title?.(course.code) ?? "",
         credits: course.credits,
         term: column,
         termName: term.slot.name,
-        x,
-        y: padding + headerHeight + row * rowHeight,
+        ...at(column, at_),
         critical: false,
         unlocks: 0,
         ...(course.caution ? { caution: course.caution } : {}),
@@ -234,23 +272,21 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
   const edges: MapEdge[] = pairs.map(({ from, to }) => {
     const a = nodes.get(from)!;
     const b = nodes.get(to)!;
-    const x1 = a.x + nodeWidth;
-    const y1 = a.y + nodeHeight / 2;
-    const x2 = b.x;
-    const y2 = b.y + nodeHeight / 2;
-    // Control points a third of the way across, so edges leave and arrive
-    // horizontally and stay readable where several converge on one course.
-    const bend = Math.max(24, (x2 - x1) / 3);
-    return {
-      from,
-      to,
-      critical: critical.has(from) && critical.has(to),
-      path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`,
-    };
+    // Leaving the trailing edge and arriving at the leading one, whichever
+    // way that is. Control points a third of the way along, so edges set off
+    // and land square and stay readable where several converge on one course.
+    const [x1, y1, x2, y2] = down
+      ? [a.x + nodeWidth / 2, a.y + nodeHeight, b.x + nodeWidth / 2, b.y]
+      : [a.x + nodeWidth, a.y + nodeHeight / 2, b.x, b.y + nodeHeight / 2];
+    const bend = Math.max(24, (down ? y2 - y1 : x2 - x1) / 3);
+    const path = down
+      ? `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`
+      : `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+    return { from, to, critical: critical.has(from) && critical.has(to), path };
   });
 
-  const columns = history.length + plan.terms.length;
-  const rows = Math.max(
+  const termCount = Math.max(1, history.length + plan.terms.length);
+  const widest = Math.max(
     0,
     ...plan.terms.map((t) => t.courses.length),
     ...history.map((t) => t.courses.length),
@@ -258,8 +294,14 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
   return {
     nodes: [...nodes.values()],
     edges,
-    width: padding * 2 + Math.max(1, columns) * columnWidth,
-    height: padding * 2 + headerHeight + rows * rowHeight,
+    flow,
+    node: { width: nodeWidth, height: nodeHeight },
+    width: down
+      ? padding * 2 + gutter + Math.max(1, widest) * columnWidth
+      : padding * 2 + termCount * columnWidth,
+    height: down
+      ? padding * 2 + termCount * rowHeight
+      : padding * 2 + headerHeight + widest * rowHeight,
     terms,
   };
 }

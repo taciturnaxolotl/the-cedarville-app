@@ -25,7 +25,7 @@ import { criticalPath, projectPlan, type TermSlot, termsFrom } from "../planner"
 import { buildGraph, depth, downstream, eligibility, nodeOf } from "../prereqs";
 import {
   completedCourses,
-  coursesNeeded,
+  coursesNeededAcross,
   gaps,
   inProgressCourses,
   normalize,
@@ -364,7 +364,12 @@ function planningContext() {
 
   const fall = regular ? store.read(regular) : { sections: [], courses: [] };
   const summer = summerTerm ? store.read(summerTerm) : { sections: [], courses: [] };
-  const records = [...(fall.courses ?? []), ...(summer.courses ?? [])];
+  // Every course we hold, not the two terms we happen to have crawled: a
+  // requisite names courses nobody is teaching, and a graph built from one
+  // term's listing loses about a third of its depth. Here that was 892 of
+  // 2047 courses.
+  const held = store.readCourses("ALL");
+  const records = held.length ? held : [...(fall.courses ?? []), ...(summer.courses ?? [])];
 
   const credits = new Map(
     records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
@@ -425,7 +430,9 @@ function registerPersonal(server: McpServer) {
     },
     async ({ program, only_gaps }) => {
       const trees = await loadTrees();
-      const chosen = program ? [trees[program]].filter(Boolean) : Object.values(trees);
+      const chosen = (program ? [trees[program]] : Object.values(trees)).filter(
+        (t): t is ProgramTree => Boolean(t),
+      );
       if (chosen.length === 0) return fail(`No captured evaluation for ${program}.`);
 
       const out: string[] = [];
@@ -468,13 +475,9 @@ function registerPersonal(server: McpServer) {
       }),
     },
     async ({ term, subject, state }) => {
-      const trees = await loadTrees();
-      const done = new Set<string>();
-      const now = new Set<string>();
-      for (const tree of Object.values(trees)) {
-        for (const c of completedCourses(tree)) done.add(c);
-        for (const c of inProgressCourses(tree)) now.add(c);
-      }
+      const trees = Object.values(await loadTrees());
+      const done = completedCourses(trees);
+      const now = inProgressCourses(trees);
 
       const { graph } = graphFor(term);
       const rows: string[] = [];
@@ -530,20 +533,30 @@ function registerPersonal(server: McpServer) {
     },
     async ({ program, credits_per_term, summers, keep_semesters_full, start }) => {
       const trees = await loadTrees();
-      const tree = program ? trees[program] : Object.values(trees)[0];
-      if (!tree)
+      // Every captured program by default, solved as one cover. Planning the
+      // first alone buys a shared requirement twice and drops the rest of a
+      // second major, which is the whole question a dual major is asking.
+      const chosen = (program ? [trees[program]] : Object.values(trees)).filter(
+        (t): t is ProgramTree => Boolean(t),
+      );
+      if (chosen.length === 0)
         return fail(
           `No captured evaluation${program ? ` for ${program}` : ""}. Have: ${Object.keys(trees).join(", ") || "none"}`,
         );
 
       const { graph, credits, offeredIn, titles, aliases } = planningContext();
-      const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
+      const have = new Set([...completedCourses(chosen), ...inProgressCourses(chosen)]);
+      const pursuing = new Set(chosen.flatMap((t) => [...t.majors, ...t.minors]));
+      const solved = coursesNeededAcross(chosen, { credits, have, pursuing });
       const season = start.startsWith("SP") ? "spring" : "fall";
       const year = 2000 + Number(start.slice(2));
 
       const plan = projectPlan({
-        need: coursesNeeded(tree, { credits, have }).courses,
+        need: solved.courses,
         completed: have,
+        // Standing is measured on the transcript, not on what the pools we can
+        // price happen to add up to.
+        earnedCredits: Math.max(...chosen.map((t) => t.credits.completed + t.credits.inProgress)),
         graph,
         credits,
         offeredIn,
@@ -556,9 +569,16 @@ function registerPersonal(server: McpServer) {
         }),
       });
 
-      const toGo = tree.credits.minimum - tree.credits.completed - tree.credits.inProgress;
+      // Two majors on one bachelor's share a single credit total, so the
+      // requirement is the largest of them and never their sum.
+      const largest = (pick: (t: ProgramTree) => number) => Math.max(...chosen.map(pick));
+      const toGo =
+        largest((t) => t.credits.minimum) -
+        largest((t) => t.credits.completed) -
+        largest((t) => t.credits.inProgress);
       const lines = [
-        `${tree.code}: ${toGo} credits remain; this plan schedules ${plan.totalCredits} across named requirements.`,
+        `${chosen.map((t) => t.code).join(" + ")}: ${toGo} credits remain; ` +
+          `this plan schedules ${plan.totalCredits} across named requirements.`,
         `Finishes ${plan.finishes ?? "never within the horizon"} at ${credits_per_term}/term` +
           `${summers ? ` with ${summers} summer${summers === 1 ? "" : "s"}` : " without summers"}.`,
         "",
@@ -575,7 +595,7 @@ function registerPersonal(server: McpServer) {
         lines.push("", "not placed:");
         for (const u of plan.unscheduled) lines.push(`   ${u.code.padEnd(11)} ${u.why}`);
       }
-      const { unenumerable } = coursesNeeded(tree, { credits, have });
+      const { unenumerable } = solved;
       if (unenumerable.length) {
         lines.push("", "not plannable — Colleague does not publish the eligible courses:");
         for (const u of unenumerable) {
@@ -584,8 +604,8 @@ function registerPersonal(server: McpServer) {
       }
       lines.push(
         "",
-        "Caveats: class standing is not modelled, so senior capstones may appear early;",
-        "spring offerings are inferred from absence in the fall catalog.",
+        "Caveats: this is the cheapest degree rather than the one you have chosen —",
+        "the pins and tracks set in the planner live in that browser, not here.",
       );
       return text(lines.join("\n"));
     },
@@ -602,15 +622,21 @@ function registerPersonal(server: McpServer) {
     },
     async ({ program }) => {
       const trees = await loadTrees();
-      const tree = program ? trees[program] : Object.values(trees)[0];
-      if (!tree)
+      const chosen = (program ? [trees[program]] : Object.values(trees)).filter(
+        (t): t is ProgramTree => Boolean(t),
+      );
+      if (chosen.length === 0)
         return fail(
           `No captured evaluation${program ? ` for ${program}` : ""}. Have: ${Object.keys(trees).join(", ") || "none"}`,
         );
 
       const { graph, credits, titles } = planningContext();
-      const have = new Set([...completedCourses(tree), ...inProgressCourses(tree)]);
-      const path = criticalPath(graph, coursesNeeded(tree, { credits, have }).courses, have);
+      const have = new Set([...completedCourses(chosen), ...inProgressCourses(chosen)]);
+      const path = criticalPath(
+        graph,
+        coursesNeededAcross(chosen, { credits, have }).courses,
+        have,
+      );
       if (path.length === 0) return text("Nothing left with prerequisites.");
 
       return text(

@@ -82,6 +82,13 @@ export interface Group {
   /** Colleague's own gap list. */
   needed: CourseRef[];
   /**
+   * What an advisor changed by hand: "8/20/26: EGGN-1110 permitted to replace
+   * EGGN-1910." A substitution is granted against one requirement rather than
+   * against the student, so it lives on the group that carries it and nowhere
+   * else.
+   */
+  modifications: string[];
+  /**
    * The group carries opaque Colleague rule ids that only the server can
    * evaluate. We cannot decide satisfaction locally; render `text` and defer.
    */
@@ -226,6 +233,7 @@ function normalizeGroup(g: RawGroup): Group {
     },
     applied: list(g.AppliedAcademicCredits),
     needed: list(g.CoursesThatNeedPlanned),
+    modifications: list(g.ModificationMessages),
     // A rule attached to an enumerated course list still narrows that list in
     // ways we cannot see, so flag it regardless of constraint kind.
     unverifiable: g.HasRules || list(g.AcademicCreditRules).length > 0,
@@ -325,6 +333,115 @@ export function programFor(
     matches.find((p) => p.Code.split(".")[0] === family) ??
     matches[0]
   );
+}
+
+/**
+ * A course an advisor accepted in place of the one a requirement names.
+ *
+ * Colleague grants these against a single requirement, never against the
+ * student, and says so only in prose hung on the group: "8/20/26: EGGN-1110
+ * permitted to replace EGGN-1910." The evaluation applies the credit and then
+ * goes on listing the replaced course, so a planner reading the list alone
+ * schedules a course the registrar has already excused.
+ */
+export interface Substitution {
+  program: string;
+  /** The requirement this was granted against, named as the catalog names it. */
+  requirement: string;
+  ids: { requirement: string; subrequirement: string; group: string };
+  /** The course the student took. */
+  taken: string;
+  /** The course it stands in for. */
+  waives: string;
+  /** Colleague's own wording, which carries the date and the authority. */
+  text: string;
+}
+
+const REPLACES = /\b([A-Z]{2,5}-\d{4}[A-Z]?)\s+permitted to replace\s+([A-Z]{2,5}-\d{4}[A-Z]?)/i;
+
+/** The pair a modification names, when it names one. */
+export function parseSubstitution(text: string): { taken: string; waives: string } | null {
+  const found = REPLACES.exec(text);
+  if (!found?.[1] || !found[2]) return null;
+  return { taken: found[1].toUpperCase(), waives: found[2].toUpperCase() };
+}
+
+/** Every substitution across a set of programs, in the order Colleague lists them. */
+export function substitutionsIn(trees: Trees): Substitution[] {
+  const found: Substitution[] = [];
+  for (const tree of each(trees)) {
+    for (const { requirement, group } of walkGroups(tree)) {
+      for (const text of group.modifications) {
+        const pair = parseSubstitution(text);
+        if (!pair) continue;
+        found.push({
+          program: tree.code,
+          requirement: requirement.text,
+          ids: {
+            requirement: group.requirementCode,
+            subrequirement: group.subrequirementId,
+            group: group.id,
+          },
+          ...pair,
+          text,
+        });
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Modifications we could not read. Shown rather than dropped: an advisor's
+ * note is the one part of a degree audit a human wrote on purpose.
+ */
+export function unreadModifications(trees: Trees): { program: string; text: string }[] {
+  const unread: { program: string; text: string }[] = [];
+  for (const tree of each(trees)) {
+    for (const { group } of walkGroups(tree)) {
+      for (const text of group.modifications) {
+        if (!parseSubstitution(text)) unread.push({ program: tree.code, text });
+      }
+    }
+  }
+  return unread;
+}
+
+/**
+ * Requirements that still name a course, once substitutions are applied.
+ *
+ * A substitution is granted against one requirement, so a second major can go
+ * on asking for the course the first one excused. That is a real question for
+ * an advisor, and saying nothing about it reads as a bug in the planner.
+ */
+export function stillRequiring(
+  trees: Trees,
+  code: string,
+  have: ReadonlySet<string>,
+): { program: string; requirement: string }[] {
+  const asking: { program: string; requirement: string }[] = [];
+  for (const tree of each(trees)) {
+    for (const { requirement, group } of walkGroups(tree)) {
+      if (group.constraint.kind !== "take-all") continue;
+      if (!group.constraint.courses.some((x) => x.CourseName === code)) continue;
+      if (group.status.completion === "Completed") continue;
+      if (waivedIn(group, have).has(code)) continue;
+      asking.push({ program: tree.code, requirement: requirement.text });
+    }
+  }
+  return asking;
+}
+
+/** Courses this group no longer wants, because something else was accepted for them. */
+function waivedIn(group: Group, have: ReadonlySet<string>): Set<string> {
+  const waived = new Set<string>();
+  for (const text of group.modifications) {
+    const pair = parseSubstitution(text);
+    // The replacement has to actually be on the transcript. A permission
+    // granted is not a course taken.
+    if (pair && have.has(pair.taken)) waived.add(pair.waives);
+  }
+  return waived;
 }
 
 // ---- querying ----------------------------------------------------------
@@ -755,8 +872,12 @@ function groupCost(group: Group, options: NeedOptions, free: ReadonlySet<string>
   const c = group.constraint;
 
   if (c.kind === "take-all") {
+    const waived = waivedIn(group, options.have);
     return c.courses
-      .filter((x) => !options.have.has(x.CourseName) && !free.has(x.CourseName))
+      .filter(
+        (x) =>
+          !options.have.has(x.CourseName) && !free.has(x.CourseName) && !waived.has(x.CourseName),
+      )
       .reduce((n, x) => n + options.credits(x.CourseName), 0);
   }
   if (c.kind === "print-only") return 0;
@@ -1105,7 +1226,11 @@ function walkProgram(
         }
 
         if (c.kind === "take-all") {
-          for (const x of c.courses) if (!options.have.has(x.CourseName)) courses.add(x.CourseName);
+          const waived = waivedIn(group, options.have);
+          for (const x of c.courses) {
+            if (options.have.has(x.CourseName) || waived.has(x.CourseName)) continue;
+            courses.add(x.CourseName);
+          }
         } else if (c.kind === "choose-from") {
           // A group whose text names the combination the student is pursuing
           // is not a choice for them, whatever the pool says.

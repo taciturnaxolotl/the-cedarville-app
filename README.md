@@ -86,6 +86,25 @@ course now, which courses it would unlock, and how deep its chain runs. A
 course gating eleven others belongs earlier in a degree than one gating none,
 and the schedule view sorts on exactly that.
 
+### what an advisor changed by hand
+
+A degree audit is mostly Colleague talking to itself. The exception is a
+modification: a human wrote "8/20/26: EGGN-1110 permitted to replace
+EGGN-1910." and hung it on one requirement group. Colleague applies the credit
+and then goes on listing the replaced course, so a planner reading the course
+list alone schedules a semester of work the registrar already excused.
+
+Those messages are parsed, and only where they were granted. A substitution is
+made against a requirement rather than against a student, so a second major
+can still be asking for the course the first one dropped — which is a real
+question for an advisor, and is reported as one rather than assumed either
+way. The replacement must also be on the transcript: a permission granted is
+not a course taken.
+
+A message that does not parse is shown verbatim. An advisor's note is the one
+line of an audit a person wrote on purpose, and failing to read it is no
+reason to hide it.
+
 ### the gates that are only prose
 
 Of 906 requisites in the catalog, 82 say something no parser should pretend to

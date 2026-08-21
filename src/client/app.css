@@ -930,6 +930,35 @@ label.section.clashes:not(:has(input:checked)) .when {
   fill: var(--overlay);
 }
 
+/* ---- what an advisor changed by hand ---- */
+
+/*
+ * A substitution is the one line of a degree audit a human wrote on purpose,
+ * so it reads as a sentence rather than as another badge in a row of badges.
+ */
+.notes {
+  margin: -6px 0 14px;
+}
+
+.swap {
+  margin: 0 0 5px;
+  color: var(--subtext);
+  font-size: 11px;
+}
+
+.swap b {
+  color: var(--green);
+  font-weight: 500;
+}
+
+.swap .prog-name {
+  color: var(--text);
+}
+
+.swap .carries {
+  color: var(--yellow);
+}
+
 /* ---- load dials ---- */
 
 .dials {

@@ -90,6 +90,8 @@ export interface RawGroup {
   AppliedAcademicCredits: AppliedCredit[] | null;
   CoursesThatNeedPlanned: CourseRef[] | null;
   AcademicCreditRules: string[] | null;
+  /** The registrar's own note when a requirement was modified by hand. */
+  ModificationMessages?: string[] | null;
   HasRules: boolean;
   OnlyConveysPrintText: boolean;
 }

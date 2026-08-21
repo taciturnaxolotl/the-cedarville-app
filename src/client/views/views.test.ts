@@ -1518,6 +1518,43 @@ describe("build view — how heavy a term", () => {
       ]),
     );
 
+  test("says what an advisor swapped, and who never heard about it", () => {
+    const swap = normalize(
+      program("BS.CYOPR", [
+        group({
+          Courses: [course("1", "EGGN", "1910")],
+          ModificationMessages: ["8/20/26: EGGN-1110 permitted to replace EGGN-1910."],
+          AppliedAcademicCredits: [
+            {
+              Id: "EGGN-1110",
+              CourseId: "EGGN-1110",
+              CourseName: "EGGN-1110",
+              Title: "EGGN-1110",
+              Credit: 3,
+              VerifiedGrade: "A",
+              Term: "2026SP",
+              IsCompletedCredit: true,
+              IsTransferCourse: false,
+              IsWithdrawn: false,
+              IsExtraCourse: false,
+              AllowedByOverride: false,
+              ReplacedStatus: "NotReplaced",
+              ReplacementStatus: "NotReplacement",
+            },
+          ],
+        }),
+      ]),
+    );
+    const other = normalize(
+      program("BS.CMPSC", [group({ Courses: [course("1", "EGGN", "1910")] })]),
+    );
+
+    build.mount(root, { trees: [swap, other], enrolled: ["BS.CYOPR", "BS.CMPSC"] });
+    const note = root.querySelector(".notes .swap")?.textContent ?? "";
+    expect(note).toContain("EGGN-1110 replaces EGGN-1910");
+    expect(note).toContain("still lists EGGN-1910");
+  });
+
   test("names a second major once, however many enrolments claim it", () => {
     // BS.CYOPR records the computer science major; BS.CMPSC is what answers
     // it. Both trees name it, and the student is doing it once.

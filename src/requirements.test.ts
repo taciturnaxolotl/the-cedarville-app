@@ -19,8 +19,12 @@ import {
   levelOf,
   normalize,
   openGroups,
+  parseSubstitution,
   programFor,
   sharedCredits,
+  stillRequiring,
+  substitutionsIn,
+  unreadModifications,
   unservedCredentials,
   walkGroups,
 } from "./requirements";
@@ -1697,5 +1701,88 @@ describe("a transcript spanning several enrolments", () => {
 
   test("one tree still reads as one tree", () => {
     expect([...completedCourses(cyber)]).toEqual(["CY-2100"]);
+  });
+});
+
+describe("a course an advisor accepted in place of another", () => {
+  // Verbatim from a real record, date and all.
+  const MESSAGE = "8/20/26: EGGN-1110 permitted to replace EGGN-1910.";
+
+  const credit = (name: string) => ({
+    Id: name,
+    CourseId: name,
+    CourseName: name,
+    Title: name,
+    Credit: 3,
+    VerifiedGrade: "A",
+    Term: "2026SP",
+    IsCompletedCredit: true,
+    IsTransferCourse: false,
+    IsWithdrawn: false,
+    IsExtraCourse: false,
+    AllowedByOverride: false,
+    ReplacedStatus: "NotReplaced",
+    ReplacementStatus: "NotReplacement",
+  });
+
+  const core = (over: Partial<RawGroup> = {}) =>
+    group({
+      Courses: [course("1", "EGGN", "1910"), course("2", "CS", "3210")],
+      AppliedAcademicCredits: [credit("EGGN-1110")],
+      ModificationMessages: [MESSAGE],
+      ...over,
+    });
+
+  test("reads the pair out of the registrar's own wording", () => {
+    expect(parseSubstitution(MESSAGE)).toEqual({ taken: "EGGN-1110", waives: "EGGN-1910" });
+    expect(parseSubstitution("8/20/26: transfer credit accepted.")).toBeNull();
+  });
+
+  test("stops asking for the course that was replaced", () => {
+    const tree = normalize(program("BS.CYOPR", [core()]));
+    const have = new Set(["EGGN-1110"]);
+    const needed = coursesNeeded(tree, { credits: () => 3, have }).courses;
+    expect(needed.has("EGGN-1910")).toBe(false);
+    expect(needed.has("CS-3210")).toBe(true);
+  });
+
+  test("a permission granted is not a course taken", () => {
+    // The substitution is on the record; the replacement is not. Excusing the
+    // requirement anyway would drop a course the student still owes.
+    const tree = normalize(program("BS.CYOPR", [core()]));
+    const needed = coursesNeeded(tree, { credits: () => 3, have: new Set() }).courses;
+    expect(needed.has("EGGN-1910")).toBe(true);
+  });
+
+  test("reports it, with the requirement it was granted against", () => {
+    const tree = normalize(program("BS.CYOPR", [core()]));
+    expect(substitutionsIn(tree)).toMatchObject([
+      {
+        program: "BS.CYOPR",
+        taken: "EGGN-1110",
+        waives: "EGGN-1910",
+        text: MESSAGE,
+      },
+    ]);
+  });
+
+  test("names the requirements that never heard about it", () => {
+    // Granted against one major's core; the other still lists the course.
+    const cyber = normalize(program("BS.CYOPR", [core()]));
+    const comp = normalize(
+      program("BS.CMPSC", [group({ Courses: [course("1", "EGGN", "1910")] })]),
+    );
+    const asking = stillRequiring([cyber, comp], "EGGN-1910", new Set(["EGGN-1110"]));
+    expect(asking).toEqual([{ program: "BS.CMPSC", requirement: "BS.CMPSC core" }]);
+  });
+
+  test("shows a note it could not read rather than dropping it", () => {
+    const tree = normalize(
+      program("BS.CYOPR", [core({ ModificationMessages: ["8/20/26: see advisor."] })]),
+    );
+    expect(substitutionsIn(tree)).toEqual([]);
+    expect(unreadModifications(tree)).toEqual([
+      { program: "BS.CYOPR", text: "8/20/26: see advisor." },
+    ]);
   });
 });

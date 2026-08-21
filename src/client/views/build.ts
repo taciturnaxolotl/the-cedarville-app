@@ -23,6 +23,9 @@ import {
   groupKey,
   inProgressCourses,
   type ProgramTree,
+  stillRequiring,
+  substitutionsIn,
+  unreadModifications,
 } from "../../requirements";
 import { offeringsFromListing } from "../../schedule";
 import type { ProgramSummary } from "../../types";
@@ -233,8 +236,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const picker = el("section", "picker");
   const dials = el("section", "dials");
   const summary = el("p", "credits");
+  const notes = el("section", "notes");
   const body = el("div");
-  root.replaceChildren(picker, dials, summary, body);
+  root.replaceChildren(picker, dials, summary, notes, body);
 
   if (trees.length === 0) {
     summary.textContent = "capture your requirements first, then add majors and minors here.";
@@ -259,6 +263,40 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   // is simply untrue, so the two are kept apart for the wording.
   const have = new Set([...passed, ...running]);
   const price = (c: string) => stretched.get(c) ?? credits.get(c) ?? 3;
+
+  // ---- what an advisor changed by hand ----------------------------------
+
+  // Written once: a substitution is a fact about the record, not about any
+  // knob, so it does not belong in a watcher that reruns on every slider.
+  for (const swap of substitutionsIn(trees)) {
+    const note = el("p", "swap");
+    note.append(el("b", undefined, swap.taken));
+    note.append(document.createTextNode(` replaces ${swap.waives} for `));
+    note.append(el("span", "prog-name", tidy(swap.requirement)));
+    note.title = swap.text;
+
+    // Granted against one requirement, and the others never hear about it.
+    const asking = stillRequiring(trees, swap.waives, have).filter(
+      (r) => r.requirement !== swap.requirement,
+    );
+    if (asking.length) {
+      note.append(
+        el(
+          "span",
+          "carries",
+          ` — ${asking.map((r) => tidy(r.requirement)).join(" and ")} still lists ` +
+            `${swap.waives}; ask whether the substitution carries.`,
+        ),
+      );
+    }
+    notes.append(note);
+  }
+
+  for (const unread of unreadModifications(trees)) {
+    // An advisor wrote this on purpose. Not parsing it is our failing, and
+    // hiding it would make that failing the student's.
+    notes.append(el("p", "swap muted", `${unread.program}: ${unread.text}`));
+  }
 
   // ---- fetching --------------------------------------------------------
 

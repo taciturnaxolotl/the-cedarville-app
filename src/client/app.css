@@ -581,36 +581,6 @@ label.section.clashes:not(:has(input:checked)) .when {
   font-variant-numeric: tabular-nums;
 }
 
-.chain {
-  margin: 16px 0 22px;
-}
-
-.chain h3 {
-  margin: 0 0 8px;
-  color: var(--peach);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.chain-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.chain-node {
-  padding: 3px 9px;
-  border-radius: 3px;
-  border-left: 2px solid var(--peach);
-  background: var(--mantle);
-  cursor: help;
-}
-
-.arrow {
-  color: var(--overlay);
-}
-
 .term {
   margin-bottom: 14px;
   padding-left: 12px;

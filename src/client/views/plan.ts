@@ -12,7 +12,6 @@
  * shorten, and it is the first thing worth knowing.
  */
 
-import { criticalPath } from "../../planner";
 import { prerequisitesOf } from "../../prereqs";
 import { groupKey, type ProgramTree } from "../../requirements";
 import type { Ctx } from "../ctx";
@@ -155,25 +154,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   );
 
   const verdict = el("p", "credits");
-  const chain = el("div", "chain");
   const body = el("div");
-  root.replaceChildren(controls, verdict, chain, body);
-
-  // The critical path depends on the transcript, not the knobs, so it is
-  // computed once rather than on every slider tick.
-  const path = criticalPath(graph, need, have);
-  if (path.length) {
-    chain.append(el("h3", undefined, `critical path — ${path.length} terms minimum`));
-    const row = el("div", "chain-row");
-    path.forEach((code: string, i: number) => {
-      if (i) row.append(el("span", "arrow", "→"));
-      const node = el("span", "chain-node", code);
-      node.title = title(code);
-      row.append(node);
-    });
-    chain.append(row);
-    chain.append(el("p", "muted", "no credit load shortens this."));
-  }
+  root.replaceChildren(controls, verdict, body);
 
   /** The graph rendering, when it is the one on screen. */
   let picture: { destroy(): void } | null = null;

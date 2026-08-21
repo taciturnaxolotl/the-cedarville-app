@@ -473,16 +473,14 @@ describe("plan view", () => {
     expect(root.textContent).toContain("capture your requirements");
   });
 
-  test("projects terms and shows the critical path", () => {
+  test("projects terms", () => {
     asList();
     plan.mount(root, ctxWith(CHAIN));
-    expect(root.querySelector(".chain-node")).toBeTruthy();
-    expect(root.textContent).toContain("critical path");
     expect(root.querySelectorAll(".term").length).toBeGreaterThan(0);
+    expect(root.textContent).toContain("finishes");
   });
 
-  // A chain cannot be compressed by raising the credit cap, which is the
-  // whole point of showing the critical path.
+  // A chain of prerequisites cannot be compressed by raising the credit cap.
   test("the credit slider reprojects but cannot beat the chain", () => {
     asList();
     plan.mount(root, ctxWith(CHAIN));

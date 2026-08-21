@@ -1486,9 +1486,20 @@ describe("map view", () => {
     expect(root.textContent).toContain("prerequisite links");
   });
 
-  test("marks the chain that sets the finish date", () => {
+  test("counts the chain that sets the finish date without painting it", () => {
+    // The number is worth knowing; seven boxes in one colour is worth asking
+    // for. Nothing is marked until the button is pressed.
+    localStorage.removeItem("cedarville:map-chain");
     map.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    expect(root.textContent).toContain("longest chain");
+    expect(root.querySelectorAll(".graph .node.critical")).toHaveLength(0);
+
+    const show = Array.from(root.querySelectorAll("button")).find((b) =>
+      (b.textContent ?? "").includes("longest chain"),
+    ) as unknown as HTMLElement;
+    show.dispatchEvent(new window.Event("click", { bubbles: true }) as unknown as Event);
     expect(root.querySelectorAll(".graph .node.critical").length).toBeGreaterThan(0);
+    localStorage.removeItem("cedarville:map-chain");
   });
 
   test("hovering a course dims everything off its chain", () => {

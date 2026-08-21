@@ -867,11 +867,6 @@ label.section.clashes:not(:has(input:checked)) .when {
   stroke-width: 1.5;
 }
 
-.graph .edge.critical {
-  stroke: var(--peach);
-  stroke-width: 2;
-}
-
 /* Dimming rather than hiding: the shape of the whole plan stays readable
    while one chain is traced through it. */
 .graph .edge.dim {
@@ -882,10 +877,6 @@ label.section.clashes:not(:has(input:checked)) .when {
 .graph .node rect {
   fill: var(--mantle);
   stroke: var(--surface);
-}
-
-.graph .node.critical rect {
-  stroke: var(--peach);
 }
 
 .graph .node .code {

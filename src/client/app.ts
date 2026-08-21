@@ -40,6 +40,19 @@ const SECTIONS = "cedarville:last-sections";
 const VIEWS = { build, map, requirements: tree, overlap, schedule, plan } as const;
 type ViewName = keyof typeof VIEWS;
 
+const isView = (name: string): name is ViewName => name in VIEWS;
+
+/**
+ * Which tab the address bar is asking for.
+ *
+ * A planner is a thing you leave open, reload, and send to somebody. All three
+ * want the tab in the URL rather than in a variable that resets to "build".
+ */
+const viewInUrl = (): ViewName | null => {
+  const asked = decodeURIComponent(location.hash.slice(1));
+  return isView(asked) ? asked : null;
+};
+
 interface Shell {
   trees: ProgramTree[];
   /** Codes the registrar has the student in, as opposed to what-if additions. */
@@ -61,7 +74,7 @@ const store = createStore<Shell>({
   enrolled: [],
   unmatched: [],
   allCourses: [],
-  view: "build",
+  view: viewInUrl() ?? "build",
   status: "",
   tone: "",
   busy: false,
@@ -95,6 +108,21 @@ store.watch(
     }
   },
 );
+
+// Replaced rather than pushed: a reload should land where you were, and the
+// back button belongs to the pages you came from, not to the tabs you clicked.
+store.watch(
+  (s) => s.view,
+  (view) => {
+    if (location.hash.slice(1) !== view) history.replaceState(null, "", `#${view}`);
+  },
+);
+
+// Someone pasted a link, or pressed back out of a tab they had linked to.
+window.addEventListener("hashchange", () => {
+  const asked = viewInUrl();
+  if (asked) store.set({ view: asked });
+});
 
 store.watch(
   (s) => `${s.status}:${s.tone}`,

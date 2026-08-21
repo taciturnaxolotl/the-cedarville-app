@@ -32,7 +32,6 @@ import { createStore, Subscriptions } from "../store";
 const PINS = "cedarville:pins";
 const TRACKS = "cedarville:tracks";
 const FLOW = "cedarville:map-flow";
-const CHAIN = "cedarville:map-chain";
 const SVG = "http://www.w3.org/2000/svg";
 
 interface State {
@@ -42,12 +41,6 @@ interface State {
   focus: string | null;
   /** Which way time runs. Remembered, because it is a matter of taste. */
   flow: Flow;
-  /**
-   * Whether the longest chain is painted. Off by default: it is the same
-   * colour on seven boxes at once, and a picture shouting one answer is a
-   * poor place to go looking for another.
-   */
-  chain: boolean;
 }
 
 const svg = <K extends keyof SVGElementTagNameMap>(
@@ -81,7 +74,6 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     // Down by default: a degree is long and a term is not, so the picture is
     // tall and thin, and a browser scrolls that way without being asked.
     flow: read<Flow>(FLOW, "down"),
-    chain: read<boolean>(CHAIN, false),
   });
 
   if (trees.length === 0) {
@@ -178,18 +170,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     store.set({ flow });
   });
 
-  const show = el("button", "export");
-  show.type = "button";
-  show.title =
-    "The longest run of prerequisites in the plan. No credit load shortens it, " +
-    "which is why it is worth knowing and why it is not worth staring at.";
-  show.addEventListener("click", () => {
-    const chain = !store.get().chain;
-    localStorage.setItem(CHAIN, JSON.stringify(chain));
-    store.set({ chain });
-  });
-
-  root.replaceChildren(legend, turn, show, board);
+  root.replaceChildren(legend, turn, board);
 
   /** Everything the focused course waits on, and everything waiting on it. */
   function related(map: CourseMap, code: string): Set<string> {
@@ -220,23 +201,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   function highlight() {
     if (!drawn) return;
-    const { focus, chain } = store.get();
+    const { focus } = store.get();
     const lit = focus ? related(drawn.map, focus) : null;
-    const critical = new Set(drawn.map.nodes.filter((n) => n.critical).map((n) => n.code));
-
     for (const [code, box] of drawn.nodes) {
       box.classList.toggle("dim", Boolean(lit && !lit.has(code)));
-      box.classList.toggle("critical", chain && critical.has(code));
     }
     for (const edge of drawn.edges) {
       edge.el.classList.toggle("dim", Boolean(lit && !(lit.has(edge.from) && lit.has(edge.to))));
-      edge.el.classList.toggle(
-        "critical",
-        chain && critical.has(edge.from) && critical.has(edge.to),
-      );
     }
     trace.textContent = focus ? ` · tracing ${focus}` : "";
-    show.textContent = chain ? "hide the longest chain" : "show the longest chain";
   }
 
   function draw() {
@@ -389,7 +362,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       () => draw(),
     ),
     store.watch(
-      (s) => `${s.focus ?? ""}:${s.chain}`,
+      (s) => s.focus,
       () => highlight(),
     ),
   );

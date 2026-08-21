@@ -257,25 +257,43 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         transform: `translate(${node.x}, ${node.y})`,
       });
       g.append(svg("rect", { width: map.node.width, height: map.node.height, rx: 3 }));
+
+      // Two lines, and every one of the four things on them is laid out
+      // against a measured budget. The page is monospace throughout, so a
+      // character is 0.6 of its font size and the arithmetic is honest —
+      // which is the only way a right-aligned label cannot land on a
+      // left-aligned one when a course turns out to gate eleven others.
+      const inner = map.node.width - 16;
+      const now = node.past === "running" ? " · now" : "";
+      const gates = node.unlocks ? `gates ${node.unlocks}` : "";
+
       g.append(
-        Object.assign(svg("text", { x: 8, y: 16, class: "code" }), { textContent: node.code }),
+        Object.assign(svg("text", { x: 8, y: 17, class: "code" }), {
+          textContent: fit(
+            node.code,
+            Math.floor((inner - (`${node.credits}cr${now}`.length + 1) * 5.4) / 6.6),
+          ),
+        }),
       );
       g.append(
         Object.assign(
-          svg("text", { x: map.node.width - 8, y: 16, class: "sub", "text-anchor": "end" }),
-          {
-            textContent: `${node.credits}cr${node.past === "running" ? " · now" : ""}${node.unlocks ? ` · gates ${node.unlocks}` : ""}`,
-          },
+          svg("text", { x: map.node.width - 8, y: 17, class: "sub", "text-anchor": "end" }),
+          { textContent: `${node.credits}cr${now}` },
         ),
       );
-      // The name, which is the whole reason a student recognises the box. SVG
-      // has no ellipsis and the page is monospace throughout, so the cut is
-      // counted rather than measured.
       g.append(
-        Object.assign(svg("text", { x: 8, y: 31, class: "name" }), {
-          textContent: fit(node.title, Math.floor((map.node.width - 16) / 5.4)),
+        Object.assign(svg("text", { x: 8, y: 32, class: "name" }), {
+          textContent: fit(node.title, Math.floor(inner / 5.4) - (gates ? gates.length + 2 : 0)),
         }),
       );
+      if (gates) {
+        g.append(
+          Object.assign(
+            svg("text", { x: map.node.width - 8, y: 32, class: "sub", "text-anchor": "end" }),
+            { textContent: gates },
+          ),
+        );
+      }
       const hint = [
         node.title,
         node.unlocks ? `${node.unlocks} later courses wait on this` : "",

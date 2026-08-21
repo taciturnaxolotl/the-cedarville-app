@@ -102,10 +102,8 @@ export interface MapOptions {
   nodeWidth?: number;
   nodeHeight?: number;
   padding?: number;
-  /** Room for the term heading above the first row. Unused when flowing down. */
+  /** Room for a term's heading: above the first row, or above every row. */
   headerHeight?: number;
-  /** Room for the term heading beside each row. Unused when flowing across. */
-  gutter?: number;
   flow?: Flow;
 }
 
@@ -182,22 +180,24 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
     // Flowing down, the width is the widest term rather than the whole degree,
     // so the boxes sit closer and the picture stays inside a page.
     columnWidth = nodeWidth + (down ? 14 : 32),
-    rowHeight = nodeHeight + (down ? 20 : 10),
+    // A heading sits above its row rather than beside it. Beside it, the
+    // gutter has to be as wide as the longest label a term can carry, and
+    // "transfer · 15cr · part time" is longer than any gutter worth spending.
+    headerHeight = down ? 17 : 28,
+    rowHeight = nodeHeight + (down ? headerHeight + 14 : 10),
     padding = 16,
-    headerHeight = 28,
-    gutter = 66,
   } = options;
 
   /** Where the box for the nth course of a term sits. */
   const at = (term: number, index: number) =>
     down
-      ? { x: padding + gutter + index * columnWidth, y: padding + term * rowHeight }
+      ? { x: padding + index * columnWidth, y: padding + term * rowHeight + headerHeight }
       : { x: padding + term * columnWidth, y: padding + headerHeight + index * rowHeight };
 
-  /** Where that term's heading hangs: above the column, or beside the row. */
+  /** Where that term's heading hangs: above its column, or above its row. */
   const heading = (term: number) =>
     down
-      ? { x: padding, y: padding + term * rowHeight + nodeHeight / 2 + 3 }
+      ? { x: padding, y: padding + term * rowHeight + 11 }
       : { x: padding + term * columnWidth, y: 14 };
 
   const nodes = new Map<string, MapNode>();
@@ -297,7 +297,7 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
     flow,
     node: { width: nodeWidth, height: nodeHeight },
     width: down
-      ? padding * 2 + gutter + Math.max(1, widest) * columnWidth
+      ? padding * 2 + Math.max(1, widest) * columnWidth
       : padding * 2 + termCount * columnWidth,
     height: down
       ? padding * 2 + termCount * rowHeight

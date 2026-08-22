@@ -482,7 +482,7 @@ describe("a term the student chose", () => {
     const p = placed({ "AA-2000": "SP27" }, ["AA-1000", "AA-2000"]);
     const first = p.terms[0]!;
     expect(first.courses[0]!.code).toBe("AA-2000");
-    expect(first.courses[0]!.conflict).toContain("AA-1000");
+    expect(first.courses[0]!.conflicts?.join()).toContain("AA-1000");
   });
 
   test("counts an overfull term rather than trimming it", () => {
@@ -499,7 +499,7 @@ describe("a term the student chose", () => {
       ]),
     });
     expect(p.terms[0]!.credits).toBe(6);
-    expect(p.terms[0]!.courses[1]!.conflict).toContain("over its cap");
+    expect(p.terms[0]!.courses[1]!.conflicts?.join()).toContain("over its cap");
   });
 
   test("reports a term the plan no longer reaches", () => {

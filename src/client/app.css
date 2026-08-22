@@ -682,12 +682,33 @@ label.section.clashes:not(:has(input:checked)) .when {
 }
 
 .plan-course:hover .release,
-.plan-course .release:focus-visible {
+.plan-course .release:focus-visible,
+/* A pin is state, not chrome: the way out of it stays on screen. */
+.plan-course.moved .release {
   opacity: 1;
 }
 
 .plan-course .release:hover {
   color: var(--red);
+}
+
+/* What the term would become, said while the course is still in the air:
+ * a native tooltip never appears during a drag. */
+.term h3 .note {
+  color: var(--lavender);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.term.drop-bad h3 .note {
+  color: var(--red);
+}
+
+.plan-course.why {
+  padding: 0 0 3px 12px;
+  color: var(--red);
+  font-size: 11px;
+  cursor: default;
 }
 
 .term h3 .add {
@@ -1071,4 +1092,28 @@ label.section.clashes:not(:has(input:checked)) .when {
 /* A light term is a thing to fix with one more course, not a thing to hide. */
 .graph .term-label.short {
   fill: var(--yellow);
+}
+
+/* A course being carried to another term, and the term it would land in. */
+
+.graph .node.moved rect {
+  stroke: var(--lavender);
+}
+
+.graph .node.clashes rect {
+  stroke: var(--red);
+}
+
+.graph .node.dragging {
+  cursor: grabbing;
+}
+
+.graph .node.dragging rect {
+  filter: drop-shadow(0 3px 6px rgb(0 0 0 / 45%));
+}
+
+.graph .band {
+  fill: var(--surface);
+  opacity: 0.35;
+  pointer-events: none;
 }

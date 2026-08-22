@@ -98,8 +98,13 @@ export interface PlannedCourse {
   caution?: string;
   /** Put here by the student rather than by the pass. */
   moved?: boolean;
-  /** What that placement breaks, if anything. Stated, never enforced. */
-  conflict?: string;
+  /**
+   * What that placement breaks, if anything, one clause each: "is not taught
+   * in FA27", "still needs CS-1210". Phrases rather than a sentence, because
+   * the interface says this twice — once in full when the move is made, and
+   * once in three words while the course is still in the air.
+   */
+  conflicts?: string[];
 }
 
 export interface PlannedTerm {
@@ -190,7 +195,7 @@ export function projectPlan(request: PlanRequest): Plan {
         credits: price,
         moved: true,
         ...(verdict.state === "unknown" ? { caution: verdict.why.join(" ") } : {}),
-        ...(broken.length ? { conflict: `Moved here, but it ${broken.join(", and ")}.` } : {}),
+        ...(broken.length ? { conflicts: broken } : {}),
       });
       used += price;
     }

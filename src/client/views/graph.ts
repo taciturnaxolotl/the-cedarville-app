@@ -36,11 +36,46 @@ const svg = <K extends keyof SVGElementTagNameMap>(
   return node;
 };
 
+/**
+ * The term under a point on the picture.
+ *
+ * A term's heading is anchored at the start of its band and the bands are laid
+ * out in order along one axis, so the band a point falls in is the last
+ * heading before it. Which means the picture needs no hit-boxes: the layout it
+ * already published is enough to say where a course was dropped.
+ */
+export function termAt(map: CourseMap, point: { x: number; y: number }) {
+  const axis = map.flow === "down" ? "y" : "x";
+  const value = point[axis];
+  let found: CourseMap["terms"][number] | null = null;
+  for (const term of map.terms) {
+    if (term[axis] <= value) found = term;
+  }
+  return found;
+}
+
 /** SVG has no ellipsis, and a course name is longer than any box. */
 const fit = (text: string, chars: number) =>
   text.length <= chars ? text : `${text.slice(0, Math.max(0, chars - 1)).trimEnd()}…`;
 
-export function mountGraph(root: HTMLElement, plan: Plan, planning: Planning) {
+export function mountGraph(
+  root: HTMLElement,
+  plan: Plan,
+  planning: Planning,
+  options: {
+    /**
+     * Called when a course is dragged into another term. Absent, the picture
+     * is read-only — which is what every other caller of this file wants.
+     */
+    onMove?: (code: string, term: string) => void;
+    /**
+     * Called to unpin a course, handing it back to the projection. A box two
+     * lines tall has no room for a button, so it is a double click on the
+     * pinned course, and the course says as much on hover.
+     */
+    onRelease?: (code: string) => void;
+  } = {},
+) {
   const subs = new Subscriptions();
   const { graph, have, title, trees } = planning;
   const store = createStore<State>({
@@ -96,6 +131,91 @@ export function mountGraph(root: HTMLElement, plan: Plan, planning: Planning) {
     edges: { from: string; to: string; el: SVGPathElement }[];
   } | null = null;
 
+  /*
+   * Dragging a course into another term.
+   *
+   * The list rendering gets this for free from HTML drag and drop, which SVG
+   * does not join in with. So the picture does it by hand: press, move, and
+   * the band under the pointer lights up as the term the course would land
+   * in. The geometry is the layout's own, so nothing here has to agree with
+   * `buildMap` about where anything is.
+   */
+  let held: {
+    code: string;
+    term: string;
+    box: SVGGElement;
+    home: { x: number; y: number };
+    at: { x: number; y: number };
+    moved: boolean;
+  } | null = null;
+  let canvas: SVGSVGElement | null = null;
+  let band: SVGRectElement | null = null;
+
+  /** Page coordinates in the picture's own units. */
+  const local = (event: MouseEvent) => {
+    const box = canvas?.getBoundingClientRect();
+    // A picture the browser has scaled still reports its own width, so the
+    // ratio is the only honest way from a click to a coordinate.
+    const scale = box?.width ? (drawn?.map.width ?? box.width) / box.width : 1;
+    return {
+      x: (event.clientX - (box?.left ?? 0)) * scale,
+      y: (event.clientY - (box?.top ?? 0)) * scale,
+    };
+  };
+
+  /** The band a term occupies, from its heading to the next one's. */
+  function lightBand(term: CourseMap["terms"][number] | null) {
+    if (!band || !drawn) return;
+    if (!term || term.past) {
+      band.style.display = "none";
+      return;
+    }
+    const { map } = drawn;
+    const down = map.flow === "down";
+    const at = map.terms.indexOf(term);
+    const next = map.terms[at + 1];
+    const start = down ? term.y : term.x;
+    const end = (down ? next?.y : next?.x) ?? (down ? map.height : map.width);
+    band.style.display = "";
+    band.setAttribute("x", String(down ? 0 : start - 6));
+    band.setAttribute("y", String(down ? start - 6 : 0));
+    band.setAttribute("width", String(down ? map.width : end - start));
+    band.setAttribute("height", String(down ? end - start : map.height));
+  }
+
+  const letGo = () => {
+    if (held) {
+      held.box.classList.remove("dragging");
+      held.box.setAttribute("transform", `translate(${held.home.x}, ${held.home.y})`);
+    }
+    held = null;
+    lightBand(null);
+  };
+
+  const onPointerMove = (event: Event) => {
+    if (!held) return;
+    const at = local(event as MouseEvent);
+    const dx = at.x - held.at.x;
+    const dy = at.y - held.at.y;
+    // A click is a press that went nowhere, and it should stay a click.
+    if (!held.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+    held.moved = true;
+    held.box.classList.add("dragging");
+    held.box.setAttribute("transform", `translate(${held.home.x + dx}, ${held.home.y + dy})`);
+    if (drawn) lightBand(termAt(drawn.map, at));
+  };
+
+  const onPointerUp = (event: Event) => {
+    if (!held) return;
+    const { code, moved } = held;
+    const target = drawn ? termAt(drawn.map, local(event as MouseEvent)) : null;
+    letGo();
+    if (moved && target && !target.past) options.onMove?.(code, target.name);
+  };
+
+  document.addEventListener("mousemove", onPointerMove);
+  document.addEventListener("mouseup", onPointerUp);
+
   function highlight() {
     if (!drawn) return;
     const { focus } = store.get();
@@ -131,7 +251,13 @@ export function mountGraph(root: HTMLElement, plan: Plan, planning: Planning) {
     turn.textContent = store.get().flow === "down" ? "lay it across" : "lay it down";
 
     board.replaceChildren();
-    const canvas = svg("svg", { width: map.width, height: map.height, class: "graph" });
+    letGo();
+    canvas = svg("svg", { width: map.width, height: map.height, class: "graph" });
+    // Behind everything, so the term a course is headed for reads as ground
+    // rather than as another box.
+    band = svg("rect", { class: "band", x: 0, y: 0, width: 0, height: 0, rx: 4 });
+    band.style.display = "none";
+    canvas.append(band);
 
     const shortTerms = new Set(plan.terms.filter((t) => t.short).map((t) => t.slot.name));
     for (const term of map.terms) {
@@ -164,7 +290,7 @@ export function mountGraph(root: HTMLElement, plan: Plan, planning: Planning) {
     const boxes = new Map<string, SVGGElement>();
     for (const node of map.nodes) {
       const g = svg("g", {
-        class: `node${node.past ? ` ${node.past}` : ""}`,
+        class: `node${node.past ? ` ${node.past}` : ""}${node.moved ? " moved" : ""}${node.conflicts ? " clashes" : ""}`,
         transform: `translate(${node.x}, ${node.y})`,
       });
       boxes.set(node.code, g);
@@ -208,13 +334,33 @@ export function mountGraph(root: HTMLElement, plan: Plan, planning: Planning) {
       }
       const hint = [
         node.title,
+        node.moved ? `pinned to ${node.termName} — double click to unpin` : "",
         node.unlocks ? `${node.unlocks} later courses wait on this` : "",
         node.caution ?? "",
+        node.conflicts ? `moved here, but it ${node.conflicts.join(", and ")}` : "",
       ]
         .filter(Boolean)
         .join(" — ");
       if (hint) {
         g.append(Object.assign(svg("title", {}), { textContent: hint }));
+      }
+      if (options.onRelease && node.moved) {
+        g.addEventListener("dblclick", () => options.onRelease?.(node.code));
+      }
+      if (options.onMove && !node.past) {
+        g.addEventListener("mousedown", (event) => {
+          held = {
+            code: node.code,
+            term: node.termName,
+            box: g,
+            home: { x: node.x, y: node.y },
+            at: local(event as MouseEvent),
+            moved: false,
+          };
+          // Otherwise the browser starts its own text selection and the
+          // picture smears blue behind the course being moved.
+          event.preventDefault();
+        });
       }
       g.addEventListener("mouseenter", () => store.set({ focus: node.code }));
       g.addEventListener("mouseleave", () => store.set({ focus: null }));
@@ -252,6 +398,8 @@ export function mountGraph(root: HTMLElement, plan: Plan, planning: Planning) {
 
   return {
     destroy() {
+      document.removeEventListener("mousemove", onPointerMove);
+      document.removeEventListener("mouseup", onPointerUp);
       subs.clear();
       root.replaceChildren();
     },

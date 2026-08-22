@@ -31,6 +31,10 @@ export interface MapNode {
   unlocks: number;
   /** A prerequisite we could not fully parse, carried through from the plan. */
   caution?: string;
+  /** Put in this term by the student rather than by the projection. */
+  moved?: boolean;
+  /** What that placement breaks, if anything, one clause each. */
+  conflicts?: string[];
   /** On the transcript rather than ahead, and how it got there. */
   past?: "done" | "running" | "transfer";
 }
@@ -241,6 +245,8 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
         critical: false,
         unlocks: 0,
         ...(course.caution ? { caution: course.caution } : {}),
+        ...(course.moved ? { moved: true } : {}),
+        ...(course.conflicts ? { conflicts: course.conflicts } : {}),
       });
     });
   });

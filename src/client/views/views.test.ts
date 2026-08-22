@@ -535,7 +535,20 @@ describe("plan view — arguing with the plan", () => {
 
   const COURSES = [
     { Id: "1", SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
-    { Id: "2", SubjectCode: "CS", Number: "2210", Title: "Data Structures", MinimumCredits: 3 },
+    {
+      Id: "2",
+      SubjectCode: "CS",
+      Number: "2210",
+      Title: "Data Structures",
+      MinimumCredits: 3,
+      CourseRequisites: [
+        {
+          DisplayText: "Take CS-1210",
+          DisplayTextExtension: "- Must be completed prior to taking this course.",
+          IsRequired: true,
+        },
+      ],
+    },
     { Id: "3", SubjectCode: "CS", Number: "3310", Title: "Algorithms", MinimumCredits: 3 },
   ];
 
@@ -576,6 +589,40 @@ describe("plan view — arguing with the plan", () => {
     expect(codesIn(moved)).toContain(code);
     expect(moved.querySelector(".plan-course.moved")).toBeTruthy();
     expect(JSON.parse(localStorage.getItem("cedarville:moves")!)[code]).toBe(slot);
+  });
+
+  test("a term reads as credits against its cap", () => {
+    plan.mount(root, ctx());
+    expect(terms()[0]!.querySelector("h3 .cr")?.textContent).toMatch(/^\d+(\.\d+)? \/ \d+/);
+  });
+
+  // A native tooltip never shows during a drag, so the term has to say it.
+  test("each term says what taking the course would do to it", () => {
+    plan.mount(root, ctx());
+    const row = root.querySelector(".plan-course") as HTMLElement;
+    fire(row, "dragstart");
+
+    const notes = Array.from(root.querySelectorAll(".term h3 .note")).map((n) => n.textContent);
+    expect(notes.filter(Boolean).length).toBe(terms().length);
+    expect(notes.join(" ")).toMatch(/cr|finish|taught|needs/);
+
+    fire(row, "dragend");
+    expect(Array.from(root.querySelectorAll(".term h3 .note")).map((n) => n.textContent)).toEqual(
+      notes.map(() => ""),
+    );
+  });
+
+  test("a move that breaks something says so under the course", () => {
+    // CS-2210 sits behind CS-1210, so pulling it into the opening term is a
+    // real clash. The plan makes the move anyway, and then explains itself.
+    plan.mount(root, ctx());
+    const opening = (terms()[0] as HTMLElement).dataset.slot!;
+    root.replaceChildren();
+    localStorage.setItem("cedarville:moves", JSON.stringify({ "CS-2210": opening }));
+    plan.mount(root, ctx());
+
+    expect(root.querySelector(".plan-course.why")?.textContent).toContain("CS-1210");
+    expect(root.querySelector(".tag.bad")?.textContent).toBe("clashes");
   });
 
   test("a move survives a remount, because a plan is not a session", () => {
@@ -1648,6 +1695,84 @@ describe("plan view — drawn as a graph", () => {
     const view = plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     view.destroy();
     expect(root.children).toHaveLength(0);
+  });
+
+  /*
+   * SVG does not join in with HTML drag and drop, and the picture is the tab's
+   * default rendering — so the moves are wired by hand here, and a feature
+   * that only works in the other rendering is one most people never find.
+   */
+  describe("moving a course by hand", () => {
+    /** happy-dom's events and the DOM's are structurally different, and both
+     * ends of a dispatch have to agree; loosening the node is the honest way
+     * through, and it keeps the coordinates readable. */
+    const send = (node: unknown, type: string, at: { x: number; y: number }) =>
+      (node as { dispatchEvent(event: unknown): boolean }).dispatchEvent(
+        new window.MouseEvent(type, { bubbles: true, clientX: at.x, clientY: at.y }),
+      );
+
+    /** Where each term's heading hangs, which is where its band begins. */
+    const bands = () =>
+      Array.from(root.querySelectorAll(".graph .term-label")).map((label) => ({
+        name: (label.textContent ?? "").split(" ")[0]!,
+        y: Number(label.getAttribute("y")),
+      }));
+
+    beforeEach(() => {
+      localStorage.removeItem("cedarville:moves");
+      asGraph();
+    });
+
+    test("drags a course down into a later term", () => {
+      plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+      const box = root.querySelector(".graph .node") as unknown as HTMLElement;
+      const code = (box.querySelector(".code")?.textContent ?? "").trim();
+      const target = bands().at(-1)!;
+
+      send(box, "mousedown", { x: 20, y: 40 });
+      send(window.document, "mousemove", { x: 20, y: target.y + 20 });
+      send(window.document, "mouseup", { x: 20, y: target.y + 20 });
+
+      expect(JSON.parse(localStorage.getItem("cedarville:moves")!)[code]).toBe(target.name);
+      expect(root.querySelector(".graph .node.moved")).toBeTruthy();
+    });
+
+    test("a press that goes nowhere is still a click", () => {
+      plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+      const box = root.querySelector(".graph .node") as unknown as HTMLElement;
+      send(box, "mousedown", { x: 20, y: 40 });
+      send(window.document, "mousemove", { x: 21, y: 41 });
+      send(window.document, "mouseup", { x: 21, y: 41 });
+      expect(localStorage.getItem("cedarville:moves")).toBeNull();
+    });
+
+    test("double clicking a pinned course hands it back to the projection", () => {
+      plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+      const box = root.querySelector(".graph .node") as unknown as HTMLElement;
+      const target = bands().at(-1)!;
+      send(box, "mousedown", { x: 20, y: 40 });
+      send(window.document, "mousemove", { x: 20, y: target.y + 20 });
+      send(window.document, "mouseup", { x: 20, y: target.y + 20 });
+
+      const pinned = root.querySelector(".graph .node.moved") as unknown as HTMLElement;
+      expect(pinned.querySelector("title")?.textContent).toContain("double click to unpin");
+      pinned.dispatchEvent(new window.Event("dblclick", { bubbles: true }) as unknown as Event);
+
+      expect(localStorage.getItem("cedarville:moves")).toBe("{}");
+      expect(root.querySelector(".graph .node.moved")).toBeNull();
+    });
+
+    test("lets go of the course when the view does", () => {
+      const view = plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+      const box = root.querySelector(".graph .node") as unknown as HTMLElement;
+      send(box, "mousedown", { x: 20, y: 40 });
+      view.destroy();
+      // The listeners live on the document, so a torn-down view that kept
+      // them would answer a pointer with a picture that is no longer there.
+      send(window.document, "mousemove", { x: 20, y: 400 });
+      send(window.document, "mouseup", { x: 20, y: 400 });
+      expect(localStorage.getItem("cedarville:moves")).toBeNull();
+    });
   });
 });
 

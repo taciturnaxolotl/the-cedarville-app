@@ -217,6 +217,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
    * last render left behind, and wiped when the drag ends.
    */
   const boxes = new Map<string, HTMLElement>();
+  /** Where each term says what taking this course would do to it. */
+  const notes = new Map<string, HTMLElement>();
   let dragging: string | null = null;
 
   /**
@@ -227,19 +229,28 @@ export function mount(root: HTMLElement, ctx: Ctx) {
    */
   function hint(code: string) {
     const { moves, load } = store.get();
-    const finishes = projectWith(moves, load).finishes;
+    const now = projectWith(moves, load);
     for (const [name, box] of boxes) {
       const trial = projectWith({ ...moves, [code]: name }, load);
-      const landed = trial.terms
-        .find((t) => t.slot.name === name)
-        ?.courses.find((c) => c.code === code);
+      const term = trial.terms.find((t) => t.slot.name === name);
+      const landed = term?.courses.find((c) => c.code === code);
       const missed = trial.unscheduled.find((u) => u.code === code);
-      const cost =
-        trial.finishes === finishes
-          ? "finishes the same term"
-          : `finishes ${trial.finishes ?? "beyond the horizon"}`;
-      box.classList.add(landed?.conflict || missed ? "drop-bad" : "drop-ok");
-      box.title = landed?.conflict ?? missed?.why ?? `${code} here, and the plan ${cost}.`;
+
+      // Three things the student is weighing, in the order they matter: does
+      // it work, what does the term become, and what does the degree become.
+      // A native tooltip would say it better and never appears during a drag,
+      // so it is written into the term itself.
+      const wrong = landed?.conflicts ?? (missed ? [missed.why] : []);
+      const later =
+        trial.finishes === now.finishes
+          ? "same finish"
+          : `finishes ${trial.finishes ?? "past the horizon"}`;
+      const said = wrong.length ? wrong.join(", and ") : `${term?.credits ?? 0} cr · ${later}`;
+
+      box.classList.add(wrong.length ? "drop-bad" : "drop-ok");
+      box.title = wrong.length ? `${code} ${said}.` : `${code} here: ${said}.`;
+      const note = notes.get(name);
+      if (note) note.textContent = said;
     }
   }
 
@@ -249,6 +260,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       box.classList.remove("drop-ok", "drop-bad", "over");
       box.removeAttribute("title");
     }
+    for (const note of notes.values()) note.textContent = "";
   };
 
   /** Every course code the catalog knows, offered to the term that asks. */
@@ -301,7 +313,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   }
 
   /** A course as it sits in a term, with the two ways to change its mind. */
-  function row(code: string, extras: { moved?: boolean; caution?: string; conflict?: string }) {
+  function row(code: string, extras: { moved?: boolean; caution?: string; conflicts?: string[] }) {
     const line = el("div", `plan-course${extras.moved ? " moved" : ""}`);
     line.draggable = true;
     line.dataset.code = code;
@@ -315,9 +327,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     line.append(el("b", undefined, code));
     line.append(el("span", undefined, title(code)));
 
-    if (extras.conflict) {
-      const flag = tag("conflict", "bad");
-      flag.title = extras.conflict;
+    if (extras.conflicts) {
+      const flag = tag("clashes", "bad");
+      flag.title = `Moved here, but it ${extras.conflicts.join(", and ")}.`;
       line.append(flag);
     }
     if (extras.caution) {
@@ -378,11 +390,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         picture?.destroy();
         picture = null;
         boxes.clear();
+        notes.clear();
         dragging = null;
         body.replaceChildren();
 
         if (drawn === "graph") {
-          picture = mountGraph(body, plan, planning);
+          // The picture is the tab's own default, so the moves have to work
+          // there too: a feature that only exists after you find a button is
+          // a feature most people never find.
+          picture = mountGraph(body, plan, planning, { onMove: place, onRelease: release });
           return;
         }
 
@@ -416,7 +432,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
           const head = el("h3");
           head.append(document.createTextNode(slot.name));
-          head.append(el("span", "cr", `${credits} cr`));
+          // Against the cap rather than alone: a term is read by how much
+          // room is left in it, and that is the number a drag is deciding.
+          const meter = el("span", "cr", `${credits} / ${slot.capacity} cr`);
+          meter.title = `${credits} credits scheduled of the ${slot.capacity} this term allows${
+            slot.minimum ? `, and ${slot.minimum} is full time` : ""
+          }.`;
+          head.append(meter);
+          const note = el("span", "note");
+          notes.set(slot.name, note);
+          head.append(note);
           if (credits > slot.capacity) {
             const over = tag("over cap", "bad");
             over.title = `${credits} credits against a ${slot.capacity}-credit cap.`;
@@ -434,9 +459,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
               row(c.code, {
                 ...(c.moved ? { moved: true } : {}),
                 ...(c.caution ? { caution: c.caution } : {}),
-                ...(c.conflict ? { conflict: c.conflict } : {}),
+                ...(c.conflicts ? { conflicts: c.conflicts } : {}),
               }),
             );
+            // A move that breaks something says so where it broke it. This is
+            // the one thing on the plan the student has to act on, and a
+            // hover tooltip is no place to keep it.
+            if (c.conflicts) {
+              box.append(el("div", "plan-course why", `↳ ${c.conflicts.join(", and ")}`));
+            }
           }
 
           box.addEventListener("dragover", (event) => {

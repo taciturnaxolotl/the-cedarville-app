@@ -1307,7 +1307,7 @@ function walkProgram(
  * Program-agnostic on purpose: it reads the counts Colleague publishes rather
  * than knowing anything about a particular major's tracks.
  */
-export function coursesNeeded(tree: ProgramTree, options: NeedOptions): Needed {
+export function coursesNeeded(tree: ProgramTree, options: NeedOptions) {
   return coursesNeededAcross([tree], options);
 }
 

@@ -162,7 +162,11 @@ for (const tree of trees) {
 
   // Second pass: with the rules expanded, every requirement enters the same
   // cover, so a course bought for one can pay for a rule-based one too.
-  const { courses: need, unenumerable } = coursesNeeded(tree, {
+  const {
+    courses: need,
+    unenumerable,
+    shortfalls,
+  } = coursesNeeded(tree, {
     credits: price,
     have,
     resolved,
@@ -306,6 +310,21 @@ for (const tree of trees) {
       w(`- ${u.credits ? `**${u.credits}cr** ` : ""}${u.text}`);
       w(
         `  <br>_${u.resolved!.length} options: ${u.resolved!.slice(0, 12).join(", ")}${u.resolved!.length > 12 ? " …" : ""}_`,
+      );
+    }
+    w();
+  }
+  // A pool that cannot close its own requirement is a hole in the date above:
+  // "Honors Integrative Seminars (4 credit hours)" draws on a pool whose
+  // seminar is worth two, so it means that seminar twice, and a set of course
+  // codes has no way to say so.
+  if (shortfalls.length) {
+    w("Requirements their own pool cannot close — nearly always a course taken twice:");
+    w();
+    for (const s of shortfalls) {
+      w(
+        `- ${s.text}\n  <br>_${s.pool.join(", ")} add up to ${s.wanted - s.short} of the ${s.wanted} ` +
+          "credits asked for; the rest is the same course again — check with your advisor_",
       );
     }
     w();

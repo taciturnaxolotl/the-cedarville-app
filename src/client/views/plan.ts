@@ -21,7 +21,7 @@ import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
 import { type Edits, editsOf, type Moves, OUT, readMoves, writeMoves } from "../moves";
-import { planningFrom, read } from "../planning";
+import { baseCode, planningFrom, read } from "../planning";
 import { createStore, Subscriptions } from "../store";
 import { mountGraph } from "./graph";
 
@@ -75,6 +75,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   const first = planning.solve();
   let need = closed(first.courses);
   let unenumerable = first.unenumerable;
+  /**
+   * Requirements their own pool cannot close, which is nearly always a course
+   * meant to be taken twice: "Honors Integrative Seminars (4 credit hours)"
+   * draws on a pool whose seminar is worth two. Colleague can say that; a set
+   * of course codes cannot, so the plan says it in words and offers the
+   * second sitting as something to add.
+   */
+  let shortfalls = first.shortfalls;
 
   void planning.expandRules(first.unenumerable).then((resolved) => {
     if (resolved.size === 0) return;
@@ -85,6 +93,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     const second = planning.solve({ resolved });
     need = closed(second.courses);
     unenumerable = second.unenumerable;
+    shortfalls = second.shortfalls;
     store.set({ resolvedAt: Date.now() });
   });
 
@@ -104,6 +113,11 @@ export function mount(root: HTMLElement, ctx: Ctx) {
    * a drop is a decision and the closure is only an inference.
    */
   const scheduled = ({ placements, dropped }: Edits) => {
+    // A sitting the student added is only plannable once the graph can answer
+    // for it, and the moves outlive the session that made them.
+    for (const code of placements.keys()) {
+      if (code.includes("#")) planning.sitting(code, Number(code.split("#")[1]));
+    }
     const set = closed(new Set([...need, ...placements.keys()]));
     for (const code of dropped) set.delete(code);
     return set;
@@ -294,10 +308,20 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     input.setAttribute("list", options().id);
 
     const take = () => {
-      const code = input.value.trim().toUpperCase();
+      const asked = baseCode(input.value.trim().toUpperCase());
       // Adding a course nothing in the catalog lists would plan a ghost.
-      if (graph.courses.has(code)) place(code, name);
-      else input.hidden = true;
+      if (!graph.courses.has(asked)) {
+        input.hidden = true;
+        return;
+      }
+      // Asking for a course the plan already holds means another sitting of
+      // it, which is the only way to say "two Honors Seminars" in a language
+      // whose nouns are course codes.
+      const { moves } = store.get();
+      const held = scheduled(editsOf(moves));
+      let nth = 1;
+      while (held.has(planning.sitting(asked, nth))) nth++;
+      place(planning.sitting(asked, nth), name);
     };
 
     add.addEventListener("click", () => {
@@ -324,8 +348,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     });
     line.addEventListener("dragend", unhint);
 
-    line.append(el("b", undefined, code));
+    line.append(el("b", undefined, baseCode(code)));
     line.append(el("span", undefined, title(code)));
+    const nth = Number(code.split("#")[1] ?? 1);
+    if (nth > 1) {
+      const again = tag(`sitting ${nth}`, "rule");
+      again.title =
+        "A second time through the same course. Some requirements can only be met that way; " +
+        "check with your advisor that this one is meant to be.";
+      line.append(again);
+    }
 
     if (extras.conflicts) {
       const flag = tag("clashes", "bad");
@@ -483,6 +515,30 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             if (code) place(code, slot.name);
           });
 
+          body.append(box);
+        }
+
+        // A pool that cannot close its own requirement is a hole in the date
+        // above, so the plan owns up to it here rather than only in the build
+        // tab — and says what to do about it, since the student can now do it.
+        if (shortfalls.length) {
+          const box = el("div", "term unenumerable");
+          box.append(el("h3", undefined, "needs a course taken twice"));
+          for (const short of shortfalls) {
+            const held = short.pool.filter((c) =>
+              plan.terms.some((t) => t.courses.some((c2) => baseCode(c2.code) === c)),
+            );
+            box.append(
+              el(
+                "p",
+                "muted",
+                `${short.text}: ${short.pool.join(", ")} add up to ${short.wanted - short.short} ` +
+                  `of the ${short.wanted} credits it asks for. The rest is the same course again — ` +
+                  `add ${held[0] ?? short.pool[0]} to a term with + to plan a second sitting, and ` +
+                  "check with your advisor that it is meant that way.",
+              ),
+            );
+          }
           body.append(box);
         }
 

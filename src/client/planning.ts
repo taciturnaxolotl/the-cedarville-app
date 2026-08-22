@@ -46,6 +46,19 @@ import { FULL_TIME, type Load } from "./load";
 export const PINS = "cedarville:pins";
 export const TRACKS = "cedarville:tracks";
 
+/**
+ * Another sitting of the same course, told apart by a suffix.
+ *
+ * Some requirements can only be met by taking a course twice: "Honors
+ * Integrative Seminars (4 credit hours)" draws on a pool whose seminar is
+ * worth two, and a registrar can say that where a set of course codes cannot.
+ * So a second sitting gets its own code — `HON-3020#2` — and everything that
+ * prices, names or dates a course looks past the suffix. The graph gets a
+ * clone of the node, so the second sitting waits on the same prerequisites the
+ * first one did.
+ */
+export const baseCode = (code: string) => code.split("#")[0] ?? code;
+
 /** The first term a plan may use. Everything before it is history or now. */
 const START = nextPlannableTerm(new Date());
 /** Terms to project. Twelve is six years without summers, and four with. */
@@ -82,6 +95,12 @@ export interface Planning {
   title(code: string): string;
   /** Its price, stretched to what the requirement asking for it wants. */
   price(code: string): number;
+  /**
+   * Makes a second (or third) sitting of a course plannable, and hands back
+   * the code that names it. Idempotent: asking twice for the same sitting
+   * registers it once.
+   */
+  sitting(code: string, nth: number): string;
   /** Seasons the registrar states. Empty means it states none, not never. */
   seasonsOf(code: string): Season[];
   offeredIn: PlanRequest["offeredIn"];
@@ -131,7 +150,10 @@ export function planningFrom(ctx: Ctx): Planning {
   const passed = completedCourses(trees);
   const running = inProgressCourses(trees);
 
-  const price = (code: string) => stretched.get(code) ?? credits.get(code) ?? 3;
+  const price = (code: string) => {
+    const base = baseCode(code);
+    return stretched.get(base) ?? credits.get(base) ?? 3;
+  };
   const have = new Set([...passed, ...running]);
   const pursuing = new Set(trees.flatMap((t) => [...t.majors, ...t.minors]));
   const earned = trees.length
@@ -139,11 +161,24 @@ export function planningFrom(ctx: Ctx): Planning {
     : 0;
 
   const offeredIn: PlanRequest["offeredIn"] = (code, slot) => {
-    const stated = seasons.get(code);
+    const base = baseCode(code);
+    const stated = seasons.get(base);
     if (stated?.length && !stated.includes(slot.season)) return false;
     // 268 courses run in alternate academic years, and a plan that ignores
     // that puts a student in a classroom that is not running.
-    return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
+    return runsIn(cycles.get(base) ?? "all", slot.year, slot.season);
+  };
+
+  /** A sitting the graph can answer for: same requisites, its own code. */
+  const sitting = (code: string, nth: number) => {
+    const base = baseCode(code);
+    if (nth <= 1) return base;
+    const instance = `${base}#${nth}`;
+    const node = graph.courses.get(base);
+    if (node && !graph.courses.has(instance)) {
+      graph.courses.set(instance, { ...node, code: instance });
+    }
+    return instance;
   };
 
   const slots = (load: Load) =>
@@ -158,9 +193,10 @@ export function planningFrom(ctx: Ctx): Planning {
     trees,
     records,
     graph,
-    title: (code) => titles.get(code) ?? "",
+    title: (code) => titles.get(baseCode(code)) ?? "",
     price,
-    seasonsOf: (code) => seasons.get(code) ?? [],
+    sitting,
+    seasonsOf: (code) => seasons.get(baseCode(code)) ?? [],
     offeredIn,
     passed,
     running,

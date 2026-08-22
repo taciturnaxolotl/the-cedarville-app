@@ -663,6 +663,39 @@ describe("plan view — arguing with the plan", () => {
     expect(terms().flatMap(codesIn)).toContain("CS-3310");
   });
 
+  /*
+   * "Honors Integrative Seminars (4 credit hours)" draws on a pool whose
+   * seminar is worth two, so the only way to meet it is to sit the same course
+   * twice. A set of course codes cannot say that; a sitting suffix can.
+   */
+  test("adding a course already on the plan makes it a second sitting", () => {
+    plan.mount(root, ctx());
+    const first = terms()[0]!;
+    (first.querySelector("button.add") as HTMLElement).click();
+    const input = first.querySelector("input.add-course") as HTMLInputElement;
+    input.value = "CS-1210";
+    fire(input, "change");
+
+    expect(JSON.parse(localStorage.getItem("cedarville:moves")!)["CS-1210#2"]).toBeTruthy();
+    // Two of them on the plan, and the suffix is bookkeeping rather than a
+    // course code the registrar would recognise.
+    const codes = terms().flatMap(codesIn);
+    expect(codes.filter((c) => c === "CS-1210")).toHaveLength(2);
+    expect(root.textContent).toContain("sitting 2");
+    expect(root.textContent).not.toContain("#2");
+  });
+
+  test("a second sitting waits on the same prerequisites the first did", () => {
+    // CS-2210 sits behind CS-1210, so a second CS-2210 cannot land in the
+    // opening term either.
+    plan.mount(root, ctx());
+    const opening = (terms()[0] as HTMLElement).dataset.slot!;
+    root.replaceChildren();
+    localStorage.setItem("cedarville:moves", JSON.stringify({ "CS-2210#2": opening }));
+    plan.mount(root, ctx());
+    expect(root.querySelector(".plan-course.why")?.textContent).toContain("CS-1210");
+  });
+
   test("keeps a course nothing in the catalog lists out of the plan", () => {
     plan.mount(root, ctx());
     const first = terms()[0]!;

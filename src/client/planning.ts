@@ -95,7 +95,8 @@ export interface Planning {
   pursuing: Set<string>;
   solve(over?: Partial<NeedOptions>): Solved;
   slots(load: Load): TermSlot[];
-  project(need: Iterable<string>, load: Load): Plan;
+  /** Placements are the student's own; everything else arranges around them. */
+  project(need: Iterable<string>, load: Load, placements?: ReadonlyMap<string, string>): Plan;
   /**
    * Asks the server to expand the groups Colleague would not, then hands back
    * the pools it found. Silent on failure: a group listed as unresolved is a
@@ -172,7 +173,7 @@ export function planningFrom(ctx: Ctx): Planning {
 
     slots,
 
-    project: (need, load) =>
+    project: (need, load, placements) =>
       projectPlan({
         need,
         completed: have,
@@ -182,6 +183,7 @@ export function planningFrom(ctx: Ctx): Planning {
         earnedCredits: earned,
         keepSemestersFull: load.fullSemesters,
         slots: slots(load),
+        ...(placements?.size ? { placements } : {}),
       }),
 
     async expandRules(groups) {

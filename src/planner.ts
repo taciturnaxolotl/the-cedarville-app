@@ -76,6 +76,18 @@ export interface PlanRequest {
   earnedCredits?: number;
   /** Overrides the credits each standing takes. */
   standingCredits?: Record<Standing, number>;
+  /**
+   * Terms the student has put a course in themselves, by slot name.
+   *
+   * A projection is a proposal, and the student knows things it does not: an
+   * internship in the spring, a professor worth waiting for, a course they
+   * have already promised a friend they would take together. So a placement
+   * is honoured outright rather than checked and refused, and whatever it
+   * costs — an overfull term, a prerequisite still ahead of it — is reported
+   * on the course itself. Telling someone their own decision is impossible is
+   * not as useful as telling them what it will do.
+   */
+  placements?: ReadonlyMap<string, string>;
   slots: TermSlot[];
 }
 
@@ -84,6 +96,10 @@ export interface PlannedCourse {
   credits: number;
   /** Named prerequisites we could not verify; shown rather than assumed away. */
   caution?: string;
+  /** Put here by the student rather than by the pass. */
+  moved?: boolean;
+  /** What that placement breaks, if anything. Stated, never enforced. */
+  conflict?: string;
 }
 
 export interface PlannedTerm {
@@ -124,6 +140,7 @@ export function projectPlan(request: PlanRequest): Plan {
     aliases,
     keepSemestersFull = true,
     standingCredits = STANDING_CREDITS,
+    placements,
   } = request;
   const taken = new Set(request.completed);
   // Callers assemble `need` from requirement pools, which happily list work
@@ -146,6 +163,38 @@ export function projectPlan(request: PlanRequest): Plan {
     const courses: PlannedCourse[] = [];
     let used = 0;
 
+    // The student's own placements go down first and unconditionally: the rest
+    // of the term is arranged around them, which is the point of making one.
+    for (const code of placedOn(placements, remaining, slot.name, leverage)) {
+      const price = credits(code);
+      const node = graph.courses.get(code) ?? { code, title: "", requisites: [] };
+      const verdict = eligibility(node, taken, new Set(courses.map((c) => c.code)), {
+        exists: (c) => graph.courses.has(c),
+        ...(aliases ? { aliases } : {}),
+      });
+
+      const broken: string[] = [];
+      if (used + price > slot.capacity) {
+        broken.push(
+          `takes ${slot.name} to ${used + price} credits, over its cap of ${slot.capacity}`,
+        );
+      }
+      if (!offeredIn(code, slot)) broken.push(`is not taught in ${slot.name}`);
+      if (verdict.blockedBy.length) broken.push(`still needs ${verdict.blockedBy.join(", ")}`);
+      if (node.standing && earned < standingCredits[node.standing]) {
+        broken.push(`wants ${node.standing} standing, and you reach ${slot.name} with ${earned}`);
+      }
+
+      courses.push({
+        code,
+        credits: price,
+        moved: true,
+        ...(verdict.state === "unknown" ? { caution: verdict.why.join(" ") } : {}),
+        ...(broken.length ? { conflict: `Moved here, but it ${broken.join(", and ")}.` } : {}),
+      });
+      used += price;
+    }
+
     // What this summer may take out of the semester behind it, if anything.
     const ration =
       keepSemestersFull && slot.season === "summer"
@@ -160,7 +209,7 @@ export function projectPlan(request: PlanRequest): Plan {
     let rationed = 0;
 
     const candidates = [...remaining]
-      .filter((code) => offeredIn(code, slot))
+      .filter((code) => !placements?.has(code) && offeredIn(code, slot))
       .sort((a, b) => (leverage.get(b) ?? 0) - (leverage.get(a) ?? 0) || a.localeCompare(b));
 
     for (const code of candidates) {
@@ -222,6 +271,12 @@ export function projectPlan(request: PlanRequest): Plan {
   if (keepSemestersFull) redistribute(terms, graph, offeredIn);
 
   const unscheduled = [...remaining].map((code) => {
+    // A placement outlives the plan it was made in: shorten the horizon or
+    // close the summers and the term it named may be gone.
+    const at = placements?.get(code);
+    if (at && !slots.some((s) => s.name === at)) {
+      return { code, why: `moved to ${at}, which this plan no longer reaches` };
+    }
     // A course no slot would accept was never schedulable; one every slot
     // would accept simply never came up. And a standing the plan never
     // reaches is neither: it is a course waiting on credits nothing here
@@ -245,6 +300,19 @@ export function projectPlan(request: PlanRequest): Plan {
     totalCredits: terms.reduce((n, t) => n + t.credits, 0),
     unscheduled,
   };
+}
+
+/** The courses the student put in this term, gates first, as ever. */
+function placedOn(
+  placements: ReadonlyMap<string, string> | undefined,
+  remaining: ReadonlySet<string>,
+  name: string,
+  leverage: ReadonlyMap<string, number>,
+): string[] {
+  if (!placements) return [];
+  return [...remaining]
+    .filter((code) => placements.get(code) === name)
+    .sort((a, b) => (leverage.get(b) ?? 0) - (leverage.get(a) ?? 0) || a.localeCompare(b));
 }
 
 /**
@@ -321,6 +389,8 @@ function redistribute(
         const after = source.credits - (lent.get(from) ?? 0);
         for (const course of source.courses) {
           if (course.credits > room) continue;
+          // A term the student chose is not the planner's to reconsider.
+          if (course.moved) continue;
           if (moving.some((m) => m.course === course)) continue;
           // A term may empty entirely, but it may not go part time to spare
           // another one: that trades the problem rather than solving it.

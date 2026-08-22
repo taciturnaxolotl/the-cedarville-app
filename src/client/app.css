@@ -626,6 +626,99 @@ label.section.clashes:not(:has(input:checked)) .when {
   color: var(--subtext);
 }
 
+/* ---- editing the plan ----
+ *
+ * A plan you can argue with has to look like one: a row you can pick up, a
+ * term that says yes or no while you hold it, and a way out of every edit.
+ */
+
+.term.empty {
+  border-left-style: dashed;
+  opacity: 0.65;
+}
+
+.term.dropped {
+  border-left-color: var(--overlay);
+}
+
+.term.drop-ok {
+  border-left-color: var(--green);
+}
+
+.term.drop-bad {
+  border-left-color: var(--red);
+}
+
+.term.over {
+  background: var(--mantle);
+}
+
+.plan-course {
+  align-items: baseline;
+  border-radius: 3px;
+  cursor: grab;
+}
+
+.plan-course:hover {
+  background: var(--mantle);
+}
+
+.plan-course.moved b::before {
+  content: "\00b7 ";
+  color: var(--lavender);
+}
+
+/* Out of the way until the row is under the pointer, so a column of buttons
+ * never competes with the courses it belongs to. */
+.plan-course .release {
+  margin-left: auto;
+  padding: 0 5px;
+  border: none;
+  background: none;
+  color: var(--overlay);
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.plan-course:hover .release,
+.plan-course .release:focus-visible {
+  opacity: 1;
+}
+
+.plan-course .release:hover {
+  color: var(--red);
+}
+
+.term h3 .add {
+  margin-left: auto;
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--overlay);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.term h3 .add:hover {
+  color: var(--lavender);
+}
+
+.term h3 .add-course {
+  width: 12ch;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--mantle);
+  border: 1px solid var(--surface);
+  border-radius: 3px;
+}
+
+.plan-controls .regenerate[hidden] {
+  display: none;
+}
+
 /* ---- build ---- */
 
 .picker {

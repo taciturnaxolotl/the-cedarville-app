@@ -516,6 +516,134 @@ describe("plan view", () => {
   });
 });
 
+describe("plan view — arguing with the plan", () => {
+  /*
+   * The projection is a first draft, so these exercise the second: a course
+   * dragged into another term, one added that the degree never asked for, one
+   * dropped, and the button that throws the lot away.
+   */
+  const asList = () => localStorage.setItem("cedarville:plan-shape", JSON.stringify("list"));
+
+  const planTree = () => {
+    const raw = program("BS.CYOPR", [
+      group({ Courses: [course("1", "CS", "1210")] }),
+      group({ Courses: [course("2", "CS", "2210")] }),
+    ]);
+    raw.Program.Requirements[0]!.Subrequirements[0]!.MinGroups = null;
+    return normalize(raw);
+  };
+
+  const COURSES = [
+    { Id: "1", SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
+    { Id: "2", SubjectCode: "CS", Number: "2210", Title: "Data Structures", MinimumCredits: 3 },
+    { Id: "3", SubjectCode: "CS", Number: "3310", Title: "Algorithms", MinimumCredits: 3 },
+  ];
+
+  const ctx = () =>
+    ({
+      trees: [planTree()],
+      sections: { term: "2026FA", fetchedAt: "", sections: [], courses: COURSES },
+    }) as unknown as Ctx;
+
+  const fire = (node: Element, type: string) =>
+    node.dispatchEvent(new window.Event(type, { bubbles: true }) as unknown as Event);
+
+  const terms = () => Array.from(root.querySelectorAll(".term[data-slot]"));
+  const codesIn = (box: Element) =>
+    Array.from(box.querySelectorAll(".plan-course b")).map((b) => b.textContent);
+
+  beforeEach(() => {
+    localStorage.removeItem("cedarville:moves");
+    asList();
+  });
+
+  test("a course dragged into a later term stays there", () => {
+    plan.mount(root, ctx());
+    const first = terms()[0]!;
+    const row = first.querySelector(".plan-course") as HTMLElement;
+    const code = row.dataset.code!;
+
+    fire(row, "dragstart");
+    // Every term says whether it would take the course, which is the whole
+    // reason the drag is worth having over a dropdown.
+    expect(root.querySelectorAll(".term.drop-ok, .term.drop-bad").length).toBeGreaterThan(0);
+
+    const target = terms().at(-1)!;
+    const slot = (target as HTMLElement).dataset.slot!;
+    fire(target, "drop");
+
+    const moved = terms().find((t) => (t as HTMLElement).dataset.slot === slot)!;
+    expect(codesIn(moved)).toContain(code);
+    expect(moved.querySelector(".plan-course.moved")).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem("cedarville:moves")!)[code]).toBe(slot);
+  });
+
+  test("a move survives a remount, because a plan is not a session", () => {
+    plan.mount(root, ctx());
+    const row = root.querySelector(".plan-course") as HTMLElement;
+    const code = row.dataset.code!;
+    fire(row, "dragstart");
+    fire(terms().at(-1)!, "drop");
+
+    root.replaceChildren();
+    plan.mount(root, ctx());
+    expect(root.querySelector(`.plan-course.moved[data-code="${code}"]`)).toBeTruthy();
+  });
+
+  test("dropping a course takes it out of the plan and offers it back", () => {
+    plan.mount(root, ctx());
+    const row = root.querySelector(".plan-course") as HTMLElement;
+    const code = row.dataset.code!;
+    (row.querySelectorAll("button.release")[0] as HTMLElement).click();
+
+    const dropped = root.querySelector(".term.dropped")!;
+    expect(dropped.textContent).toContain(code);
+    expect(terms().flatMap(codesIn)).not.toContain(code);
+
+    (dropped.querySelector("button.release") as HTMLElement).click();
+    expect(root.querySelector(".term.dropped")).toBeNull();
+    expect(terms().flatMap(codesIn)).toContain(code);
+  });
+
+  test("adds a course the degree never asked for", () => {
+    plan.mount(root, ctx());
+    const first = terms()[0]!;
+    (first.querySelector("button.add") as HTMLElement).click();
+    const input = first.querySelector("input.add-course") as HTMLInputElement;
+    input.value = "cs-3310";
+    fire(input, "change");
+
+    expect(terms().flatMap(codesIn)).toContain("CS-3310");
+  });
+
+  test("keeps a course nothing in the catalog lists out of the plan", () => {
+    plan.mount(root, ctx());
+    const first = terms()[0]!;
+    (first.querySelector("button.add") as HTMLElement).click();
+    const input = first.querySelector("input.add-course") as HTMLInputElement;
+    input.value = "ZZ-9999";
+    fire(input, "change");
+
+    expect(root.textContent).not.toContain("ZZ-9999");
+  });
+
+  test("regenerate drops every move and hides itself", () => {
+    plan.mount(root, ctx());
+    const row = root.querySelector(".plan-course") as HTMLElement;
+    fire(row, "dragstart");
+    fire(terms().at(-1)!, "drop");
+
+    const button = root.querySelector("button.regenerate") as HTMLButtonElement;
+    expect(button.hidden).toBe(false);
+    expect(button.textContent).toContain("1 move");
+    button.click();
+
+    expect(root.querySelector(".plan-course.moved")).toBeNull();
+    expect(button.hidden).toBe(true);
+    expect(localStorage.getItem("cedarville:moves")).toBe("{}");
+  });
+});
+
 describe("build view", () => {
   // Each program carries one group, because the shared harness lets a
   // subrequirement pick only one of them.

@@ -7,9 +7,12 @@
  * controls, so both are on screen: credits per term, and whether summers
  * count. Changing either reprojects immediately.
  *
- * The critical path is shown above the plan rather than below it, because a
- * chain of prerequisites is the one constraint no amount of credit load will
- * shorten, and it is the first thing worth knowing.
+ * And the plan is a draft, not a verdict. A generated term-by-term is the
+ * start of the conversation a student has with their advisor, so this view
+ * lets them argue with it: drag a course into another term, add one the
+ * degree never asked for, drop one to see what it was costing. Every edit is
+ * a pin the next projection arranges itself around, which is what makes
+ * "regenerate" mean something — the moves stay, everything else reflows.
  */
 
 import { prerequisitesOf } from "../../prereqs";
@@ -17,6 +20,7 @@ import { groupKey, type ProgramTree } from "../../requirements";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
+import { type Edits, editsOf, type Moves, OUT, readMoves, writeMoves } from "../moves";
 import { planningFrom, read } from "../planning";
 import { createStore, Subscriptions } from "../store";
 import { mountGraph } from "./graph";
@@ -33,6 +37,8 @@ interface State {
    * holding up what, the list answers what you are taking in spring.
    */
   shape: Shape;
+  /** The student's own edits to the generated plan. */
+  moves: Moves;
 }
 
 const SHAPE = "cedarville:plan-shape";
@@ -52,7 +58,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   // One projection, assembled where every view can share it. This tab used to
   // build its own and quietly disagreed with the other two about the date.
   const planning = planningFrom(ctx);
-  const { graph, have, price, title } = planning;
+  const { graph, have, title } = planning;
 
   // First pass names the groups the evaluation will not enumerate; the server
   // asks Colleague what qualifies; the second pass runs one cover over
@@ -86,7 +92,27 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     load: readLoad(),
     resolvedAt: 0,
     shape: read<Shape>(SHAPE, "graph"),
+    moves: readMoves(),
   });
+
+  /**
+   * What the plan schedules once the student has had their say.
+   *
+   * An inserted course brings its prerequisites with it — asking for a
+   * capstone and being handed only the capstone would be a lie — and a
+   * dropped one leaves even if something else's chain wants it back, because
+   * a drop is a decision and the closure is only an inference.
+   */
+  const scheduled = ({ placements, dropped }: Edits) => {
+    const set = closed(new Set([...need, ...placements.keys()]));
+    for (const code of dropped) set.delete(code);
+    return set;
+  };
+
+  const projectWith = (moves: Moves, load: Load) => {
+    const edits = editsOf(moves);
+    return planning.project(scheduled(edits), load, edits.placements);
+  };
 
   // ---- chrome ----------------------------------------------------------
 
@@ -95,6 +121,19 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     writeLoad(load);
     store.set({ load });
   };
+
+  const edit = (change: (moves: Moves) => Moves) => {
+    const moves = change({ ...store.get().moves });
+    writeMoves(moves);
+    store.set({ moves });
+  };
+
+  const place = (code: string, at: string) => edit((m) => ({ ...m, [code]: at }));
+  const release = (code: string) =>
+    edit((m) => {
+      delete m[code];
+      return m;
+    });
 
   /** A slider that reports as it moves, and remembers where it was left. */
   function slider(
@@ -137,6 +176,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     store.set({ shape: next });
   });
 
+  const regenerate = el("button", "export regenerate");
+  regenerate.type = "button";
+  regenerate.title = "Throws away every move and takes the plan the projection would make.";
+  regenerate.addEventListener("click", () => {
+    writeMoves({});
+    store.set({ moves: {} });
+  });
+
   controls.append(
     ...slider(
       "credits per term",
@@ -151,6 +198,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     summersLabel,
     fullLabel,
     shape,
+    regenerate,
   );
 
   const verdict = el("p", "credits");
@@ -160,17 +208,159 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   /** The graph rendering, when it is the one on screen. */
   let picture: { destroy(): void } | null = null;
 
+  // ---- dragging --------------------------------------------------------
+
+  /*
+   * A drag is the one piece of state that must not go through the store:
+   * re-rendering mid-drag replaces the node being dragged, and the browser
+   * cancels the drag with it. So the hints are painted onto the boxes the
+   * last render left behind, and wiped when the drag ends.
+   */
+  const boxes = new Map<string, HTMLElement>();
+  let dragging: string | null = null;
+
+  /**
+   * What moving this course into each term would do, tried rather than
+   * reasoned about: the projection is the only authority on whether a term
+   * works, so ask it. Twelve greedy passes, which is the same price the build
+   * view already pays to put a number on a single choice.
+   */
+  function hint(code: string) {
+    const { moves, load } = store.get();
+    const finishes = projectWith(moves, load).finishes;
+    for (const [name, box] of boxes) {
+      const trial = projectWith({ ...moves, [code]: name }, load);
+      const landed = trial.terms
+        .find((t) => t.slot.name === name)
+        ?.courses.find((c) => c.code === code);
+      const missed = trial.unscheduled.find((u) => u.code === code);
+      const cost =
+        trial.finishes === finishes
+          ? "finishes the same term"
+          : `finishes ${trial.finishes ?? "beyond the horizon"}`;
+      box.classList.add(landed?.conflict || missed ? "drop-bad" : "drop-ok");
+      box.title = landed?.conflict ?? missed?.why ?? `${code} here, and the plan ${cost}.`;
+    }
+  }
+
+  const unhint = () => {
+    dragging = null;
+    for (const box of boxes.values()) {
+      box.classList.remove("drop-ok", "drop-bad", "over");
+      box.removeAttribute("title");
+    }
+  };
+
+  /** Every course code the catalog knows, offered to the term that asks. */
+  let catalogue: HTMLDataListElement | null = null;
+  const options = () => {
+    if (catalogue) return catalogue;
+    catalogue = el("datalist");
+    catalogue.id = "cedarville-courses";
+    for (const record of planning.records) {
+      const code = `${record.SubjectCode}-${record.Number}`;
+      const option = el("option");
+      option.value = code;
+      option.label = record.Title ?? "";
+      catalogue.append(option);
+    }
+    root.append(catalogue);
+    return catalogue;
+  };
+
+  /** The one control that adds work rather than rearranging it. */
+  function adder(name: string) {
+    const add = el("button", "add");
+    add.type = "button";
+    add.textContent = "+";
+    add.title = `Add a course to ${name}.`;
+
+    const input = el("input", "add-course");
+    input.type = "text";
+    input.placeholder = "CS-1210";
+    input.hidden = true;
+    input.setAttribute("list", options().id);
+
+    const take = () => {
+      const code = input.value.trim().toUpperCase();
+      // Adding a course nothing in the catalog lists would plan a ghost.
+      if (graph.courses.has(code)) place(code, name);
+      else input.hidden = true;
+    };
+
+    add.addEventListener("click", () => {
+      input.hidden = !input.hidden;
+      if (!input.hidden) input.focus();
+    });
+    input.addEventListener("change", take);
+    input.addEventListener("keydown", (event) => {
+      if ((event as KeyboardEvent).key === "Enter") take();
+      if ((event as KeyboardEvent).key === "Escape") input.hidden = true;
+    });
+    return [add, input] as const;
+  }
+
+  /** A course as it sits in a term, with the two ways to change its mind. */
+  function row(code: string, extras: { moved?: boolean; caution?: string; conflict?: string }) {
+    const line = el("div", `plan-course${extras.moved ? " moved" : ""}`);
+    line.draggable = true;
+    line.dataset.code = code;
+    line.addEventListener("dragstart", (event) => {
+      dragging = code;
+      (event as DragEvent).dataTransfer?.setData("text/plain", code);
+      hint(code);
+    });
+    line.addEventListener("dragend", unhint);
+
+    line.append(el("b", undefined, code));
+    line.append(el("span", undefined, title(code)));
+
+    if (extras.conflict) {
+      const flag = tag("conflict", "bad");
+      flag.title = extras.conflict;
+      line.append(flag);
+    }
+    if (extras.caution) {
+      const flag = tag("verify", "rule");
+      flag.title = extras.caution;
+      line.append(flag);
+    }
+
+    if (extras.moved) {
+      const back = el("button", "release");
+      back.type = "button";
+      back.textContent = "⤺";
+      back.title = "Let the projection place this one again.";
+      back.addEventListener("click", () => release(code));
+      line.append(back);
+    }
+
+    const out = el("button", "release");
+    out.type = "button";
+    out.textContent = "×";
+    out.title = "Take this out of the plan and see what it was costing.";
+    out.addEventListener("click", () => place(code, OUT));
+    line.append(out);
+
+    return line;
+  }
+
   subs.add(
     store.watch(
-      (s) => `${JSON.stringify(s.load)}:${s.resolvedAt}:${s.shape}`,
+      (s) => `${JSON.stringify(s.load)}:${s.resolvedAt}:${s.shape}:${JSON.stringify(s.moves)}`,
       () => {
-        const { load, shape: drawn } = store.get();
+        const { load, moves, shape: drawn } = store.get();
+        const edits = editsOf(moves);
+        const count = Object.keys(moves).length;
+
         shape.textContent = drawn === "graph" ? "list it" : "draw it";
         perTermLabel.textContent = `${load.perTerm}`;
         perTermLabel.title = verdictOf(load.perTerm).text;
         summersLabel.textContent = load.summers === 0 ? "none" : `${load.summers}`;
+        regenerate.hidden = count === 0;
+        regenerate.textContent = `regenerate (${count} move${count === 1 ? "" : "s"})`;
 
-        const plan = planning.project(need, load);
+        const plan = projectWith(moves, load);
 
         // Two majors on one bachelor's share a single credit total, so the
         // requirement is the largest of them and never their sum. Earned
@@ -187,6 +377,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
         picture?.destroy();
         picture = null;
+        boxes.clear();
+        dragging = null;
         body.replaceChildren();
 
         if (drawn === "graph") {
@@ -205,22 +397,81 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           );
         }
 
-        for (const term of plan.terms) {
-          const box = el("div", `term ${term.slot.season}`);
+        // Every slot up to one past the last with work in it, so there is
+        // always a term ahead to drag something into — and so an empty term
+        // in the middle stays visible rather than closing the gap silently.
+        const placed = new Map(plan.terms.map((t) => [t.slot.name, t]));
+        const slots = planning.slots(load);
+        let last = -1;
+        slots.forEach((s, at) => {
+          if (placed.has(s.name)) last = at;
+        });
+
+        for (const slot of slots.slice(0, last + 2)) {
+          const term = placed.get(slot.name);
+          const credits = term?.credits ?? 0;
+          const box = el("div", `term ${slot.season}${term ? "" : " empty"}`);
+          box.dataset.slot = slot.name;
+          boxes.set(slot.name, box);
+
           const head = el("h3");
-          head.append(document.createTextNode(term.slot.name));
-          head.append(el("span", "cr", `${term.credits} cr`));
+          head.append(document.createTextNode(slot.name));
+          head.append(el("span", "cr", `${credits} cr`));
+          if (credits > slot.capacity) {
+            const over = tag("over cap", "bad");
+            over.title = `${credits} credits against a ${slot.capacity}-credit cap.`;
+            head.append(over);
+          } else if (term?.short) {
+            const light = tag("part time", "cheap");
+            light.title = `Under ${slot.minimum} credits, which is full time here.`;
+            head.append(light);
+          }
+          head.append(...adder(slot.name));
           box.append(head);
-          for (const c of term.courses) {
-            const row = el("div", "plan-course");
-            row.append(el("b", undefined, c.code));
-            row.append(el("span", undefined, title(c.code)));
-            if (c.caution) {
-              const flag = tag("verify", "rule");
-              flag.title = c.caution;
-              row.append(flag);
-            }
-            box.append(row);
+
+          for (const c of term?.courses ?? []) {
+            box.append(
+              row(c.code, {
+                ...(c.moved ? { moved: true } : {}),
+                ...(c.caution ? { caution: c.caution } : {}),
+                ...(c.conflict ? { conflict: c.conflict } : {}),
+              }),
+            );
+          }
+
+          box.addEventListener("dragover", (event) => {
+            if (!dragging) return;
+            event.preventDefault();
+            box.classList.add("over");
+          });
+          box.addEventListener("dragleave", () => box.classList.remove("over"));
+          box.addEventListener("drop", (event) => {
+            event.preventDefault();
+            const code = dragging ?? (event as DragEvent).dataTransfer?.getData("text/plain");
+            unhint();
+            if (code) place(code, slot.name);
+          });
+
+          body.append(box);
+        }
+
+        if (edits.dropped.size) {
+          const box = el("div", "term dropped");
+          box.append(el("h3", undefined, "dropped"));
+          box.append(
+            el("p", "muted", "Out of the plan by your hand. The date above is without them."),
+          );
+          for (const code of edits.dropped) {
+            const line = el("div", "plan-course muted");
+            line.append(el("b", undefined, code));
+            line.append(el("span", undefined, title(code)));
+            const back = el("button", "release");
+            back.type = "button";
+            back.textContent = "⤺";
+            back.title = "Put it back and reproject.";
+            back.addEventListener("click", () => release(code));
+            line.append(back);
+            box.append(line);
           }
           body.append(box);
         }
@@ -234,9 +485,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           body.append(box);
         }
 
-        if (first.unenumerable.length) {
+        if (unenumerable.length) {
           const box = el("div", "term unenumerable");
-          const pending = first.unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
+          const pending = unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
           if (pending.length) {
             box.append(el("h3", undefined, "not plannable"));
             box.append(
@@ -255,8 +506,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           el(
             "p",
             "muted",
-            "Spring terms are modelled rather than read: Colleague publishes a term or two " +
-              "ahead, so a course is placed on the season the catalog states for it.",
+            "Drag a course into another term to pin it there, and the rest of the plan will " +
+              "arrange itself around it. Spring terms are modelled rather than read: Colleague " +
+              "publishes a term or two ahead, so a course is placed on the season the catalog " +
+              "states for it.",
           ),
         );
       },

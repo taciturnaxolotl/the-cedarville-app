@@ -449,3 +449,80 @@ describe("a course that wants class standing", () => {
     expect(at(p, "CC-4010")).toBe("SP27");
   });
 });
+
+describe("a term the student chose", () => {
+  const placed = (placements: Record<string, string>, need: string[], everywhere = true) =>
+    projectPlan({
+      need,
+      completed: new Set(),
+      graph,
+      credits: () => 3,
+      offeredIn: (code, slot) => everywhere || slot.season !== "summer" || code.startsWith("BB"),
+      slots: termsFrom({ year: 2027, season: "spring" }, 6, { summers: 0 }),
+      placements: new Map(Object.entries(placements)),
+    });
+
+  test("holds a course in the term it was moved to", () => {
+    const p = placed({ "BB-1000": "SP28" }, ["BB-1000", "BB-1010"]);
+    const term = p.terms.find((t) => t.slot.name === "SP28");
+    expect(term?.courses.map((c) => c.code)).toEqual(["BB-1000"]);
+    expect(term?.courses[0]?.moved).toBe(true);
+    // And it does not get scheduled twice on the way there.
+    expect(p.terms.filter((t) => t.courses.some((c) => c.code === "BB-1000"))).toHaveLength(1);
+  });
+
+  // The whole point of a pin: everything else arranges itself around it.
+  test("lets the prerequisite chain reflow behind it", () => {
+    const p = placed({ "AA-4000": "SP29" }, ["AA-1000", "AA-2000", "AA-3000", "AA-4000"]);
+    expect(p.finishes).toBe("SP29");
+    expect(p.terms.at(-1)!.courses.map((c) => c.code)).toEqual(["AA-4000"]);
+  });
+
+  test("says what a move breaks rather than refusing it", () => {
+    const p = placed({ "AA-2000": "SP27" }, ["AA-1000", "AA-2000"]);
+    const first = p.terms[0]!;
+    expect(first.courses[0]!.code).toBe("AA-2000");
+    expect(first.courses[0]!.conflict).toContain("AA-1000");
+  });
+
+  test("counts an overfull term rather than trimming it", () => {
+    const p = projectPlan({
+      need: ["BB-1000", "BB-1010", "BB-1020"],
+      completed: new Set(),
+      graph,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots: [{ name: "SP27", season: "spring", year: 2027, capacity: 4 }],
+      placements: new Map([
+        ["BB-1000", "SP27"],
+        ["BB-1010", "SP27"],
+      ]),
+    });
+    expect(p.terms[0]!.credits).toBe(6);
+    expect(p.terms[0]!.courses[1]!.conflict).toContain("over its cap");
+  });
+
+  test("reports a term the plan no longer reaches", () => {
+    const p = placed({ "BB-1000": "SU31" }, ["BB-1000"]);
+    expect(p.unscheduled[0]!.why).toContain("no longer reaches");
+  });
+
+  test("is not undone by the pass that fills a light semester", () => {
+    const slots: TermSlot[] = [
+      { name: "SP27", season: "spring", year: 2027, capacity: 18, minimum: 12 },
+      { name: "FA27", season: "fall", year: 2027, capacity: 18, minimum: 12 },
+    ];
+    const p = projectPlan({
+      need: ["BB-1000", "BB-1010", "BB-1020"],
+      completed: new Set(),
+      graph,
+      credits: () => 3,
+      offeredIn: () => true,
+      slots,
+      placements: new Map([["BB-1000", "FA27"]]),
+    });
+    expect(p.terms.find((t) => t.slot.name === "FA27")?.courses.map((c) => c.code)).toEqual([
+      "BB-1000",
+    ]);
+  });
+});

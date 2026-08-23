@@ -143,8 +143,53 @@ export interface EvaluationResponse {
   };
 }
 
+/**
+ * A course on Colleague's own degree plan.
+ *
+ * `SectionId` is the field that matters most here: set, the student has picked
+ * a section, and this planner treats the entry as none of its business.
+ */
+export interface PlannedCourseDto {
+  CourseId: string;
+  SectionId: string | null;
+  TermId: string;
+  Credits: number | null;
+  GradingType?: string;
+  AddedBy?: string;
+  AddedOn?: string;
+  IsProtected?: boolean;
+  CoursePlaceholderId?: string | null;
+}
+
+/**
+ * The plan as the write endpoints want it handed back.
+ *
+ * Every mutation carries the whole DTO and returns the updated copy, Version
+ * and all. That is Ellucian's concurrency check, and the reason a sync runs in
+ * sequence: the plan one call returns is the plan the next call must send.
+ */
+export interface DegreePlanDto {
+  Id: number;
+  PersonId: string;
+  Version: number;
+  Terms: { TermId: string; PlannedCourses: PlannedCourseDto[] }[];
+  NonTermPlannedCourses?: PlannedCourseDto[];
+  [key: string]: unknown;
+}
+
 export interface DegreePlanResponse {
-  DegreePlan: { PersonId: string; Id: number; Version: number };
+  DegreePlan: {
+    PersonId: string;
+    Id: number;
+    Version: number;
+    DegreePlanDto: DegreePlanDto;
+    /** Terms on the plan, in Colleague's own order. */
+    Terms: { Code: string; Description: string; IsTermProtected?: boolean }[];
+    /** Terms the plan could be extended with — where the summers live. */
+    UnplannedTerms?: { Code: string }[] | string[];
+    AvailablePlanningTerms?: { Code: string }[] | string[];
+    IsPlanProtected?: boolean;
+  };
   StudentPrograms: { Code: string; Title: string; Catalog: string; StudentId: string }[];
 }
 

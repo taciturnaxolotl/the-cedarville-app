@@ -11,6 +11,8 @@ import {
   seasonsOffered,
   shortTerm,
   type TermCatalog,
+  termCodeOf,
+  termKey,
   yearsOffered,
 } from "./catalog";
 
@@ -93,6 +95,22 @@ describe("ordering terms", () => {
 
   test("an unrecognised season sorts last within its year rather than throwing", () => {
     expect(["2026XX", "2026FA"].sort(compareTerms)).toEqual(["2026FA", "2026XX"]);
+  });
+});
+
+describe("naming a term the way Colleague does", () => {
+  // Our own names are short because they are read in a column; every write to
+  // a degree plan is keyed on Colleague's spelling instead.
+  test("year first, season second", () => {
+    expect(termCodeOf({ year: 2027, season: "spring" })).toBe("2027SP");
+    expect(termCodeOf({ year: 2027, season: "summer" })).toBe("2027SU");
+    expect(termCodeOf({ year: 2029, season: "fall" })).toBe("2029FA");
+  });
+
+  test("and it sorts the way the catalog's own keys do", () => {
+    expect(termKey(termCodeOf({ year: 2027, season: "spring" }))).toBeLessThan(
+      termKey(termCodeOf({ year: 2027, season: "fall" })),
+    );
   });
 });
 

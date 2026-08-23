@@ -91,6 +91,8 @@ export interface Planning {
   title(code: string): string;
   /** Its price, stretched to what the requirement asking for it wants. */
   price(code: string): number;
+  /** Colleague's own id for a course, which every write to a plan is keyed on. */
+  courseId(code: string): string | undefined;
   /**
    * Makes a second (or third) sitting of a course plannable, and hands back
    * the code that names it. Idempotent: asking twice for the same sitting
@@ -131,6 +133,7 @@ export function planningFrom(ctx: Ctx): Planning {
   const credits = new Map(records.map((c) => [key(c), c.MinimumCredits ?? 0]));
   const maxima = new Map(records.map((c) => [key(c), c.MaximumCredits ?? c.MinimumCredits ?? 0]));
   const titles = new Map(records.map((c) => [key(c), c.Title]));
+  const ids = new Map(records.map((c) => [key(c), (c as { Id?: string }).Id]));
   const seasons = new Map(records.map((c) => [key(c), seasonsOffered(c)]));
   const cycles = new Map(records.map((c) => [key(c), yearsOffered(c)]));
 
@@ -186,6 +189,7 @@ export function planningFrom(ctx: Ctx): Planning {
     graph,
     title: (code) => titles.get(baseCode(code)) ?? "",
     price,
+    courseId: (code) => ids.get(baseCode(code)),
     sitting,
     seasonsOf: (code) => seasons.get(baseCode(code)) ?? [],
     offeredIn,

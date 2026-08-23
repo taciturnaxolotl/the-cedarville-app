@@ -740,6 +740,38 @@ label.section.clashes:not(:has(input:checked)) .when {
   display: none;
 }
 
+/* What a sync would do, shown in full before anything is written. */
+.sync:not(:empty) {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--surface);
+  border-left: 2px solid var(--lavender);
+  border-radius: 3px;
+  background: var(--mantle);
+}
+
+.sync h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sync-change {
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.sync-change.muted {
+  color: var(--overlay);
+}
+
+.sync-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 /* ---- build ---- */
 
 .picker {

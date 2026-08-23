@@ -8,6 +8,7 @@
 
 import type {
   CatalogVocabulary,
+  DegreePlanDto,
   DegreePlanResponse,
   EvaluationResponse,
   ProgramSummary,
@@ -142,5 +143,68 @@ export class SelfService {
   /** Meeting times, seat counts and instructors for a course's sections. */
   sections(courseId: string, sectionIds: string[]): Promise<SectionsResponse> {
     return this.post("/Student/Student/Courses/Sections", { courseId, sectionIds });
+  }
+
+  // ---- writing to the degree plan --------------------------------------
+  //
+  // The only endpoints in this file that change anything. Argument names are
+  // Self-Service's own, read off the Plan & Schedule bundle rather than
+  // guessed at, and each call carries the whole plan and returns the updated
+  // copy: the DTO holds a Version and Colleague refuses a stale one. So these
+  // run in sequence, each fed what the last one handed back.
+  //
+  // `RegisterSections` lives on the same controller and is deliberately
+  // absent. Planning a course and registering for it are different promises.
+
+  /** Puts a course in a term. `credits` is what a variable-credit course is taken for. */
+  addCourseToPlan(
+    courseId: string,
+    termId: string,
+    credits: number,
+    degreePlan: DegreePlanDto,
+  ): Promise<DegreePlanResponse> {
+    return this.post("/Student/Planning/DegreePlans/AddCourse", {
+      courseId,
+      termId,
+      credits,
+      degreePlan,
+    });
+  }
+
+  /** Carries a planned course from one term to another. The drag, server-side. */
+  moveCourseOnPlan(
+    courseId: string,
+    oldTerm: string,
+    newTerm: string,
+    degreePlan: DegreePlanDto,
+  ): Promise<DegreePlanResponse> {
+    return this.post("/Student/Planning/DegreePlans/UpdateCourse", {
+      courseId,
+      oldTerm,
+      newTerm,
+      degreePlan,
+    });
+  }
+
+  removeCourseFromPlan(
+    courseId: string,
+    termId: string,
+    sectionId: string | null,
+    degreePlan: DegreePlanDto,
+  ): Promise<DegreePlanResponse> {
+    return this.post("/Student/Planning/DegreePlans/RemoveCourse", {
+      removeCourseId: courseId,
+      removeCourseTermId: termId,
+      removeCourseSectionId: sectionId,
+      degreePlan,
+    });
+  }
+
+  /** Opens a term on the plan. Colleague will not hold a course in a term the plan has not got. */
+  addTermToPlan(termId: string, degreePlan: DegreePlanDto): Promise<DegreePlanResponse> {
+    return this.post("/Student/Planning/DegreePlans/AddTerm", {
+      addTermId: termId,
+      degreePlan,
+    });
   }
 }

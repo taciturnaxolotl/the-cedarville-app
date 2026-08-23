@@ -15,8 +15,11 @@
  * "regenerate" mean something — the moves stay, everything else reflows.
  */
 
+import { termCodeOf } from "../../catalog";
 import { prerequisitesOf } from "../../prereqs";
 import { groupKey, type ProgramTree } from "../../requirements";
+import { type Change, mark, type Sitting, describe as sayChange, syncPlan } from "../../sync";
+import { applyPlan, colleaguePlan, installed } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
@@ -198,6 +201,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     store.set({ moves: {} });
   });
 
+  const push = el("button", "export");
+  push.type = "button";
+  push.textContent = "send to Colleague";
+  push.title =
+    "Shows what this would change on your real degree plan, and writes nothing until you say so. " +
+    "Your advisor sees that plan.";
+  push.addEventListener("click", () => void preview());
+
   controls.append(
     ...slider(
       "credits per term",
@@ -213,14 +224,156 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     fullLabel,
     shape,
     regenerate,
+    ...(installed() ? [push] : []),
   );
 
   const verdict = el("p", "credits");
+  const panel = el("div", "sync");
   const body = el("div");
-  root.replaceChildren(controls, verdict, body);
+  root.replaceChildren(controls, verdict, panel, body);
 
   /** The graph rendering, when it is the one on screen. */
   let picture: { destroy(): void } | null = null;
+
+  // ---- sending it to Colleague -----------------------------------------
+
+  /*
+   * The only thing this application writes anywhere. Everything above reads a
+   * registrar's data and reasons about it; this puts the answer back where an
+   * advisor will see it, so it happens on purpose, once, after being shown in
+   * full — and it keeps a note of what it wrote so a later run can take its
+   * own work back without touching anybody else's.
+   */
+  const PUSHED = "cedarville:pushed";
+
+  /** The projection as course ids and term codes, one entry per sitting. */
+  function sittings(): { wanted: Sitting[]; unknown: string[] } {
+    const { load, moves } = store.get();
+    const plan = projectWith(moves, load);
+    const wanted: Sitting[] = [];
+    const unknown: string[] = [];
+    for (const term of plan.terms) {
+      for (const course of term.courses) {
+        const id = planning.courseId(course.code);
+        // A course no catalog we hold lists cannot be named to Colleague.
+        if (!id) {
+          unknown.push(baseCode(course.code));
+          continue;
+        }
+        wanted.push({
+          code: baseCode(course.code),
+          courseId: id,
+          termId: termCodeOf(term.slot),
+          credits: course.credits,
+        });
+      }
+    }
+    return { wanted, unknown };
+  }
+
+  const line = (text: string, kind = "muted") => el("p", kind, text);
+
+  async function preview() {
+    panel.replaceChildren(line("reading your plan in Colleague…"));
+    let theirs: Awaited<ReturnType<typeof colleaguePlan>>;
+    try {
+      theirs = await colleaguePlan();
+    } catch (err) {
+      panel.replaceChildren(
+        line(err instanceof Error ? err.message : String(err), "muted bad"),
+        line("open Self-Service in another tab and sign in, then try again."),
+      );
+      return;
+    }
+
+    if (theirs.locked) {
+      panel.replaceChildren(line("your degree plan is protected; an advisor has to unlock it."));
+      return;
+    }
+
+    const { wanted, unknown } = sittings();
+    const { changes, skipped } = syncPlan({
+      wanted,
+      planned: theirs.planned,
+      terms: theirs.terms,
+      addable: theirs.addable,
+      ours: new Set(read<string[]>(PUSHED, [])),
+    });
+
+    panel.replaceChildren();
+    const head = el("h3", undefined, changes.length ? "this would change" : "nothing to change");
+    panel.append(head);
+
+    for (const change of changes) panel.append(el("div", "sync-change", sayChange(change)));
+    for (const miss of skipped) {
+      panel.append(el("div", "sync-change muted", `${miss.code ?? ""} — ${miss.why}`.trim()));
+    }
+    for (const code of unknown) {
+      panel.append(
+        el("div", "sync-change muted", `${code} — no catalog record, so it is left out`),
+      );
+    }
+
+    if (!changes.length) {
+      panel.append(line("Colleague already agrees with this plan."));
+      return;
+    }
+
+    const go = el("button", "export");
+    go.type = "button";
+    go.textContent = `send ${changes.length} change${changes.length === 1 ? "" : "s"}`;
+    go.addEventListener("click", () => void commit(changes));
+
+    const cancel = el("button", "export");
+    cancel.type = "button";
+    cancel.textContent = "cancel";
+    cancel.addEventListener("click", () => panel.replaceChildren());
+
+    const row = el("div", "sync-actions");
+    row.append(go, cancel);
+    panel.append(row);
+  }
+
+  async function commit(changes: Change[]) {
+    panel.replaceChildren(line("writing to Colleague…"));
+    let result: Awaited<ReturnType<typeof applyPlan>>;
+    try {
+      result = await applyPlan(changes);
+    } catch (err) {
+      panel.replaceChildren(line(err instanceof Error ? err.message : String(err), "muted bad"));
+      return;
+    }
+
+    // The ledger is what makes a later sync able to withdraw its own work and
+    // nobody else's, so it is written from what actually landed.
+    const pushed = new Set(read<string[]>(PUSHED, []));
+    for (const change of result.applied) {
+      if (change.kind === "add") pushed.add(mark(change.courseId, change.termId));
+      if (change.kind === "move") {
+        pushed.delete(mark(change.courseId, change.from));
+        pushed.add(mark(change.courseId, change.to));
+      }
+      if (change.kind === "remove") pushed.delete(mark(change.courseId, change.termId));
+    }
+    localStorage.setItem(PUSHED, JSON.stringify([...pushed]));
+
+    panel.replaceChildren(
+      el(
+        "h3",
+        undefined,
+        `${result.applied.length} of ${changes.length} written to your degree plan`,
+      ),
+    );
+    if (result.stopped) {
+      panel.append(
+        line(
+          `stopped at "${sayChange(result.stopped.change)}" — ${result.stopped.why}`,
+          "muted bad",
+        ),
+      );
+      panel.append(line("nothing after that was tried. Your plan holds what did land."));
+    }
+  }
 
   // ---- dragging --------------------------------------------------------
 

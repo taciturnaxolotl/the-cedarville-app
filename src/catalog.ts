@@ -39,6 +39,15 @@ export function termKey(code: string): number {
   return (Number.isFinite(year) ? year : 0) * 10 + (SEASON_ORDER[code.slice(4)] ?? 9);
 }
 
+/**
+ * A slot's name as Colleague spells it: "2027SP" for the spring of 2027.
+ *
+ * Our own names are short because they are read in a column ("SP27"); Colleague
+ * wants the year first, and every write to a degree plan is keyed on it.
+ */
+export const termCodeOf = (slot: { year: number; season: "fall" | "spring" | "summer" }) =>
+  `${slot.year}${slot.season === "spring" ? "SP" : slot.season === "summer" ? "SU" : "FA"}`;
+
 /** Oldest first. Negate for newest first. */
 export const compareTerms = (a: string, b: string) => termKey(a) - termKey(b);
 

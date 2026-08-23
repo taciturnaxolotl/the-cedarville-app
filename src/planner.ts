@@ -12,6 +12,7 @@
  */
 
 import { eligibility, type Graph, type Standing } from "./prereqs";
+import { baseCode } from "./requirements";
 
 /**
  * Credits a student must hold to count as each standing.
@@ -221,6 +222,12 @@ export function projectPlan(request: PlanRequest): Plan {
       const price = credits(code);
       if (used + price > slot.capacity) continue;
 
+      // Two sittings of one course belong in two terms. The catalog says so
+      // in the case that needs it — "two sections of the Honors Seminar on
+      // different topics" — and Colleague's own plan will not hold a course
+      // twice in a term either, so a plan that stacks them cannot be followed.
+      if (courses.some((c) => baseCode(c.code) === baseCode(code))) continue;
+
       // A course that gates another belongs as early as it fits, whatever it
       // costs the term after; only the leaves are held back.
       if (ration?.contested.has(code) && (leverage.get(code) ?? 0) === 0) {
@@ -396,6 +403,9 @@ function redistribute(
           if (course.credits > room) continue;
           // A term the student chose is not the planner's to reconsider.
           if (course.moved) continue;
+          // And a second sitting may not be carried into the term holding the
+          // first: the same course twice in one term is not a thing to plan.
+          if (term.courses.some((c) => baseCode(c.code) === baseCode(course.code))) continue;
           if (moving.some((m) => m.course === course)) continue;
           // A term may empty entirely, but it may not go part time to spare
           // another one: that trades the problem rather than solving it.

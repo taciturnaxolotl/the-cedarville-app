@@ -526,3 +526,42 @@ describe("a term the student chose", () => {
     ]);
   });
 });
+
+describe("a course taken twice", () => {
+  // "Two sections of the Honors Seminar on different topics" is two terms'
+  // work however you read it, and Colleague's own degree plan will not hold a
+  // course twice in one term either.
+  const twice = (slots = termsFrom({ year: 2027, season: "spring" }, 6, { summers: 0 })) =>
+    projectPlan({
+      need: ["BB-1000", "BB-1000#2"],
+      completed: new Set(),
+      graph,
+      credits: () => 2,
+      offeredIn: () => true,
+      slots,
+    });
+
+  test("puts the second sitting in another term", () => {
+    const p = twice();
+    expect(p.terms).toHaveLength(2);
+    expect(p.terms.map((t) => t.courses.map((c) => c.code))).toEqual([["BB-1000"], ["BB-1000#2"]]);
+  });
+
+  test("and the pass that fills a light semester will not stack them", () => {
+    const p = projectPlan({
+      need: ["BB-1000", "BB-1000#2", "BB-1010"],
+      completed: new Set(),
+      graph,
+      credits: () => 6,
+      offeredIn: () => true,
+      slots: [
+        { name: "SP27", season: "spring", year: 2027, capacity: 18, minimum: 12 },
+        { name: "FA27", season: "fall", year: 2027, capacity: 18, minimum: 12 },
+      ],
+    });
+    for (const term of p.terms) {
+      const bases = term.courses.map((c) => c.code.split("#")[0]);
+      expect(new Set(bases).size).toBe(bases.length);
+    }
+  });
+});

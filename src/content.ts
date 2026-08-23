@@ -9,7 +9,14 @@
 
 import { SelfService, UnauthorizedError } from "./client";
 import { normalize, programFor, unservedCredentials } from "./requirements";
-import type { CatalogVocabulary, EvaluationResponse, ProgramSummary } from "./types";
+import type { Change, PlannedCourse } from "./sync";
+import type {
+  CatalogVocabulary,
+  DegreePlanDto,
+  DegreePlanResponse,
+  EvaluationResponse,
+  ProgramSummary,
+} from "./types";
 
 const api = new SelfService();
 
@@ -93,11 +100,111 @@ async function capture(whatIf: string[] = []): Promise<Capture> {
   };
 }
 
+/** Colleague's own plan, as the diff wants to see it. */
+export interface ColleaguePlan {
+  studentId: string;
+  planned: PlannedCourse[];
+  /** Terms already on the plan. */
+  terms: string[];
+  /** Terms it could be extended with, which is where the summers are. */
+  addable: string[];
+  /** A protected plan is an advisor's, and this refuses to touch one. */
+  locked: boolean;
+}
+
+const codesOf = (terms: { Code: string }[] | string[] | undefined): string[] =>
+  (terms ?? []).map((t) => (typeof t === "string" ? t : t.Code));
+
+function readPlan(response: DegreePlanResponse, studentId: string): ColleaguePlan {
+  const plan = response.DegreePlan;
+  const dto = plan.DegreePlanDto;
+  return {
+    studentId,
+    planned: (dto.Terms ?? []).flatMap((term) =>
+      (term.PlannedCourses ?? []).map((c) => ({
+        courseId: c.CourseId,
+        termId: c.TermId,
+        credits: c.Credits,
+        sectionId: c.SectionId,
+        ...(c.IsProtected ? { isProtected: true } : {}),
+      })),
+    ),
+    terms: (plan.Terms ?? []).map((t) => t.Code),
+    addable: codesOf(plan.UnplannedTerms),
+    locked: Boolean(plan.IsPlanProtected),
+  };
+}
+
+/**
+ * Runs the changes the app decided on, in order, against a plan fetched here.
+ *
+ * The DTO is never taken from the app: Colleague versions the plan and
+ * refuses a stale copy, so the freshest one is the one this just fetched and
+ * then the one each call hands back. Stops at the first failure and says how
+ * far it got, because a half-applied plan the student is told about is a
+ * great deal better than one they are not.
+ */
+async function applyPlan(changes: Change[]): Promise<Applied> {
+  const id = await studentId();
+  let response = await api.currentDegreePlan(id);
+  if (response.DegreePlan.IsPlanProtected) {
+    throw new Error("your degree plan is protected; an advisor has to unlock it");
+  }
+
+  let dto: DegreePlanDto = response.DegreePlan.DegreePlanDto;
+  const done: Change[] = [];
+
+  for (const change of changes) {
+    try {
+      switch (change.kind) {
+        case "term":
+          response = await api.addTermToPlan(change.termId, dto);
+          break;
+        case "add":
+          response = await api.addCourseToPlan(change.courseId, change.termId, change.credits, dto);
+          break;
+        case "move":
+          response = await api.moveCourseOnPlan(change.courseId, change.from, change.to, dto);
+          break;
+        case "remove":
+          response = await api.removeCourseFromPlan(
+            change.courseId,
+            change.termId,
+            change.sectionId,
+            dto,
+          );
+          break;
+      }
+      dto = response.DegreePlan.DegreePlanDto;
+      done.push(change);
+    } catch (err) {
+      return {
+        applied: done,
+        stopped: { change, why: err instanceof Error ? err.message : String(err) },
+      };
+    }
+  }
+  return { applied: done };
+}
+
+export interface Applied {
+  applied: Change[];
+  /** The change that failed, and why. Everything after it went untried. */
+  stopped?: { change: Change; why: string };
+}
+
 export type Request =
   | { type: "ping" }
   | { type: "programs" }
   | { type: "terms" }
   | { type: "capture"; whatIf?: string[] }
+  /** Colleague's degree plan, read only, for working out what would change. */
+  | { type: "colleaguePlan" }
+  /**
+   * The one request in this file that writes to the registrar's system. The
+   * app decides what the changes are; this only carries them out.
+   */
+  | { type: "applyPlan"; changes: Change[] }
   /**
    * What the student chose, on its way to their own machine. Never reaches
    * this file: the background answers it without troubling Self-Service,
@@ -113,6 +220,8 @@ export interface ReplyMap {
   programs: ProgramSummary[];
   terms: { code: string; description: string }[];
   capture: Capture;
+  colleaguePlan: ColleaguePlan;
+  applyPlan: Applied;
 }
 
 chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
@@ -135,6 +244,12 @@ chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
         }
         case "capture":
           return { ok: true, data: await capture(msg.whatIf) };
+        case "colleaguePlan": {
+          const id = await studentId();
+          return { ok: true, data: readPlan(await api.currentDegreePlan(id), id) };
+        }
+        case "applyPlan":
+          return { ok: true, data: await applyPlan(msg.changes) };
         default:
           // "picks" never gets this far; the background answers it.
           return { ok: false, error: `this half does not answer ${(msg as Request).type}` };

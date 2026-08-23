@@ -7,7 +7,8 @@
  */
 
 import type { TermCatalog } from "../catalog";
-import type { Capture, Reply, ReplyMap, Request } from "../content";
+import type { Applied, Capture, ColleaguePlan, Reply, ReplyMap, Request } from "../content";
+import type { Change } from "../sync";
 import type { ProgramSummary } from "../types";
 
 export const EXTENSION_ID = "dijggphdklmdeegidljleaogedbahpjo";
@@ -54,6 +55,16 @@ export const capture = (whatIf: string[] = []): Promise<Capture> =>
  * is the ordinary case and worth saying out loud rather than swallowing.
  */
 export const sendPicks = (picks: unknown): Promise<true> => send({ type: "picks", picks });
+
+/** Colleague's own degree plan. A read, and the basis for any sync. */
+export const colleaguePlan = (): Promise<ColleaguePlan> => send({ type: "colleaguePlan" });
+
+/**
+ * Writes the changes to Colleague. The only call in this file that changes
+ * anything a registrar can see, so it is never made without asking first.
+ */
+export const applyPlan = (changes: Change[]): Promise<Applied> =>
+  send({ type: "applyPlan", changes });
 
 /**
  * Hands a capture to the local dev server, which writes it to .data/ so the

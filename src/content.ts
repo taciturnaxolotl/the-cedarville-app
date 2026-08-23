@@ -212,7 +212,15 @@ export type Request =
    */
   | { type: "picks"; picks: unknown };
 
-export type Reply<T> = { ok: true; data: T } | { ok: false; error: string; signedOut?: boolean };
+export type Reply<T> =
+  | { ok: true; data: T }
+  | {
+      ok: false;
+      error: string;
+      signedOut?: boolean;
+      /** This tab is running a content script older than the page asking it. */
+      stale?: boolean;
+    };
 
 export interface ReplyMap {
   ping: true;
@@ -251,8 +259,22 @@ chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
         case "applyPlan":
           return { ok: true, data: await applyPlan(msg.changes) };
         default:
-          // "picks" never gets this far; the background answers it.
-          return { ok: false, error: `this half does not answer ${(msg as Request).type}` };
+          /*
+           * A request this build has never heard of, which in practice means
+           * one thing: the page has been rebuilt and this tab is still running
+           * the content script it loaded this morning. Naming the message type
+           * told the student nothing; naming the remedy tells them everything.
+           *
+           * ("picks" also lands in this branch and never gets here — the
+           * background answers it without troubling Self-Service.)
+           */
+          return {
+            ok: false,
+            error:
+              "this Self-Service tab is running an older build of the extension. " +
+              "Reload the extension at chrome://extensions, then reload this tab.",
+            stale: true,
+          };
       }
     } catch (err) {
       return {

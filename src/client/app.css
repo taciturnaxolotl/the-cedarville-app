@@ -766,6 +766,13 @@ label.section.clashes:not(:has(input:checked)) .when {
   color: var(--overlay);
 }
 
+/* The reason something failed, which is the one line worth reading. */
+.sync .why {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+}
+
 .sync-actions {
   display: flex;
   gap: 8px;

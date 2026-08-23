@@ -279,10 +279,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     try {
       theirs = await colleaguePlan();
     } catch (err) {
-      panel.replaceChildren(
-        line(err instanceof Error ? err.message : String(err), "muted bad"),
-        line("open Self-Service in another tab and sign in, then try again."),
-      );
+      // One sentence, and only the remedy that fits. Stacking a generic
+      // "sign in and try again" under every failure taught a student to read
+      // neither line.
+      const why = err instanceof Error ? err.message : String(err);
+      panel.replaceChildren(el("h3", undefined, "could not read your plan"), line(why, "why"));
+      if (/sign|session|unauthor/i.test(why)) {
+        panel.append(line("open Self-Service in another tab and sign in, then try again."));
+      }
       return;
     }
 
@@ -340,7 +344,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     try {
       result = await applyPlan(changes);
     } catch (err) {
-      panel.replaceChildren(line(err instanceof Error ? err.message : String(err), "muted bad"));
+      panel.replaceChildren(
+        el("h3", undefined, "nothing was written"),
+        line(err instanceof Error ? err.message : String(err), "why"),
+      );
       return;
     }
 

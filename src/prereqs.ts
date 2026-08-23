@@ -133,11 +133,25 @@ export function standingIn(text: string): Standing | null {
  * Five call sites built this by hand, so none of them could learn a new field
  * without the other four going stale.
  */
+/**
+ * A course whose own name says when it is taken.
+ *
+ * "Honors Sr Colloq I" carries no description, no requisite and no rule: the
+ * only thing in Colleague that says it is a senior course is the word in its
+ * title. Read literally it is open to a freshman, and a plan that believes
+ * that puts the senior colloquium in somebody's sophomore summer.
+ *
+ * Thirty-one courses are in exactly this position, and none of them is a
+ * course a first-year student takes.
+ */
+const SENIOR_TITLE = /\b(?:sr|senior)\b/i;
+
 export function nodeOf(record: CatalogCourseRecord): CourseNode {
   const requisites = record.CourseRequisites ?? [];
-  const standing = standingIn(
-    `${record.Description ?? ""} ${requisites.map((r) => r.DisplayText ?? "").join(" ")}`,
-  );
+  const standing =
+    standingIn(
+      `${record.Description ?? ""} ${requisites.map((r) => r.DisplayText ?? "").join(" ")}`,
+    ) ?? (SENIOR_TITLE.test(record.Title ?? "") ? "senior" : null);
   return {
     code: `${record.SubjectCode}-${record.Number}`,
     title: record.Title,

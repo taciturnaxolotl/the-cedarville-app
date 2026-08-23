@@ -488,3 +488,26 @@ describe("class standing, which is prose and nowhere else", () => {
     ).toBeUndefined();
   });
 });
+
+describe("a course whose title is the only thing that says when it is taken", () => {
+  const record = (Title: string, over: Record<string, unknown> = {}) =>
+    ({ SubjectCode: "HON", Number: "4910", Title, MinimumCredits: 1, ...over }) as never;
+
+  test("reads senior standing out of the name", () => {
+    // HON-4910 carries no description, no requisite and no rule. Read
+    // literally it is open to a freshman.
+    expect(nodeOf(record("Honors Sr Colloq I")).standing).toBe("senior");
+    expect(nodeOf(record("Senior Theatre Project")).standing).toBe("senior");
+  });
+
+  test("and prose still wins where there is any", () => {
+    const said = nodeOf(
+      record("Design Project", { Description: "Prerequisite: junior status in engineering." }),
+    );
+    expect(said.standing).toBe("junior");
+  });
+
+  test("leaving ordinary titles alone", () => {
+    expect(nodeOf(record("Data Structures")).standing).toBeUndefined();
+  });
+});

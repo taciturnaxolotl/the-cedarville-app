@@ -40,6 +40,7 @@ import {
   sittingCode,
   type Unenumerable,
 } from "../requirements";
+import { sequencesFrom } from "../sequences";
 import { resolveRules } from "./bridge";
 import type { Ctx } from "./ctx";
 import { FULL_TIME, type Load } from "./load";
@@ -138,6 +139,8 @@ export function planningFrom(ctx: Ctx): Planning {
   const cycles = new Map(records.map((c) => [key(c), yearsOffered(c)]));
 
   const graph = buildGraph(records.map(nodeOf));
+  // Which courses run back to back, which a prerequisite alone never says.
+  const sequences = sequencesFrom(records);
 
   // A variable-credit course is worth what the requirement asking for it
   // demands, not its floor: HON-4950 runs 1 to 2 and the capstone wants 2.
@@ -233,6 +236,7 @@ export function planningFrom(ctx: Ctx): Planning {
         offeredIn,
         earnedCredits: earned,
         keepSemestersFull: load.fullSemesters,
+        sequences,
         slots: slots(load),
         ...(placements?.size ? { placements } : {}),
       }),

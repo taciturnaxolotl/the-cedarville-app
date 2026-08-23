@@ -565,3 +565,74 @@ describe("a course taken twice", () => {
     }
   });
 });
+
+describe("courses that run back to back", () => {
+  /*
+   * A prerequisite says "later". A sequence says "next". Secure Software
+   * Engineering II is a spring course whose first half runs in the autumn, and
+   * a plan that leaves a year between them has split one project in two.
+   */
+  const pair = new Map([["BB-1020", "BB-1010"]]);
+  const chain = buildGraph([
+    node("BB-1010"),
+    node("BB-1020", "Take BB-1010"),
+    node("CC-1000"),
+    node("CC-1010"),
+    node("CC-1020"),
+  ]);
+
+  const springOnly = (code: string) => code === "BB-1020";
+  const fallOnly = (code: string) => code === "BB-1010";
+
+  const project = (need: string[], capacity: number, completed: string[] = []) =>
+    projectPlan({
+      need,
+      completed: new Set(completed),
+      graph: chain,
+      credits: (code) => (code === "BB-1020" ? 4 : 3),
+      offeredIn: (code, slot) =>
+        springOnly(code)
+          ? slot.season === "spring"
+          : fallOnly(code)
+            ? slot.season === "fall"
+            : true,
+      slots: termsFrom({ year: 2027, season: "spring" }, 8, { summers: 0, capacity }),
+      sequences: pair,
+    });
+
+  test("takes the second half at the first opportunity, not the cheapest one", () => {
+    // Without the pairing the filler courses take the spring and the four
+    // credit second half waits a year, which is arithmetically fine and wrong.
+    const p = project(["BB-1010", "BB-1020", "CC-1000", "CC-1010", "CC-1020"], 10);
+    const at = (code: string) => p.terms.find((t) => t.courses.some((c) => c.code === code))?.slot;
+    expect(at("BB-1010")?.name).toBe("FA27");
+    expect(at("BB-1020")?.name).toBe("SP28");
+  });
+
+  test("and the term fills around it rather than pushing it back", () => {
+    const p = project(["BB-1010", "BB-1020", "CC-1000", "CC-1010", "CC-1020"], 10);
+    const spring = p.terms.find((t) => t.slot.name === "SP28");
+    expect(spring?.courses[0]?.code).toBe("BB-1020");
+  });
+
+  test("a first half already passed puts the second in the very next term", () => {
+    const p = project(["BB-1020", "CC-1000", "CC-1010"], 6, ["BB-1010"]);
+    expect(p.terms[0]?.slot.name).toBe("SP27");
+    expect(p.terms[0]?.courses.some((c) => c.code === "BB-1020")).toBe(true);
+  });
+
+  /* The colloquium: two halves, in sequence, and no requisite recorded at all. */
+  test("keeps an unenforced pair in order and out of one term", () => {
+    const colloquium = new Map([["CC-1020", "CC-1010"]]);
+    const p = projectPlan({
+      need: ["CC-1010", "CC-1020"],
+      completed: new Set(),
+      graph: chain,
+      credits: () => 1,
+      offeredIn: () => true,
+      slots: termsFrom({ year: 2027, season: "spring" }, 4, { summers: 0 }),
+      sequences: colloquium,
+    });
+    expect(p.terms.map((t) => t.courses.map((c) => c.code))).toEqual([["CC-1010"], ["CC-1020"]]);
+  });
+});

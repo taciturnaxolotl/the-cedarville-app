@@ -89,6 +89,21 @@ export interface PlanRequest {
    * not as useful as telling them what it will do.
    */
   placements?: ReadonlyMap<string, string>;
+  /**
+   * Courses that run back to back, follower to leader.
+   *
+   * A prerequisite says "later" and nothing more, which is how a capstone ends
+   * up split across two academic years: Secure Software Engineering II is a
+   * spring course, and a spring eighteen months out satisfies the requisite as
+   * well as the next one does. It does not satisfy the course, whose whole
+   * subject is the project the first half started. Same for Making of the
+   * Modern Mind, and for a colloquium the catalog says to take "in sequence"
+   * and Colleague records no requisite for at all.
+   *
+   * So a follower waits for its leader and then goes at the first opportunity,
+   * ahead of everything else that term.
+   */
+  sequences?: ReadonlyMap<string, string>;
   slots: TermSlot[];
 }
 
@@ -147,6 +162,7 @@ export function projectPlan(request: PlanRequest): Plan {
     keepSemestersFull = true,
     standingCredits = STANDING_CREDITS,
     placements,
+    sequences,
   } = request;
   const taken = new Set(request.completed);
   // Callers assemble `need` from requirement pools, which happily list work
@@ -158,6 +174,36 @@ export function projectPlan(request: PlanRequest): Plan {
   for (const code of remaining) leverage.set(code, countDownstream(graph, code));
 
   const terms: PlannedTerm[] = [];
+
+  /*
+   * Where the plan put each course, so a sequence can tell "the term after" from
+   * "some term after". A leader already on the transcript counts as before the
+   * plan began, which is what makes the spring half of a course finished this
+   * autumn the very next thing scheduled.
+   */
+  const placedAt = new Map<string, number>();
+  for (const code of taken) placedAt.set(code, -1);
+
+  /** Is this the first chance to take the second half since the first? */
+  const dueNow = (code: string, at: number): boolean => {
+    const leader = sequences?.get(code);
+    if (leader === undefined) return false;
+    const led = placedAt.get(leader);
+    if (led === undefined || led >= at) return false;
+    for (let k = led + 1; k < at; k++) {
+      const slot = slots[k];
+      if (slot && offeredIn(code, slot)) return false;
+    }
+    return true;
+  };
+
+  /** A second half never runs before its first, or beside it. */
+  const waiting = (code: string, at: number): boolean => {
+    const leader = sequences?.get(code);
+    if (leader === undefined) return false;
+    const led = placedAt.get(leader);
+    return led === undefined || led >= at;
+  };
 
   // Standing is read at the start of a term: a course finished in it does not
   // make a student a senior partway through.
@@ -215,8 +261,17 @@ export function projectPlan(request: PlanRequest): Plan {
     let rationed = 0;
 
     const candidates = [...remaining]
-      .filter((code) => !placements?.has(code) && offeredIn(code, slot))
-      .sort((a, b) => (leverage.get(b) ?? 0) - (leverage.get(a) ?? 0) || a.localeCompare(b));
+      .filter((code) => !placements?.has(code) && offeredIn(code, slot) && !waiting(code, at))
+      // A sequence due this term goes first, ahead of whatever unlocks most:
+      // everything else can be taken a term later at the cost of a term, and
+      // the second half of a capstone cannot be taken later at all without
+      // costing a year and splitting the project in two.
+      .sort(
+        (a, b) =>
+          Number(dueNow(b, at)) - Number(dueNow(a, at)) ||
+          (leverage.get(b) ?? 0) - (leverage.get(a) ?? 0) ||
+          a.localeCompare(b),
+      );
 
     for (const code of candidates) {
       const price = credits(code);
@@ -273,6 +328,7 @@ export function projectPlan(request: PlanRequest): Plan {
     for (const c of courses) {
       taken.add(c.code);
       remaining.delete(c.code);
+      placedAt.set(c.code, at);
     }
     earned += used;
     terms.push({ slot, courses, credits: used, ...(short ? { short: true } : {}) });
@@ -280,7 +336,7 @@ export function projectPlan(request: PlanRequest): Plan {
 
   // The greedy pass is right term by term and can still be wrong across them,
   // leaving a semester below full time behind three at their cap.
-  if (keepSemestersFull) redistribute(terms, graph, offeredIn);
+  if (keepSemestersFull) redistribute(terms, graph, offeredIn, sequences);
 
   const unscheduled = [...remaining].map((code) => {
     // A placement outlives the plan it was made in: shorten the horizon or
@@ -379,7 +435,17 @@ function redistribute(
   terms: PlannedTerm[],
   graph: Graph,
   offeredIn: PlanRequest["offeredIn"],
+  sequences?: ReadonlyMap<string, string>,
 ): void {
+  // Either half of a back-to-back pair. Filling a light term is worth
+  // rearranging a plan for; it is not worth putting a year between the two
+  // halves of a capstone, which is the one move that cannot be undone by
+  // taking an extra course.
+  const paired = new Set<string>();
+  for (const [follower, leader] of sequences ?? []) {
+    paired.add(follower);
+    paired.add(leader);
+  }
   const where = new Map<string, number>();
   terms.forEach((term, at) => {
     for (const c of term.courses) where.set(c.code, at);
@@ -403,6 +469,7 @@ function redistribute(
           if (course.credits > room) continue;
           // A term the student chose is not the planner's to reconsider.
           if (course.moved) continue;
+          if (paired.has(course.code)) continue;
           // And a second sitting may not be carried into the term holding the
           // first: the same course twice in one term is not a thing to plan.
           if (term.courses.some((c) => baseCode(c.code) === baseCode(course.code))) continue;

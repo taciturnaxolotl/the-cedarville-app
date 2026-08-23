@@ -26,6 +26,7 @@ import {
   walkGroups,
 } from "../src/requirements";
 import { offeringsFromListing } from "../src/schedule";
+import { sequencesFrom } from "../src/sequences";
 import type { Book } from "../src/server/book";
 import { resolveGroup } from "../src/server/colleague";
 import { CatalogStore } from "../src/server/store";
@@ -64,6 +65,7 @@ const maxima = new Map(
 );
 const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
 const graph = buildGraph(records.map(nodeOf));
+const sequences = sequencesFrom(records);
 
 const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseName));
 const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));
@@ -201,6 +203,7 @@ for (const tree of trees) {
     graph,
     credits: price,
     offeredIn,
+    sequences,
     slots: termsFrom({ year: 2027, season: "spring" }, 12, { capacity: cap }),
   });
 

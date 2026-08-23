@@ -3,6 +3,7 @@ import { merge, type Significance } from "./merge";
 import {
   absorbInto,
   accepts,
+  baseCode,
   completedCourses,
   coursesNeeded,
   coursesNeededAcross,
@@ -1160,10 +1161,8 @@ describe("pinning a course", () => {
 });
 
 describe("a requirement its own pool cannot close", () => {
-  test("reports the shortfall rather than quietly under-buying", () => {
-    // "Two sections of the Honors Seminar (HON-3020)" is four credits over a
-    // pool holding one two-credit course and a one-credit study.
-    const tree = normalize(
+  const seminars = () =>
+    normalize(
       program("A", [
         group({
           DisplayText: "Honors Integrative Seminars (4 credit hours)",
@@ -1172,16 +1171,55 @@ describe("a requirement its own pool cannot close", () => {
         }),
       ]),
     );
-    const credits = (c: string) => (c === "HON-3020" ? 2 : 1);
-    const { courses, shortfalls } = coursesNeededAcross(tree ? [tree] : [], {
-      credits,
+  const seminarCredits = (c: string) => (baseCode(c) === "HON-3020" ? 2 : 1);
+
+  test("takes the course twice, which is what the plural was always saying", () => {
+    // "Honors Integrative Seminars (4 credit hours)" over a two-credit seminar
+    // and a one-credit study is not a choice between them: it is that seminar,
+    // twice. Nothing in the arithmetic says so and the name says it plainly.
+    const { courses, shortfalls } = coursesNeededAcross([seminars()], {
+      credits: seminarCredits,
       have: new Set(),
     });
 
-    // Everything available is still bought; the gap is named, not hidden.
-    expect([...courses].sort()).toEqual(["HON-3020", "HON-4900"]);
-    expect(shortfalls).toHaveLength(1);
-    expect(shortfalls[0]).toMatchObject({ wanted: 4, short: 1 });
+    expect([...courses].sort()).toEqual(["HON-3020", "HON-3020#2"]);
+    expect(shortfalls).toEqual([]);
+  });
+
+  test("fills it with sittings of one course rather than a mixture", () => {
+    // Four one-credit studies would also add to four, and would be four
+    // separate courses where two sittings do.
+    const { courses } = coursesNeededAcross([seminars()], {
+      credits: seminarCredits,
+      have: new Set(),
+    });
+    expect([...courses].some((c) => baseCode(c) === "HON-4900")).toBe(false);
+  });
+
+  test("counts a sitting already on the transcript", () => {
+    const { courses } = coursesNeededAcross([seminars()], {
+      credits: seminarCredits,
+      have: new Set(["HON-3020"]),
+    });
+    expect([...courses]).toEqual(["HON-3020#2"]);
+  });
+
+  test("names what it still cannot close", () => {
+    // A pool of nothing cannot be sat twice either, and the gap is real.
+    const tree = normalize(
+      program("A", [
+        group({
+          DisplayText: "Two credits of something",
+          FromCourses: [course("1", "HON", "3020")],
+          MinCredits: 4,
+        }),
+      ]),
+    );
+    const { shortfalls } = coursesNeededAcross([tree], {
+      credits: () => 0,
+      have: new Set(),
+    });
+    expect(shortfalls[0]).toMatchObject({ wanted: 4, short: 4 });
   });
 
   test("a pool that closes its requirement reports nothing", () => {

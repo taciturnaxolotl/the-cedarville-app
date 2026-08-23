@@ -18,6 +18,7 @@ import { type Plan, type PlanRequest, projectPlan, type Season, type TermSlot } 
 import { type Graph, prerequisitesOf } from "./prereqs";
 import {
   type BranchOption,
+  baseCode,
   coursesNeededAcross,
   groupKey,
   type NeedOptions,
@@ -44,6 +45,12 @@ export interface Candidate {
   addedCredits: number;
   /** Prerequisites this choice drags in, which are part of its price. */
   requires: string[];
+  /**
+   * How many times the plan takes this course. More than one when the
+   * requirement asks for more credits than its pool holds — "Honors
+   * Integrative Seminars (4 credit hours)" over a two-credit seminar.
+   */
+  sittings?: number;
   /**
    * The term the projection puts this course in, when it fits. "SP28" answers
    * "when would I actually take this", which a credit count never does.
@@ -223,6 +230,14 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
 
   // Which programs want a course, gathered before ranking so a candidate can
   // say "this one counts toward both your major and your minor".
+  // How many times the cover bought each course. Usually once; twice when a
+  // pool could not close its own requirement without another sitting.
+  const sittings = new Map<string, number>();
+  for (const code of solved.courses) {
+    const base = baseCode(code);
+    sittings.set(base, (sittings.get(base) ?? 0) + 1);
+  }
+
   const wanted = new Map<string, { program: string; text: string }[]>();
   for (const choice of solved.choices) {
     for (const code of choice.pool) {
@@ -354,6 +369,7 @@ export function rankChoices(trees: readonly ProgramTree[], options: RankOptions)
         addedTerms: 0,
         addedCredits: 0,
         requires: [],
+        ...((sittings.get(code) ?? 1) > 1 ? { sittings: sittings.get(code) } : {}),
         offered: SEASONS.filter((season) => options.offeredIn(code, seasonSlot(season))),
         displaces: [],
         ...(baseline.terms.find((t) => t.courses.some((c) => c.code === code))?.slot.name

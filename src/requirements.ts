@@ -35,6 +35,22 @@ export interface Progress {
   planning: Planning;
 }
 
+/**
+ * Another sitting of the same course.
+ *
+ * Some requirements can only be met by taking a course twice. "Honors
+ * Integrative Seminars (4 credit hours)" is a pool whose seminar is worth
+ * two, and the plural in its name is the whole instruction: sit HON-3020, then
+ * sit it again. A registrar can say that; a set of course codes cannot, so a
+ * second sitting is written `HON-3020#2` and everything that prices, names or
+ * dates a course reads past the suffix.
+ */
+export const baseCode = (code: string) => code.split("#")[0] ?? code;
+
+/** The nth sitting of a course, where the first one is just the course. */
+export const sittingCode = (code: string, nth: number) =>
+  nth <= 1 ? baseCode(code) : `${baseCode(code)}#${nth}`;
+
 /** Set of courses a group will accept, expressed the way Colleague expressed it. */
 export type Constraint =
   /** Take every one of these. */
@@ -1400,9 +1416,14 @@ function cover(
 ): number[] {
   const owed = choices.map((choice) => {
     let left = choice.credits;
-    // Anything already passed, or already required outright, counts first.
+    // Anything already passed, or already required outright, counts first —
+    // every sitting of it, since the point of a second one is the credit.
     for (const code of choice.pool) {
-      if (options.have.has(code) || courses.has(code)) left -= options.credits(code);
+      for (let nth = 1; ; nth++) {
+        const sitting = sittingCode(code, nth);
+        if (!options.have.has(sitting) && !courses.has(sitting)) break;
+        left -= options.credits(code);
+      }
     }
     return { pool: choice.pool, left };
   });
@@ -1410,12 +1431,66 @@ function cover(
   /** What each choice still wants once nothing more can be bought for it. */
   const shortfall = () => owed.map((o) => Math.max(0, o.left));
 
+  /**
+   * A pool worth less than the requirement standing over it is not a choice
+   * at all: "Honors Integrative Seminars (4 credit hours)" over a two-credit
+   * seminar and a one-credit study means that seminar twice. Filled here,
+   * before the cover runs, and with sittings of one course rather than a mix
+   * — the plural in the name is the whole instruction.
+   *
+   * Fewest sittings that reach it without overshooting, which for four
+   * credits is two seminars and not four independent studies.
+   */
+  for (const [at, choice] of choices.entries()) {
+    const owe = owed[at];
+    if (!owe || owe.left <= 0) continue;
+    const worth = choice.pool.reduce((n, c) => n + options.credits(c), 0);
+    if (worth >= choice.credits) continue;
+
+    const sittings = (code: string) => Math.ceil(owe.left / (options.credits(code) || 1));
+    const pick = [...choice.pool]
+      .filter((c) => options.credits(c) > 0)
+      .sort(
+        (a, b) =>
+          sittings(a) * options.credits(a) -
+            owe.left -
+            (sittings(b) * options.credits(b) - owe.left) ||
+          sittings(a) - sittings(b) ||
+          a.localeCompare(b),
+      )[0];
+    if (!pick) continue;
+
+    for (let nth = 1; owe.left > 0; nth++) {
+      const sitting = sittingCode(pick, nth);
+      if (options.have.has(sitting) || courses.has(sitting)) continue;
+      courses.add(sitting);
+      for (const o of owed) {
+        if (o.pool.includes(pick)) o.left -= options.credits(pick);
+      }
+    }
+  }
+
   for (;;) {
     const open = owed.filter((o) => o.left > 0);
     if (open.length === 0) return shortfall();
 
+    const held = (code: string) => courses.has(code) || options.have.has(code);
+    /** The first sitting of this course nobody has bought yet. */
+    const next = (code: string) => {
+      let nth = 1;
+      while (held(sittingCode(code, nth))) nth++;
+      return sittingCode(code, nth);
+    };
+
     const candidates = new Set(
-      open.flatMap((o) => o.pool).filter((c) => !courses.has(c) && !options.have.has(c)),
+      open.flatMap((o) => {
+        const fresh = o.pool.filter((c) => !held(c));
+        // Only once the pool is exhausted, and never before: a literature
+        // elective with forty options wants a different course, not the same
+        // one twice. A pool that has run out and still owes credit is asking
+        // for another sitting, and that is the only reading left.
+        return fresh.length ? fresh : o.pool.map(next);
+      }),
     );
     if (candidates.size === 0) return shortfall();
 
@@ -1423,12 +1498,13 @@ function cover(
     for (const code of candidates) {
       // Closed against true cost: what the requirement gains over what the
       // whole purchase costs, chain included.
-      const price = (options.cost ?? options.credits)(code) || 1;
+      const base = baseCode(code);
+      const price = (options.cost ?? options.credits)(base) || 1;
       // Credit actually closed, not credit offered: a 4-credit course against
       // a 3-credit requirement closes three.
       const closed = open
-        .filter((o) => o.pool.includes(code))
-        .reduce((n, o) => n + Math.min(options.credits(code), o.left), 0);
+        .filter((o) => o.pool.includes(base))
+        .reduce((n, o) => n + Math.min(options.credits(base), o.left), 0);
       const value = closed / price;
       if (!best || value > best.value || (value === best.value && code < best.code)) {
         best = { code, value };
@@ -1437,8 +1513,9 @@ function cover(
     if (!best || best.value <= 0) return shortfall();
 
     courses.add(best.code);
+    const bought = baseCode(best.code);
     for (const o of open) {
-      if (o.pool.includes(best.code)) o.left -= options.credits(best.code);
+      if (o.pool.includes(bought)) o.left -= options.credits(bought);
     }
   }
 }

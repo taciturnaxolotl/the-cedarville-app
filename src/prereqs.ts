@@ -169,6 +169,21 @@ export function buildGraph(nodes: CourseNode[]): Graph {
   return { courses, unlocks };
 }
 
+/**
+ * Teaches the graph about a second sitting of a course.
+ *
+ * `HON-3020#2` is the same course with its own place in a plan, so it waits on
+ * exactly what the first sitting waited on. Nothing waits on *it*, which is
+ * right: a requirement that wants the course twice is the only thing that
+ * cares, and it is already satisfied.
+ */
+export function addSitting(graph: Graph, code: string): void {
+  const base = code.split("#")[0] ?? code;
+  if (base === code || graph.courses.has(code)) return;
+  const node = graph.courses.get(base);
+  if (node) graph.courses.set(code, { ...node, code });
+}
+
 export type Eligibility =
   /** Every required prerequisite is satisfied. */
   | { state: "open"; blockedBy: [] }

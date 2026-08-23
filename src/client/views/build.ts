@@ -88,6 +88,19 @@ function tidy(text: string, keepCredits = false): string {
 
 /** "+2 terms" reads better than a bare number, and null is not a number. */
 function priceOf(candidate: Candidate): { text: string; kind: string; why: string } {
+  // A requirement asking for more credits than its whole pool holds is asking
+  // for the same course again: "Honors Integrative Seminars (4 credit hours)"
+  // over a two-credit seminar means two of them. That is the loudest thing
+  // about the row, so it goes in the badge ahead of what it cost.
+  if ((candidate.sittings ?? 1) > 1) {
+    return {
+      text: candidate.sittings === 2 ? "take it twice" : `take it ${candidate.sittings}×`,
+      kind: "free",
+      why:
+        "this requirement asks for more credits than its pool holds, so it means this course " +
+        "more than once — check with your advisor that it is meant that way",
+    };
+  }
   if (candidate.forced) {
     return {
       text: "already required",
@@ -530,7 +543,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     }));
     const forced = choice.candidates
       .filter((c) => c.forced)
-      .map((c) => ({ code: c.code, credits: c.credits, done: false, running: false }));
+      .map((c) => ({
+        code: c.sittings && c.sittings > 1 ? `${c.code} ×${c.sittings}` : c.code,
+        // A second sitting is a second purchase, and it is the only way some
+        // requirements close at all.
+        credits: c.credits * (c.sittings ?? 1),
+        done: false,
+        running: false,
+      }));
     const covering = [...done, ...forced];
     const covered = covering.reduce((n, c) => n + c.credits, 0);
     return covered >= choice.credits ? covering : [];

@@ -921,7 +921,7 @@ describe("build view — specializations", () => {
 });
 
 describe("build view — a pool that cannot close its requirement", () => {
-  test("warns instead of quietly showing a short list", () => {
+  test("says the seminar is required twice, because that is what it means", () => {
     const short = normalize(
       program("BS.CYOPR", [
         group({
@@ -940,9 +940,13 @@ describe("build view — a pool that cannot close its requirement", () => {
     ] as unknown as NonNullable<Ctx["allCourses"]>;
 
     build.mount(root, { trees: [short], enrolled: ["BS.CYOPR"], allCourses });
-    const warn = root.querySelector(".shortfall");
-    expect(warn?.textContent).toContain("of the 4 credits needed");
-    expect(warn?.textContent).toContain("taken twice");
+    // Four credits over a two-credit seminar is that seminar twice, and the
+    // pool's one-credit study is not part of the reading.
+    const row = Array.from(root.querySelectorAll(".candidate")).find((r) =>
+      r.textContent?.includes("HON-3020"),
+    );
+    expect(row?.textContent).toContain("take it twice");
+    expect(root.querySelector(".shortfall")).toBeNull();
   });
 });
 

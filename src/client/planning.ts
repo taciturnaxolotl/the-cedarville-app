@@ -28,36 +28,32 @@ import {
   type TermSlot,
   termsFrom,
 } from "../planner";
-import { buildGraph, type Graph, nodeOf } from "../prereqs";
+import { addSitting, buildGraph, type Graph, nodeOf } from "../prereqs";
 import {
+  baseCode,
   completedCourses,
   coursesNeededAcross,
   expectedCredits,
   inProgressCourses,
   type NeedOptions,
   type ProgramTree,
+  sittingCode,
   type Unenumerable,
 } from "../requirements";
 import { resolveRules } from "./bridge";
 import type { Ctx } from "./ctx";
 import { FULL_TIME, type Load } from "./load";
 
+/**
+ * A second sitting of a course is a code of its own, and everything that
+ * prices, names or dates one reads past the suffix. Re-exported because the
+ * views ask this question constantly and the solver is where it is answered.
+ */
+export { baseCode } from "../requirements";
+
 /** Where the build view keeps what the student has settled on. */
 export const PINS = "cedarville:pins";
 export const TRACKS = "cedarville:tracks";
-
-/**
- * Another sitting of the same course, told apart by a suffix.
- *
- * Some requirements can only be met by taking a course twice: "Honors
- * Integrative Seminars (4 credit hours)" draws on a pool whose seminar is
- * worth two, and a registrar can say that where a set of course codes cannot.
- * So a second sitting gets its own code — `HON-3020#2` — and everything that
- * prices, names or dates a course looks past the suffix. The graph gets a
- * clone of the node, so the second sitting waits on the same prerequisites the
- * first one did.
- */
-export const baseCode = (code: string) => code.split("#")[0] ?? code;
 
 /** The first term a plan may use. Everything before it is history or now. */
 const START = nextPlannableTerm(new Date());
@@ -171,13 +167,8 @@ export function planningFrom(ctx: Ctx): Planning {
 
   /** A sitting the graph can answer for: same requisites, its own code. */
   const sitting = (code: string, nth: number) => {
-    const base = baseCode(code);
-    if (nth <= 1) return base;
-    const instance = `${base}#${nth}`;
-    const node = graph.courses.get(base);
-    if (node && !graph.courses.has(instance)) {
-      graph.courses.set(instance, { ...node, code: instance });
-    }
+    const instance = sittingCode(code, nth);
+    addSitting(graph, instance);
     return instance;
   };
 
@@ -204,8 +195,22 @@ export function planningFrom(ctx: Ctx): Planning {
     earned,
     pursuing,
 
-    solve: (over = {}) =>
-      coursesNeededAcross(trees, { credits: price, have, pursuing, ...storedPicks(), ...over }),
+    solve: (over = {}) => {
+      const solved = coursesNeededAcross(trees, {
+        credits: price,
+        have,
+        pursuing,
+        ...storedPicks(),
+        ...over,
+      });
+      // The cover mints a second sitting when a pool cannot close its own
+      // requirement, and nothing downstream can plan a course the graph has
+      // never heard of.
+      for (const code of solved.courses) {
+        if (code.includes("#")) sitting(code, Number(code.split("#")[1]));
+      }
+      return solved;
+    },
 
     slots,
 

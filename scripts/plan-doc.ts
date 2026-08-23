@@ -11,8 +11,9 @@
 import { absorbed, creditCeiling, impliedOverlap, matchProgram, totalCredits } from "../src/book";
 import { compareTerms, runsIn, seasonsOffered, yearsOffered } from "../src/catalog";
 import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from "../src/planner";
-import { buildGraph, eligibility, nodeOf } from "../src/prereqs";
+import { addSitting, buildGraph, eligibility, nodeOf } from "../src/prereqs";
 import {
+  baseCode,
   completedCourses,
   coursesNeeded,
   coursesNeededAcross,
@@ -55,7 +56,9 @@ const records = everything.length
 const credits = new Map(
   records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MinimumCredits ?? 0]),
 );
-const price = (c: string) => credits.get(c) ?? 3;
+// A second sitting of a course is priced, named and dated as the course it
+// is: only the plan needs to tell the two apart.
+const price = (c: string) => credits.get(baseCode(c)) ?? 3;
 const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
 const graph = buildGraph(records.map(nodeOf));
 
@@ -67,9 +70,9 @@ const seasons = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, seas
 const cycles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]));
 /** The registrar's own statement, rather than what one term's listing implies. */
 const offeredIn = (code: string, slot: TermSlot) => {
-  const stated = seasons.get(code);
+  const stated = seasons.get(baseCode(code));
   if (stated?.length && !stated.includes(slot.season)) return false;
-  return runsIn(cycles.get(code) ?? "all", slot.year, slot.season);
+  return runsIn(cycles.get(baseCode(code)) ?? "all", slot.year, slot.season);
 };
 
 /**
@@ -97,7 +100,11 @@ const done = completedCourses(trees);
 const inProgress = inProgressCourses(trees);
 const have = new Set([...done, ...inProgress]);
 
-const label = (code: string) => `${code}${titles.has(code) ? ` — ${titles.get(code)}` : ""}`;
+const label = (code: string) => {
+  const base = baseCode(code);
+  const nth = Number(code.split("#")[1] ?? 1);
+  return `${base}${titles.has(base) ? ` — ${titles.get(base)}` : ""}${nth > 1 ? ` (sitting ${nth})` : ""}`;
+};
 
 /** A course code as `accepts` wants it: subject, number and title. */
 const asCourse = (code: string) => {
@@ -106,7 +113,7 @@ const asCourse = (code: string) => {
     Id: code,
     SubjectCode: subject,
     Number: number,
-    Title: titles.get(code) ?? code,
+    Title: titles.get(baseCode(code)) ?? code,
     CourseName: code,
     EquatedCourseIds: null,
     IsPseudoCourse: false,
@@ -175,6 +182,9 @@ for (const tree of trees) {
     const pool = resolved.get(groupKey(u.ids));
     if (pool) u.resolved = pool;
   }
+  // A requirement its pool cannot close is met by sitting a course twice, and
+  // the second sitting waits on whatever the first one did.
+  for (const code of need) addSitting(graph, code);
   const plan = projectPlan({
     need,
     completed: have,

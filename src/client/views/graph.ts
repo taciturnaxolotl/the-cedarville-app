@@ -303,12 +303,16 @@ export function mountGraph(
       // left-aligned one when a course turns out to gate eleven others.
       const inner = map.node.width - 16;
       const now = node.past === "running" ? " · now" : "";
+      // The suffix on a second sitting is bookkeeping. What a student needs to
+      // see is the course, and that this is the second time through it.
+      const nth = Number(node.code.split("#")[1] ?? 1);
+      const shown = nth > 1 ? `${node.code.split("#")[0]} ×${nth}` : node.code;
       const gates = node.unlocks ? `gates ${node.unlocks}` : "";
 
       g.append(
         Object.assign(svg("text", { x: 8, y: 17, class: "code" }), {
           textContent: fit(
-            node.code,
+            shown,
             Math.floor((inner - (`${node.credits}cr${now}`.length + 1) * 5.4) / 6.6),
           ),
         }),

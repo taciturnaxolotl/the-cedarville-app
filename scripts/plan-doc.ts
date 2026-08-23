@@ -59,6 +59,9 @@ const credits = new Map(
 // A second sitting of a course is priced, named and dated as the course it
 // is: only the plan needs to tell the two apart.
 const price = (c: string) => credits.get(baseCode(c)) ?? 3;
+const maxima = new Map(
+  records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.MaximumCredits ?? c.MinimumCredits ?? 0]),
+);
 const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Title]));
 const graph = buildGraph(records.map(nodeOf));
 
@@ -154,7 +157,13 @@ for (const tree of trees) {
   const cap = 15;
   const name = `${tree.code} — ${tree.title}`;
   // First pass: find the groups the evaluation will not enumerate.
-  const first = coursesNeeded(tree, { credits: price, have });
+  const naming = {
+    // A pool can only be judged short at what its courses can be taken for,
+    // and a requirement asking for two of something says so in its name.
+    ceiling: (c: string) => maxima.get(baseCode(c)) || price(c),
+    titleOf: (c: string) => titles.get(baseCode(c)) ?? "",
+  };
+  const first = coursesNeeded(tree, { credits: price, have, ...naming });
 
   const resolved = new Map<string, string[]>();
   for (const u of first.unenumerable) {
@@ -177,6 +186,7 @@ for (const tree of trees) {
     credits: price,
     have,
     resolved,
+    ...naming,
   });
   for (const u of first.unenumerable) {
     const pool = resolved.get(groupKey(u.ids));

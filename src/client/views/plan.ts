@@ -354,8 +354,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     if (nth > 1) {
       const again = tag(`sitting ${nth}`, "rule");
       again.title =
-        "A second time through the same course. Some requirements can only be met that way; " +
-        "check with your advisor that this one is meant to be.";
+        "The same course again, because the requirement asks for more of it than one sitting " +
+        "gives: the honours seminars are four credits of a two-credit seminar, taken twice on " +
+        "different topics. Worth confirming with your advisor.";
       line.append(again);
     }
 
@@ -523,7 +524,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         // tab — and says what to do about it, since the student can now do it.
         if (shortfalls.length) {
           const box = el("div", "term unenumerable");
-          box.append(el("h3", undefined, "needs a course taken twice"));
+          box.append(el("h3", undefined, "not closed by its own list"));
           for (const short of shortfalls) {
             const held = short.pool.filter((c) =>
               plan.terms.some((t) => t.courses.some((c2) => baseCode(c2.code) === c)),
@@ -533,9 +534,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
                 "p",
                 "muted",
                 `${short.text}: ${short.pool.join(", ")} add up to ${short.wanted - short.short} ` +
-                  `of the ${short.wanted} credits it asks for. The rest is the same course again — ` +
-                  `add ${held[0] ?? short.pool[0]} to a term with + to plan a second sitting, and ` +
-                  "check with your advisor that it is meant that way.",
+                  `of the ${short.wanted} credits it asks for, and nothing here says what closes ` +
+                  `the rest. Often it is one of them taken again — add ${held[0] ?? short.pool[0]} ` +
+                  "to a term with + to plan a second sitting — but ask your advisor first.",
               ),
             );
           }

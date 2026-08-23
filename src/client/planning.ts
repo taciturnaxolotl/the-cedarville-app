@@ -198,6 +198,12 @@ export function planningFrom(ctx: Ctx): Planning {
     solve: (over = {}) => {
       const solved = coursesNeededAcross(trees, {
         credits: price,
+        // What a course could be taken for, which is what decides whether a
+        // pool can close its requirement at all.
+        ceiling: (code) => maxima.get(baseCode(code)) || price(code),
+        // And what it is called, which is where a requirement asking for two
+        // of something says so.
+        titleOf: (code) => titles.get(baseCode(code)) ?? "",
         have,
         pursuing,
         ...storedPicks(),

@@ -1173,6 +1173,64 @@ describe("a requirement its own pool cannot close", () => {
     );
   const seminarCredits = (c: string) => (baseCode(c) === "HON-3020" ? 2 : 1);
 
+  /*
+   * The printed catalog, 2024-25, page 209: "Two sections of the Honors
+   * Seminar (HON-3020) on different topics". Colleague states only the credit
+   * total and expands the pool to every HON course it can find, so the pool
+   * carries an independent study the requirement never meant. The requirement
+   * names what it wants and one course in the pool wears that name.
+   */
+  test("takes the course the requirement is named after, twice", () => {
+    const titles: Record<string, string> = {
+      "HON-3020": "Honors Seminar",
+      "HON-4900": "Ind Study-Honors",
+    };
+    const { courses, shortfalls } = coursesNeededAcross([seminars()], {
+      credits: seminarCredits,
+      // Honest about the study's range, so nothing here rests on the pool
+      // looking too small to close itself.
+      ceiling: (c) => (baseCode(c) === "HON-3020" ? 2 : 3),
+      titleOf: (c) => titles[baseCode(c)] ?? "",
+      have: new Set(),
+    });
+
+    expect([...courses].sort()).toEqual(["HON-3020", "HON-3020#2"]);
+    expect(shortfalls).toEqual([]);
+  });
+
+  test("leaves a pool alone when nothing in it wears the requirement's name", () => {
+    // The same shape, and the seminar renamed: now the pool is a choice
+    // between two courses and the cover treats it as one.
+    const { courses } = coursesNeededAcross([seminars()], {
+      credits: seminarCredits,
+      ceiling: (c) => (baseCode(c) === "HON-3020" ? 2 : 3),
+      titleOf: () => "Special Topics",
+      have: new Set(),
+    });
+    expect([...courses].every((c) => !c.includes("#"))).toBe(true);
+  });
+
+  test("a variable-credit course is not short just because it starts low", () => {
+    // "Research (3 credit hours)" over one course worth one to three is three
+    // credits of that course, not three sittings of it.
+    const tree = normalize(
+      program("A", [
+        group({
+          DisplayText: "Independent research (3 credit hours)",
+          FromCourses: [course("1", "RSCH", "4900")],
+          MinCredits: 3,
+        }),
+      ]),
+    );
+    const { courses } = coursesNeededAcross([tree], {
+      credits: () => 1,
+      ceiling: () => 3,
+      titleOf: () => "Independent Research",
+      have: new Set(),
+    });
+    expect([...courses]).toEqual(["RSCH-4900"]);
+  });
+
   test("takes the course twice, which is what the plural was always saying", () => {
     // "Honors Integrative Seminars (4 credit hours)" over a two-credit seminar
     // and a one-credit study is not a choice between them: it is that seminar,

@@ -97,8 +97,9 @@ function priceOf(candidate: Candidate): { text: string; kind: string; why: strin
       text: candidate.sittings === 2 ? "take it twice" : `take it ${candidate.sittings}×`,
       kind: "free",
       why:
-        "this requirement asks for more credits than its pool holds, so it means this course " +
-        "more than once — check with your advisor that it is meant that way",
+        "this requirement asks for more of this course than one sitting gives, so it means the " +
+        "course more than once — the honours seminars are four credits of a two-credit seminar, " +
+        "taken twice on different topics. Worth confirming with your advisor.",
     };
   }
   if (candidate.forced) {

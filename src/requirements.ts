@@ -851,6 +851,22 @@ export interface NeedOptions {
    * keeps this module free of the prerequisite graph.
    */
   cost?: (code: string) => number;
+  /**
+   * The most a course can be taken for, when the catalog gives a range.
+   *
+   * Only used to ask whether a pool could ever close its requirement, and
+   * asking that with the floor is how a 1-to-3 credit study reads as though
+   * it were worth one. Defaults to `credits`.
+   */
+  ceiling?: (code: string) => number;
+  /**
+   * A course's title, which is sometimes the only place a requirement says
+   * what it means: "Honors Integrative Seminars (4 credit hours)" over a pool
+   * holding "Honors Seminar" is the catalog's own sentence, and the printed
+   * catalog says it outright — "two sections of the Honors Seminar (HON-3020)
+   * on different topics".
+   */
+  titleOf?: (code: string) => string;
   /** Courses already passed or under way. */
   have: ReadonlySet<string>;
   /**
@@ -1396,6 +1412,79 @@ export function coursesNeededAcross(
 }
 
 /**
+ * The course a requirement means to be taken more than once.
+ *
+ * Two readings, and the first is the one the printed catalog writes out. A
+ * requirement usually names the thing it wants, in the plural, and a pool
+ * course carries that name in the singular: "Honors Integrative Seminars
+ * (4 credit hours)" over "Honors Seminar" is the 2024-25 catalog's own
+ * sentence, "two sections of the Honors Seminar (HON-3020) on different
+ * topics". Colleague states the credits and expands the pool to every HON
+ * course it can find, so the pool holds an independent study that has nothing
+ * to do with the requirement. The name is the only place the instruction
+ * survives.
+ *
+ * The second reading is arithmetic, and only counts when the first finds
+ * nothing: a pool that cannot reach its own credit total even with every
+ * course taken for the most it is worth is asking for something twice.
+ * Measured at the ceiling on purpose — a one-to-three credit study priced at
+ * its floor makes any pool holding it look short.
+ */
+function repeatedCourse(
+  choice: { text?: string; pool: string[]; credits: number },
+  options: NeedOptions,
+): string | undefined {
+  const ceiling = options.ceiling ?? options.credits;
+  const fits = (code: string) =>
+    options.credits(code) > 0 && options.credits(code) < choice.credits;
+
+  const named = choice.text ? headNoun(choice.text) : undefined;
+  if (named && options.titleOf) {
+    const matching = choice.pool.filter(
+      (code) =>
+        fits(code) && new RegExp(`\\b${named}s?\\b`, "i").test(options.titleOf?.(code) ?? ""),
+    );
+    // One course wearing the requirement's name is an instruction. Two is a
+    // choice between them, and the requirement never said which.
+    if (matching.length === 1) return matching[0];
+  }
+
+  const worth = choice.pool.reduce((n, c) => n + ceiling(c), 0);
+  if (worth >= choice.credits) return undefined;
+
+  // Fewest sittings that reach it without overshooting: four credits is two
+  // two-credit seminars rather than four one-credit studies.
+  const sittings = (code: string) => Math.ceil(choice.credits / options.credits(code));
+  return [...choice.pool]
+    .filter(fits)
+    .sort(
+      (a, b) =>
+        sittings(a) * options.credits(a) - sittings(b) * options.credits(b) ||
+        sittings(a) - sittings(b) ||
+        a.localeCompare(b),
+    )[0];
+}
+
+/**
+ * The thing a requirement is asking for, singular: "Honors Integrative
+ * Seminars (4 credit hours)" is asking for a Seminar.
+ *
+ * The last plural word before the credit count, which is where English puts
+ * the head of a noun phrase. Nothing else in the title is load-bearing:
+ * "Integrative" describes the seminar and "Honors" names the programme.
+ */
+function headNoun(text: string): string | undefined {
+  const words = text
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\bselected from the following\b/gi, " ")
+    .replace(/[^A-Za-z\s]/g, " ")
+    .trim()
+    .split(/\s+/);
+  const last = [...words].reverse().find((w) => w.length > 4 && w.toLowerCase().endsWith("s"));
+  return last ? last.slice(0, -1) : undefined;
+}
+
+/**
  * Satisfies every choose-from group with as few extra credits as possible.
  *
  * Solved together rather than one group at a time, because Colleague lets a
@@ -1431,33 +1520,14 @@ function cover(
   /** What each choice still wants once nothing more can be bought for it. */
   const shortfall = () => owed.map((o) => Math.max(0, o.left));
 
-  /**
-   * A pool worth less than the requirement standing over it is not a choice
-   * at all: "Honors Integrative Seminars (4 credit hours)" over a two-credit
-   * seminar and a one-credit study means that seminar twice. Filled here,
-   * before the cover runs, and with sittings of one course rather than a mix
-   * — the plural in the name is the whole instruction.
-   *
-   * Fewest sittings that reach it without overshooting, which for four
-   * credits is two seminars and not four independent studies.
+  /*
+   * Requirements met by taking one course more than once, filled before the
+   * cover runs so nothing buys a filler course on the way.
    */
   for (const [at, choice] of choices.entries()) {
     const owe = owed[at];
     if (!owe || owe.left <= 0) continue;
-    const worth = choice.pool.reduce((n, c) => n + options.credits(c), 0);
-    if (worth >= choice.credits) continue;
-
-    const sittings = (code: string) => Math.ceil(owe.left / (options.credits(code) || 1));
-    const pick = [...choice.pool]
-      .filter((c) => options.credits(c) > 0)
-      .sort(
-        (a, b) =>
-          sittings(a) * options.credits(a) -
-            owe.left -
-            (sittings(b) * options.credits(b) - owe.left) ||
-          sittings(a) - sittings(b) ||
-          a.localeCompare(b),
-      )[0];
+    const pick = repeatedCourse(choice, options);
     if (!pick) continue;
 
     for (let nth = 1; owe.left > 0; nth++) {
@@ -1474,23 +1544,12 @@ function cover(
     const open = owed.filter((o) => o.left > 0);
     if (open.length === 0) return shortfall();
 
-    const held = (code: string) => courses.has(code) || options.have.has(code);
-    /** The first sitting of this course nobody has bought yet. */
-    const next = (code: string) => {
-      let nth = 1;
-      while (held(sittingCode(code, nth))) nth++;
-      return sittingCode(code, nth);
-    };
-
+    // Repeats are decided before the cover runs and never inside it: a pool
+    // that has merely run out is a requirement we cannot close, and buying
+    // the same course again to make the arithmetic work would invent a
+    // registrar's instruction out of a rounding error. Those stay shortfalls.
     const candidates = new Set(
-      open.flatMap((o) => {
-        const fresh = o.pool.filter((c) => !held(c));
-        // Only once the pool is exhausted, and never before: a literature
-        // elective with forty options wants a different course, not the same
-        // one twice. A pool that has run out and still owes credit is asking
-        // for another sitting, and that is the only reading left.
-        return fresh.length ? fresh : o.pool.map(next);
-      }),
+      open.flatMap((o) => o.pool).filter((c) => !courses.has(c) && !options.have.has(c)),
     );
     if (candidates.size === 0) return shortfall();
 

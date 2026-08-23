@@ -177,19 +177,30 @@ export interface DegreePlanDto {
   [key: string]: unknown;
 }
 
+/**
+ * The plan as Self-Service renders it: the DTO plus everything the page needs
+ * around it.
+ *
+ * Worth naming separately, because the endpoints disagree about how to hand it
+ * over. `Current` wraps it in a `DegreePlan` property alongside the student's
+ * programs; every write returns this object bare. Reading one shape where the
+ * other arrived is how a successful write reports itself as a failure.
+ */
+export interface DegreePlanView {
+  PersonId: string;
+  Id: number;
+  Version: number;
+  DegreePlanDto: DegreePlanDto;
+  /** Terms on the plan, in Colleague's own order. */
+  Terms: { Code: string; Description: string; IsTermProtected?: boolean }[];
+  /** Terms the plan could be extended with — where the summers live. */
+  UnplannedTerms?: { Code: string }[] | string[];
+  AvailablePlanningTerms?: { Code: string }[] | string[];
+  IsPlanProtected?: boolean;
+}
+
 export interface DegreePlanResponse {
-  DegreePlan: {
-    PersonId: string;
-    Id: number;
-    Version: number;
-    DegreePlanDto: DegreePlanDto;
-    /** Terms on the plan, in Colleague's own order. */
-    Terms: { Code: string; Description: string; IsTermProtected?: boolean }[];
-    /** Terms the plan could be extended with — where the summers live. */
-    UnplannedTerms?: { Code: string }[] | string[];
-    AvailablePlanningTerms?: { Code: string }[] | string[];
-    IsPlanProtected?: boolean;
-  };
+  DegreePlan: DegreePlanView;
   StudentPrograms: { Code: string; Title: string; Catalog: string; StudentId: string }[];
 }
 

@@ -14,6 +14,7 @@ import type {
   CatalogVocabulary,
   DegreePlanDto,
   DegreePlanResponse,
+  DegreePlanView,
   EvaluationResponse,
   ProgramSummary,
 } from "./types";
@@ -144,40 +145,43 @@ function readPlan(response: DegreePlanResponse, studentId: string): ColleaguePla
  * far it got, because a half-applied plan the student is told about is a
  * great deal better than one they are not.
  */
+/**
+ * The plan as of this tab's last write.
+ *
+ * Colleague versions the plan and refuses a stale copy, so each write must
+ * carry what the one before it returned. The app sends changes one at a time
+ * — that is the only way it can show progress across thirty round trips —
+ * so the thread between them is kept here rather than re-fetched thirty
+ * times. Cleared on any failure, so the next attempt starts from the truth.
+ */
+let carried: DegreePlanDto | null = null;
+
 async function applyPlan(changes: Change[]): Promise<Applied> {
   const id = await studentId();
-  let response = await api.currentDegreePlan(id);
-  if (response.DegreePlan.IsPlanProtected) {
-    throw new Error("your degree plan is protected; an advisor has to unlock it");
+  if (!carried) {
+    const current = await api.currentDegreePlan(id);
+    if (current.DegreePlan.IsPlanProtected) {
+      throw new Error("your degree plan is protected; an advisor has to unlock it");
+    }
+    carried = current.DegreePlan.DegreePlanDto;
   }
 
-  let dto: DegreePlanDto = response.DegreePlan.DegreePlanDto;
   const done: Change[] = [];
-
   for (const change of changes) {
     try {
-      switch (change.kind) {
-        case "term":
-          response = await api.addTermToPlan(change.termId, dto);
-          break;
-        case "add":
-          response = await api.addCourseToPlan(change.courseId, change.termId, change.credits, dto);
-          break;
-        case "move":
-          response = await api.moveCourseOnPlan(change.courseId, change.from, change.to, dto);
-          break;
-        case "remove":
-          response = await api.removeCourseFromPlan(
-            change.courseId,
-            change.termId,
-            change.sectionId,
-            dto,
-          );
-          break;
-      }
-      dto = response.DegreePlan.DegreePlanDto;
+      const dto: DegreePlanDto = carried;
+      const view: DegreePlanView = await (change.kind === "term"
+        ? api.addTermToPlan(change.termId, dto)
+        : change.kind === "add"
+          ? api.addCourseToPlan(change.courseId, change.termId, change.credits, dto)
+          : change.kind === "move"
+            ? api.moveCourseOnPlan(change.courseId, change.from, change.to, dto)
+            : api.removeCourseFromPlan(change.courseId, change.termId, change.sectionId, dto));
+      carried = view.DegreePlanDto;
       done.push(change);
     } catch (err) {
+      // Whatever went wrong, this tab's copy of the plan is now a guess.
+      carried = null;
       return {
         applied: done,
         stopped: { change, why: err instanceof Error ? err.message : String(err) },

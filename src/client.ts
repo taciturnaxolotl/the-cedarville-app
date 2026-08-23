@@ -10,6 +10,7 @@ import type {
   CatalogVocabulary,
   DegreePlanDto,
   DegreePlanResponse,
+  DegreePlanView,
   EvaluationResponse,
   ProgramSummary,
   SearchCriteria,
@@ -88,6 +89,16 @@ export class SelfService {
     }
   }
 
+  /**
+   * A write, unwrapped. Colleague answers a mutation with the plan itself and
+   * `Current` with the plan inside a wrapper; this accepts either, so nothing
+   * downstream has to know which endpoint it came from.
+   */
+  async #written(path: string, body: unknown): Promise<DegreePlanView> {
+    const answer = await this.post<DegreePlanView & { DegreePlan?: DegreePlanView }>(path, body);
+    return answer.DegreePlan ?? answer;
+  }
+
   get<T>(path: string, query?: Record<string, string>): Promise<T> {
     const qs = query ? `?${new URLSearchParams(query)}` : "";
     return this.#request<T>("GET", path + qs);
@@ -147,6 +158,12 @@ export class SelfService {
 
   // ---- writing to the degree plan --------------------------------------
   //
+  // Each of these hands back the updated plan, and hands it back bare: where
+  // `Current` wraps the same object in a `DegreePlan` property, a write
+  // returns it on its own. Reading the wrapper off a write threw on every
+  // call, after the change had already been made — so the plan filled up
+  // while the interface reported nothing written at all.
+  //
   // The only endpoints in this file that change anything. Argument names are
   // Self-Service's own, read off the Plan & Schedule bundle rather than
   // guessed at, and each call carries the whole plan and returns the updated
@@ -162,8 +179,8 @@ export class SelfService {
     termId: string,
     credits: number,
     degreePlan: DegreePlanDto,
-  ): Promise<DegreePlanResponse> {
-    return this.post("/Student/Planning/DegreePlans/AddCourse", {
+  ): Promise<DegreePlanView> {
+    return this.#written("/Student/Planning/DegreePlans/AddCourse", {
       courseId,
       termId,
       credits,
@@ -177,8 +194,8 @@ export class SelfService {
     oldTerm: string,
     newTerm: string,
     degreePlan: DegreePlanDto,
-  ): Promise<DegreePlanResponse> {
-    return this.post("/Student/Planning/DegreePlans/UpdateCourse", {
+  ): Promise<DegreePlanView> {
+    return this.#written("/Student/Planning/DegreePlans/UpdateCourse", {
       courseId,
       oldTerm,
       newTerm,
@@ -191,8 +208,8 @@ export class SelfService {
     termId: string,
     sectionId: string | null,
     degreePlan: DegreePlanDto,
-  ): Promise<DegreePlanResponse> {
-    return this.post("/Student/Planning/DegreePlans/RemoveCourse", {
+  ): Promise<DegreePlanView> {
+    return this.#written("/Student/Planning/DegreePlans/RemoveCourse", {
       removeCourseId: courseId,
       removeCourseTermId: termId,
       removeCourseSectionId: sectionId,
@@ -201,8 +218,8 @@ export class SelfService {
   }
 
   /** Opens a term on the plan. Colleague will not hold a course in a term the plan has not got. */
-  addTermToPlan(termId: string, degreePlan: DegreePlanDto): Promise<DegreePlanResponse> {
-    return this.post("/Student/Planning/DegreePlans/AddTerm", {
+  addTermToPlan(termId: string, degreePlan: DegreePlanDto): Promise<DegreePlanView> {
+    return this.#written("/Student/Planning/DegreePlans/AddTerm", {
       addTermId: termId,
       degreePlan,
     });

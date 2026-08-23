@@ -338,47 +338,96 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     panel.append(row);
   }
 
+  /**
+   * Writes the changes, one at a time, saying where it has got to.
+   *
+   * One at a time because thirty round trips is long enough that a student
+   * needs to see it moving, and a single call across the bridge can only
+   * answer once. The extension keeps the plan Colleague handed back between
+   * them, which is what the next write has to carry.
+   */
   async function commit(changes: Change[]) {
-    panel.replaceChildren(line("writing to Colleague…"));
-    let result: Awaited<ReturnType<typeof applyPlan>>;
-    try {
-      result = await applyPlan(changes);
-    } catch (err) {
-      panel.replaceChildren(
-        el("h3", undefined, "nothing was written"),
-        line(err instanceof Error ? err.message : String(err), "why"),
-      );
-      return;
+    const bar = el("progress");
+    bar.max = changes.length;
+    bar.value = 0;
+    const doing = el("p", "muted");
+    panel.replaceChildren(el("h3", undefined, "writing to your degree plan"), bar, doing);
+
+    const done: Change[] = [];
+    let stopped: { change: Change; why: string } | null = null;
+
+    for (const change of changes) {
+      doing.textContent = `${done.length + 1} of ${changes.length} · ${sayChange(change)}`;
+      try {
+        const result = await applyPlan([change]);
+        done.push(...result.applied);
+        if (result.stopped) {
+          stopped = result.stopped;
+          break;
+        }
+      } catch (err) {
+        stopped = { change, why: err instanceof Error ? err.message : String(err) };
+        break;
+      }
+      bar.value = done.length;
     }
 
-    // The ledger is what makes a later sync able to withdraw its own work and
-    // nobody else's, so it is written from what actually landed.
+    await settle(changes, done, stopped);
+  }
+
+  /**
+   * Says what happened, having gone and looked.
+   *
+   * Counting the calls that came back is not the same as counting what
+   * landed: a write that succeeded and then failed to be *read* reported
+   * itself as nothing written while the course sat on the plan. So the report,
+   * and the ledger under it, come from Colleague's own answer afterwards
+   * rather than from what this end believes it did.
+   */
+  async function settle(
+    changes: Change[],
+    done: Change[],
+    stopped: { change: Change; why: string } | null,
+  ) {
+    const wanted = new Set(
+      changes.flatMap((c) =>
+        c.kind === "add"
+          ? [mark(c.courseId, c.termId)]
+          : c.kind === "move"
+            ? [mark(c.courseId, c.to)]
+            : [],
+      ),
+    );
+
+    let landed = new Set<string>();
+    try {
+      const theirs = await colleaguePlan();
+      landed = new Set(theirs.planned.map((c) => mark(c.courseId, c.termId)));
+    } catch {
+      /* Cannot check, so the count below falls back to what the calls said. */
+    }
+
+    const confirmed = [...wanted].filter((entry) => landed.has(entry));
     const pushed = new Set(read<string[]>(PUSHED, []));
-    for (const change of result.applied) {
-      if (change.kind === "add") pushed.add(mark(change.courseId, change.termId));
-      if (change.kind === "move") {
-        pushed.delete(mark(change.courseId, change.from));
-        pushed.add(mark(change.courseId, change.to));
-      }
+    for (const entry of confirmed) pushed.add(entry);
+    for (const change of done) {
       if (change.kind === "remove") pushed.delete(mark(change.courseId, change.termId));
+      if (change.kind === "move") pushed.delete(mark(change.courseId, change.from));
     }
     localStorage.setItem(PUSHED, JSON.stringify([...pushed]));
 
-    panel.replaceChildren(
-      el(
-        "h3",
-        undefined,
-        `${result.applied.length} of ${changes.length} written to your degree plan`,
-      ),
-    );
-    if (result.stopped) {
-      panel.append(
-        line(
-          `stopped at "${sayChange(result.stopped.change)}" — ${result.stopped.why}`,
-          "muted bad",
-        ),
-      );
-      panel.append(line("nothing after that was tried. Your plan holds what did land."));
+    const count = landed.size ? confirmed.length : done.length;
+    panel.replaceChildren(el("h3", undefined, `${count} of ${changes.length} on your degree plan`));
+    if (stopped) {
+      panel.append(line(`stopped at "${sayChange(stopped.change)}" — ${stopped.why}`, "why"));
+      panel.append(line("nothing after that was tried."));
+      const again = el("button", "export");
+      again.type = "button";
+      again.textContent = "work out what is left";
+      again.addEventListener("click", () => void preview());
+      const row = el("div", "sync-actions");
+      row.append(again);
+      panel.append(row);
     }
   }
 

@@ -104,17 +104,32 @@ export function mountGraph(
 
   root.replaceChildren(legend, turn, board);
 
-  /** Everything the focused course waits on, and everything waiting on it. */
-  function related(map: CourseMap, code: string): Set<string> {
-    const lit = new Set([code]);
-    for (let grew = true; grew; ) {
-      grew = false;
-      for (const e of map.edges) {
-        if (lit.has(e.from) && !lit.has(e.to)) lit.add(e.to), (grew = true);
-        if (lit.has(e.to) && !lit.has(e.from)) lit.add(e.from), (grew = true);
+  /**
+   * What the focused course waits on, and what waits on it — kept apart.
+   *
+   * Walking the edges in both directions at once lights the whole connected
+   * component, which for a course in the middle of a degree is most of the
+   * picture: from a prerequisite you reach its other dependents, and from
+   * those their prerequisites, and nothing on screen is any longer about the
+   * course under the pointer. Two directed walks answer the question actually
+   * being asked — what do I need first, and what is stuck behind this.
+   */
+  function chains(map: CourseMap, code: string): { before: Set<string>; after: Set<string> } {
+    const walk = (forwards: boolean) => {
+      const found = new Set<string>();
+      const queue = [code];
+      while (queue.length) {
+        const at = queue.pop() as string;
+        for (const edge of map.edges) {
+          const [from, to] = forwards ? [edge.from, edge.to] : [edge.to, edge.from];
+          if (from !== at || found.has(to) || to === code) continue;
+          found.add(to);
+          queue.push(to);
+        }
       }
-    }
-    return lit;
+      return found;
+    };
+    return { before: walk(false), after: walk(true) };
   }
 
   /**
@@ -219,15 +234,45 @@ export function mountGraph(
   function highlight() {
     if (!drawn) return;
     const { focus } = store.get();
-    const lit = focus ? related(drawn.map, focus) : null;
+    const chain = focus ? chains(drawn.map, focus) : null;
+
     for (const [code, box] of drawn.nodes) {
-      box.classList.toggle("dim", Boolean(lit && !lit.has(code)));
+      const before = Boolean(chain?.before.has(code));
+      const after = Boolean(chain?.after.has(code));
+      box.classList.toggle("before", before);
+      box.classList.toggle("after", after);
+      box.classList.toggle("focus", code === focus);
+      box.classList.toggle("dim", Boolean(chain) && !before && !after && code !== focus);
     }
+
     for (const edge of drawn.edges) {
-      edge.el.classList.toggle("dim", Boolean(lit && !(lit.has(edge.from) && lit.has(edge.to))));
+      // An edge belongs to the chain only if it runs the same way the walk
+      // did: the link into a prerequisite of a prerequisite is part of what
+      // this course waits on; the link out of it to somebody else's course
+      // is not, and lighting it was most of what made this unreadable.
+      const up = Boolean(
+        chain?.before.has(edge.from) && (chain.before.has(edge.to) || edge.to === focus),
+      );
+      const down = Boolean(
+        chain?.after.has(edge.to) && (chain.after.has(edge.from) || edge.from === focus),
+      );
+      edge.el.classList.toggle("before", up);
+      edge.el.classList.toggle("after", down);
+      edge.el.classList.toggle("dim", Boolean(chain) && !up && !down);
     }
-    trace.textContent = focus ? ` · tracing ${focus}` : "";
+
+    /*
+     * And say it in words, because a course with nothing either side of it
+     * lights nothing at all — which is the true answer for the honours
+     * colloquium and reads as a broken hover.
+     */
+    trace.textContent = focus
+      ? ` · ${focus}: ${count(chain?.before.size ?? 0, "waits on")}, ${count(chain?.after.size ?? 0, "unlocks")}`
+      : "";
   }
+
+  /** "waits on 3", or "waits on nothing". */
+  const count = (n: number, verb: string) => (n === 0 ? `${verb} nothing` : `${verb} ${n}`);
 
   function draw() {
     const map = buildMap(plan, {

@@ -1151,6 +1151,33 @@ label.section.clashes:not(:has(input:checked)) .when {
   fill: var(--yellow);
 }
 
+/* Tracing a chain: what a course waits on, and what waits on it.
+ *
+ * Two colours rather than one highlight, because they are two different
+ * answers. Peach is behind you — work to do before this. Sky is ahead —
+ * work stuck behind this until it is done.
+ */
+.graph .node.before rect {
+  stroke: var(--peach);
+}
+
+.graph .node.after rect {
+  stroke: var(--sky);
+}
+
+.graph .node.focus rect {
+  stroke: var(--lavender);
+  stroke-width: 2;
+}
+
+.graph .edge.before {
+  stroke: var(--peach);
+}
+
+.graph .edge.after {
+  stroke: var(--sky);
+}
+
 /* A course being carried to another term, and the term it would land in. */
 
 .graph .node.moved rect {

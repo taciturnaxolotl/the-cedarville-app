@@ -1766,7 +1766,20 @@ describe("plan view — drawn as a graph", () => {
     plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
     const first = root.querySelector(".graph .node") as unknown as HTMLElement;
     first.dispatchEvent(new window.Event("mouseenter") as unknown as Event);
-    expect(root.textContent).toContain("tracing");
+    // Which way a course is connected is the whole question: what it waits on
+    // is work to do first, what waits on it is work stuck behind it.
+    expect(root.textContent).toContain("waits on nothing, unlocks 1");
+    expect(root.querySelectorAll(".graph .node.after")).toHaveLength(1);
+    expect(root.querySelectorAll(".graph .node.before")).toHaveLength(0);
+  });
+
+  test("and lights the other end of the chain the other way round", () => {
+    asGraph();
+    plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses });
+    const second = root.querySelectorAll(".graph .node")[1] as unknown as HTMLElement;
+    second.dispatchEvent(new window.Event("mouseenter") as unknown as Event);
+    expect(root.textContent).toContain("waits on 1, unlocks nothing");
+    expect(root.querySelectorAll(".graph .node.before")).toHaveLength(1);
   });
 
   test("the box under the pointer survives being hovered", () => {
@@ -1780,7 +1793,7 @@ describe("plan view — drawn as a graph", () => {
     expect(root.querySelector(".graph .node")).toBe(box as never);
 
     box.dispatchEvent(new window.Event("mouseleave") as unknown as Event);
-    expect(root.textContent).not.toContain("tracing");
+    expect(root.textContent).not.toContain("waits on");
     expect(root.querySelectorAll(".graph .node.dim")).toHaveLength(0);
   });
 

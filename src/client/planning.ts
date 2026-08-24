@@ -94,6 +94,8 @@ export interface Planning {
   price(code: string): number;
   /** Colleague's own id for a course, which every write to a plan is keyed on. */
   courseId(code: string): string | undefined;
+  /** Courses that run back to back, follower to leader. */
+  sequences: ReadonlyMap<string, string>;
   /**
    * Makes a second (or third) sitting of a course plannable, and hands back
    * the code that names it. Idempotent: asking twice for the same sitting
@@ -193,6 +195,7 @@ export function planningFrom(ctx: Ctx): Planning {
     title: (code) => titles.get(baseCode(code)) ?? "",
     price,
     courseId: (code) => ids.get(baseCode(code)),
+    sequences,
     sitting,
     seasonsOf: (code) => seasons.get(baseCode(code)) ?? [],
     offeredIn,

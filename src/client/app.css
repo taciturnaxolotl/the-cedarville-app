@@ -1151,6 +1151,12 @@ label.section.clashes:not(:has(input:checked)) .when {
   fill: var(--yellow);
 }
 
+/* A link the catalog implies and the requisite table never states: the two
+ * halves of a sequence. Dashed, because it is a different kind of claim. */
+.graph .edge.sequence {
+  stroke-dasharray: 3 3;
+}
+
 /* Tracing a chain: what a course waits on, and what waits on it.
  *
  * Two colours rather than one highlight, because they are two different

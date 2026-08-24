@@ -264,3 +264,52 @@ describe("credit brought in", () => {
     expect(map.edges.map((e) => `${e.from}->${e.to}`)).toEqual(["CS-1210->CS-1220"]);
   });
 });
+
+describe("a link the requisite table never states", () => {
+  /*
+   * "Honors Sr Colloq I" gates its own second half as surely as any
+   * prerequisite does — the catalog says to take them in sequence — and
+   * Colleague records no requisite at all. Without the pairing the two sat
+   * side by side with nothing drawn between them, and hovering either lit
+   * nothing.
+   */
+  const colloquium = buildGraph([node("HON-4910"), node("HON-4920"), node("ART-1100")]);
+  const board = plan([
+    ["SP27", ["HON-4910", "ART-1100"]],
+    ["FA27", ["HON-4920"]],
+  ]);
+
+  test("draws nothing between them on the requisites alone", () => {
+    const map = buildMap(board, { graph: colloquium, have: new Set() });
+    expect(map.edges).toHaveLength(0);
+  });
+
+  test("and draws the sequence when it is told about it", () => {
+    const map = buildMap(board, {
+      graph: colloquium,
+      have: new Set(),
+      sequences: new Map([["HON-4920", "HON-4910"]]),
+    });
+    expect(map.edges).toEqual([
+      expect.objectContaining({ from: "HON-4910", to: "HON-4920", sequence: true }),
+    ]);
+    // And it counts: the first half is genuinely holding up the second.
+    expect(map.nodes.find((n) => n.code === "HON-4910")?.unlocks).toBe(1);
+  });
+
+  test("without doubling a link the requisites already carry", () => {
+    const map = buildMap(
+      plan([
+        ["SP27", ["CS-1210"]],
+        ["FA27", ["CS-1220"]],
+      ]),
+      {
+        graph: chain,
+        have: new Set(),
+        sequences: new Map([["CS-1220", "CS-1210"]]),
+      },
+    );
+    expect(map.edges).toHaveLength(1);
+    expect(map.edges[0]?.sequence).toBeUndefined();
+  });
+});

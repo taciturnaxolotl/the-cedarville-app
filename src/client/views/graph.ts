@@ -77,7 +77,7 @@ export function mountGraph(
   } = {},
 ) {
   const subs = new Subscriptions();
-  const { graph, have, title, trees } = planning;
+  const { graph, have, sequences, title, trees } = planning;
   const store = createStore<State>({
     focus: null,
     // Down by default: a degree is long and a term is not, so the picture is
@@ -280,6 +280,7 @@ export function mountGraph(
       have,
       history: coursesTaken(trees),
       title,
+      sequences,
       flow: store.get().flow,
     });
     legend.replaceChildren();
@@ -325,7 +326,7 @@ export function mountGraph(
     for (const edge of map.edges) {
       const el = svg("path", {
         d: edge.path,
-        class: "edge",
+        class: `edge${edge.sequence ? " sequence" : ""}`,
         fill: "none",
       });
       edges.push({ from: edge.from, to: edge.to, el });

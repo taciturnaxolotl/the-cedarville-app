@@ -42,6 +42,12 @@ export interface MapNode {
 export interface MapEdge {
   from: string;
   to: string;
+  /**
+   * Drawn because the two run back to back rather than because Colleague
+   * records a requisite. True of the honours colloquium, whose halves gate
+   * each other with nothing in the requisite table to say so.
+   */
+  sequence?: boolean;
   /** Both ends on the critical path, so this edge is what sets the date. */
   critical: boolean;
   /** Cubic bezier, left edge of the dependent to the right edge of its gate. */
@@ -109,6 +115,8 @@ export interface MapOptions {
   /** Room for a term's heading: above the first row, or above every row. */
   headerHeight?: number;
   flow?: Flow;
+  /** Courses that run back to back, follower to leader. Drawn as links too. */
+  sequences?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -254,7 +262,7 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
   // An edge only exists between two courses both on the plan. A prerequisite
   // already passed is satisfied and draws nothing: the graph is about what is
   // still ahead, not a history of the degree.
-  const pairs: { from: string; to: string }[] = [];
+  const pairs: { from: string; to: string; sequence?: boolean }[] = [];
   const out = new Map<string, string[]>();
   for (const node of nodes.values()) {
     // Direct gates only: the implied CS-1210 to CS-2210 edge says nothing the
@@ -269,13 +277,29 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
     }
   }
 
+  /*
+   * And the pairs Colleague records no requisite for.
+   *
+   * "Honors Sr Colloq I" gates "Honors Sr Colloq II" as surely as any
+   * prerequisite does — the catalog says to take them in sequence — and the
+   * requisite table says nothing at all, so the two sat side by side on the
+   * board with no line between them and hovering either lit nothing. The line
+   * is real; only the record of it is missing.
+   */
+  for (const [follower, leader] of options.sequences ?? []) {
+    if (!nodes.has(follower) || !nodes.has(leader)) continue;
+    if (pairs.some((p) => p.from === leader && p.to === follower)) continue;
+    pairs.push({ from: leader, to: follower, sequence: true });
+    out.set(leader, [...(out.get(leader) ?? []), follower]);
+  }
+
   const critical = longestChain(nodes, pairs);
   for (const node of nodes.values()) {
     node.critical = critical.has(node.code);
     node.unlocks = reach(node.code, out);
   }
 
-  const edges: MapEdge[] = pairs.map(({ from, to }) => {
+  const edges: MapEdge[] = pairs.map(({ from, to, sequence }) => {
     const a = nodes.get(from)!;
     const b = nodes.get(to)!;
     // Leaving the trailing edge and arriving at the leading one, whichever
@@ -288,7 +312,13 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
     const path = down
       ? `M ${x1} ${y1} C ${x1} ${y1 + bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`
       : `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
-    return { from, to, critical: critical.has(from) && critical.has(to), path };
+    return {
+      from,
+      to,
+      critical: critical.has(from) && critical.has(to),
+      path,
+      ...(sequence ? { sequence: true } : {}),
+    };
   });
 
   const termCount = Math.max(1, history.length + plan.terms.length);

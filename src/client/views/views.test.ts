@@ -1049,6 +1049,63 @@ describe("build view — reading the requirement text", () => {
   });
 });
 
+describe("build view — a pool of one is not a choice", () => {
+  /*
+   * Picking the senior project among the branches used to make a box appear
+   * at the bottom whose only option was the senior project. A control with
+   * one setting reads as broken, and there was never anything to decide.
+   */
+  const lone = () => {
+    const raw = program("BS.CYOPR", [
+      group({
+        Id: "solo",
+        DisplayText: "Honors Senior Project (2 credit hours)",
+        FromCourses: [course("1", "HON", "4950")],
+        MinCredits: 2,
+      }),
+      group({
+        Id: "pair",
+        DisplayText: "One laboratory science",
+        FromCourses: [course("2", "BIO", "1115"), course("3", "CHEM", "1110")],
+        MinCredits: 4,
+      }),
+    ]);
+    // Both groups are owed; the shared fixture would otherwise make them a
+    // choice between themselves, which is a different question entirely.
+    raw.Program.Requirements[0]!.Subrequirements[0]!.MinGroups = null;
+    return normalize(raw);
+  };
+
+  test("shows the real choice and not the settled one", () => {
+    build.mount(root, { trees: [lone()], enrolled: ["BS.CYOPR"] });
+    const headings = Array.from(root.querySelectorAll(".choice:not(.branch) h3")).map(
+      (h) => h.textContent ?? "",
+    );
+    expect(headings.some((h) => h.includes("laboratory"))).toBe(true);
+    expect(headings.some((h) => h.includes("Senior Project"))).toBe(false);
+  });
+
+  test("but keeps one a rule in prose decided, since that carries the reason", () => {
+    // "Students pursuing the Computer Science/Cyber Operations double major
+    // must take PHYS-2120" is why a course nobody picked is on the degree.
+    const mandated = normalize(
+      program("BS.CYOPR", [
+        group({
+          Id: "phys",
+          DisplayText:
+            "Select one course - Students pursuing the Computer Science/Cyber Operations " +
+            "double major must take PHYS-2120.",
+          FromCourses: [course("1", "BIO", "1115"), course("2", "PHYS", "2120")],
+          MinCredits: 4,
+        }),
+      ]),
+    );
+    mandated.majors = ["Computer Science", "Cyber Operations"];
+    build.mount(root, { trees: [mandated], enrolled: ["BS.CYOPR"] });
+    expect(root.textContent).toContain("required for this combination");
+  });
+});
+
 describe("build view — a requirement already met", () => {
   /** The major requires CS-1210 outright, and it covers the minor's elective. */
   const major = () => normalize(program("MAJ", [group({ Courses: [course("1", "CS", "1210")] })]));

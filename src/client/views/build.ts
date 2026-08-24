@@ -738,11 +738,28 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           body.append(box);
         }
 
-        if (!ranking.choices.length) {
+        /*
+         * A pool holding one course is not a choice, it is a consequence.
+         *
+         * Picking the senior project up in the branches made a box appear at
+         * the bottom offering, as its sole option, the senior project — which
+         * reads as a broken control rather than as an answer. The course is
+         * required either way and says so on the plan; this tab is for
+         * decisions, and there is no decision here.
+         *
+         * A mandated one stays, because it is carrying an explanation nothing
+         * else does: "students on this combination must take PHYS-2120" is the
+         * reason a course the student never picked is on their degree.
+         */
+        const decisions = ranking.choices.filter(
+          (c) => c.mandated || c.candidates.length + c.satisfiedBy.length > 1,
+        );
+
+        if (!decisions.length) {
           body.append(el("p", "muted", "nothing left to choose — every requirement is decided."));
         }
 
-        for (const choice of ranking.choices) {
+        for (const choice of decisions) {
           const met = metBy(choice);
           const box = el("div", `choice${met.length ? " met" : ""}`);
           const head = el("h3");

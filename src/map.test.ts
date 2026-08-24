@@ -297,6 +297,20 @@ describe("a link the requisite table never states", () => {
     expect(map.nodes.find((n) => n.code === "HON-4910")?.unlocks).toBe(1);
   });
 
+  test("and links a second sitting to the first", () => {
+    const twice = buildGraph([node("HON-3020"), { code: "HON-3020#2", title: "", requisites: [] }]);
+    const map = buildMap(
+      plan([
+        ["SP27", ["HON-3020"]],
+        ["FA27", ["HON-3020#2"]],
+      ]),
+      { graph: twice, have: new Set() },
+    );
+    expect(map.edges).toEqual([
+      expect.objectContaining({ from: "HON-3020", to: "HON-3020#2", sequence: true }),
+    ]);
+  });
+
   test("without doubling a link the requisites already carry", () => {
     const map = buildMap(
       plan([

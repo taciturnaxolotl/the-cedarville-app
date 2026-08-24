@@ -286,11 +286,22 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
    * board with no line between them and hovering either lit nothing. The line
    * is real; only the record of it is missing.
    */
-  for (const [follower, leader] of options.sequences ?? []) {
-    if (!nodes.has(follower) || !nodes.has(leader)) continue;
-    if (pairs.some((p) => p.from === leader && p.to === follower)) continue;
+  const link = (leader: string, follower: string) => {
+    if (!nodes.has(follower) || !nodes.has(leader)) return;
+    if (pairs.some((p) => p.from === leader && p.to === follower)) return;
     pairs.push({ from: leader, to: follower, sequence: true });
     out.set(leader, [...(out.get(leader) ?? []), follower]);
+  };
+
+  for (const [follower, leader] of options.sequences ?? []) link(leader, follower);
+
+  // A second sitting follows the first for the same reason, and needs no
+  // table to say so: "two sections of the Honors Seminar on different topics"
+  // is one course drawn twice, and the line between them is the order.
+  for (const code of nodes.keys()) {
+    const [base = "", nth] = code.split("#");
+    if (!nth) continue;
+    link(Number(nth) > 2 ? `${base}#${Number(nth) - 1}` : base, code);
   }
 
   const critical = longestChain(nodes, pairs);

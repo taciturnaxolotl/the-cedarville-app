@@ -591,6 +591,35 @@ describe("plan view — arguing with the plan", () => {
     expect(JSON.parse(localStorage.getItem("cedarville:moves")!)[code]).toBe(slot);
   });
 
+  test("a course gated by credits says so in the list too", () => {
+    localStorage.setItem("cedarville:moves", JSON.stringify({}));
+    const gated = [
+      ...COURSES,
+      {
+        Id: "9",
+        SubjectCode: "EGGN",
+        Number: "2010",
+        Title: "Engineering Practice",
+        MinimumCredits: 1,
+        Description: "Prerequisite: sophomore status in engineering.",
+      },
+    ];
+    const tree = () => {
+      const raw = program("BS.CYOPR", [group({ Courses: [course("9", "EGGN", "2010")] })]);
+      raw.Program.Requirements[0]!.Subrequirements[0]!.MinGroups = null;
+      return normalize(raw);
+    };
+    plan.mount(root, {
+      trees: [tree()],
+      sections: { term: "2026FA", fetchedAt: "", sections: [], courses: gated },
+    } as unknown as Ctx);
+
+    const row = Array.from(root.querySelectorAll(".plan-course")).find((r) =>
+      r.textContent?.includes("EGGN-2010"),
+    );
+    expect(row?.textContent).toContain("sophomore standing");
+  });
+
   test("a term reads as credits against its cap", () => {
     plan.mount(root, ctx());
     expect(terms()[0]!.querySelector("h3 .cr")?.textContent).toMatch(/^\d+(\.\d+)? \/ \d+/);
@@ -1795,6 +1824,41 @@ describe("plan view — drawn as a graph", () => {
     box.dispatchEvent(new window.Event("mouseleave") as unknown as Event);
     expect(root.textContent).not.toContain("waits on");
     expect(root.querySelectorAll(".graph .node.dim")).toHaveLength(0);
+  });
+
+  /*
+   * "Senior status in engineering" is a sentence of prose and sometimes just
+   * the word in a title. It gates a course as hard as any prerequisite and
+   * draws no line to say so, which is why a course can sit three years out
+   * with nothing at all behind it on the board.
+   */
+  test("says when a course is waiting on credits rather than on courses", () => {
+    asGraph();
+    const senior = [
+      ...allCourses,
+      {
+        SubjectCode: "EGGN",
+        Number: "2010",
+        Title: "Engineering Practice",
+        MinimumCredits: 1,
+        Description: "Prerequisite: sophomore status in engineering.",
+      },
+    ] as unknown as NonNullable<Ctx["allCourses"]>;
+    const tree = normalize(
+      program("BS.CYOPR", [
+        group({ Courses: [course("1", "CS", "1210"), course("9", "EGGN", "2010")] }),
+      ]),
+    );
+    plan.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"], allCourses: senior });
+
+    const node = Array.from(root.querySelectorAll(".graph .node")).find((n) =>
+      n.textContent?.includes("EGGN-2010"),
+    );
+    expect(node?.textContent).toContain("soph");
+    expect(node?.querySelector("title")?.textContent).toContain("31 credits");
+
+    node?.dispatchEvent(new window.Event("mouseenter") as unknown as Event);
+    expect(root.textContent).toContain("and sophomore standing");
   });
 
   test("destroys cleanly", () => {

@@ -12,6 +12,8 @@
 
 import { buildMap, type CourseMap, type Flow } from "../../map";
 import type { Plan } from "../../planner";
+import { STANDING_CREDITS } from "../../planner";
+import type { Standing } from "../../prereqs";
 import { coursesTaken } from "../../requirements";
 import { el } from "../dom";
 import { type Planning, read } from "../planning";
@@ -19,6 +21,9 @@ import { createStore, Subscriptions } from "../store";
 
 const FLOW = "cedarville:map-flow";
 const SVG = "http://www.w3.org/2000/svg";
+
+/** Three letters, because a node is two lines tall. */
+const SHORT: Record<Standing, string> = { sophomore: "soph", junior: "jr", senior: "sr" };
 
 interface State {
   /** The course under the pointer, whose chain is lit up. */
@@ -266,8 +271,15 @@ export function mountGraph(
      * lights nothing at all — which is the true answer for the honours
      * colloquium and reads as a broken hover.
      */
+    // A course held back by credits alone has nothing behind it on the board,
+    // and "waits on nothing" is the wrong answer to why it sits in a senior
+    // year. Standing is the rest of that sentence.
+    const rank = focus ? drawn.map.nodes.find((n) => n.code === focus)?.standing : undefined;
+    const waits = rank
+      ? `${count(chain?.before.size ?? 0, "waits on")} and ${rank} standing`
+      : count(chain?.before.size ?? 0, "waits on");
     trace.textContent = focus
-      ? ` · ${focus}: ${count(chain?.before.size ?? 0, "waits on")}, ${count(chain?.after.size ?? 0, "unlocks")}`
+      ? ` · ${focus}: ${waits}, ${count(chain?.after.size ?? 0, "unlocks")}`
       : "";
   }
 
@@ -349,6 +361,10 @@ export function mountGraph(
       // left-aligned one when a course turns out to gate eleven others.
       const inner = map.node.width - 16;
       const now = node.past === "running" ? " · now" : "";
+      // Class standing gates a course as hard as any prerequisite and draws no
+      // line to say so: it waits on credits rather than on courses. Beside the
+      // credits, in three letters, because that is where the reader already is.
+      const rank = node.standing ? ` · ${SHORT[node.standing]}` : "";
       // The suffix on a second sitting is bookkeeping. What a student needs to
       // see is the course, and that this is the second time through it.
       const nth = Number(node.code.split("#")[1] ?? 1);
@@ -359,7 +375,7 @@ export function mountGraph(
         Object.assign(svg("text", { x: 8, y: 17, class: "code" }), {
           textContent: fit(
             shown,
-            Math.floor((inner - (`${node.credits}cr${now}`.length + 1) * 5.4) / 6.6),
+            Math.floor((inner - (`${node.credits}cr${now}${rank}`.length + 1) * 5.4) / 6.6),
           ),
         }),
       );
@@ -384,6 +400,9 @@ export function mountGraph(
       }
       const hint = [
         node.title,
+        node.standing
+          ? `needs ${node.standing} standing: ${STANDING_CREDITS[node.standing]} credits`
+          : "",
         node.moved ? `pinned to ${node.termName} — double click to unpin` : "",
         node.unlocks ? `${node.unlocks} later courses wait on this` : "",
         node.caution ?? "",

@@ -1151,6 +1151,11 @@ label.section.clashes:not(:has(input:checked)) .when {
   fill: var(--yellow);
 }
 
+/* Credits, not courses: a gate with no line drawn to it. */
+.graph .sub.standing {
+  fill: var(--peach);
+}
+
 /* A link the catalog implies and the requisite table never states: the two
  * halves of a sequence. Dashed, because it is a different kind of claim. */
 .graph .edge.sequence {

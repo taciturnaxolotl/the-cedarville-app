@@ -16,6 +16,7 @@
  */
 
 import { termCodeOf } from "../../catalog";
+import { STANDING_CREDITS } from "../../planner";
 import { prerequisitesOf } from "../../prereqs";
 import { groupKey, type ProgramTree } from "../../requirements";
 import { type Change, mark, type Sitting, describe as sayChange, syncPlan } from "../../sync";
@@ -558,6 +559,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   /** A course as it sits in a term, with the two ways to change its mind. */
   function row(code: string, extras: { moved?: boolean; caution?: string; conflicts?: string[] }) {
+    const standing = graph.courses.get(code)?.standing;
     const line = el("div", `plan-course${extras.moved ? " moved" : ""}`);
     line.draggable = true;
     line.dataset.code = code;
@@ -578,6 +580,16 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         "gives: the honours seminars are four credits of a two-credit seminar, taken twice on " +
         "different topics. Worth confirming with your advisor.";
       line.append(again);
+    }
+
+    // Credits gate a course as hard as a prerequisite does and draw nothing to
+    // say so: this is why a course sits three years out with nothing behind it.
+    if (standing) {
+      const rank = tag(`${standing} standing`, "rule");
+      rank.title =
+        `Cedarville counts ${STANDING_CREDITS[standing]} credits as ${standing}. ` +
+        "The course is placed in the first term this plan reaches that.";
+      line.append(rank);
     }
 
     if (extras.conflicts) {

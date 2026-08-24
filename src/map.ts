@@ -14,7 +14,7 @@
  */
 
 import type { Plan } from "./planner";
-import { type Graph, gatesOf } from "./prereqs";
+import { type Graph, gatesOf, type Standing } from "./prereqs";
 
 export interface MapNode {
   code: string;
@@ -35,6 +35,12 @@ export interface MapNode {
   moved?: boolean;
   /** What that placement breaks, if anything, one clause each. */
   conflicts?: string[];
+  /**
+   * Class standing the course demands, which gates it as hard as any
+   * prerequisite and appears in no requisite record: it is a sentence of
+   * prose, or nothing but the word "Senior" in the title.
+   */
+  standing?: Standing;
   /** On the transcript rather than ahead, and how it got there. */
   past?: "done" | "running" | "transfer";
 }
@@ -252,6 +258,9 @@ export function buildMap(plan: Plan, options: MapOptions): CourseMap {
         ...at(column, at_),
         critical: false,
         unlocks: 0,
+        ...(options.graph.courses.get(course.code)?.standing
+          ? { standing: options.graph.courses.get(course.code)?.standing }
+          : {}),
         ...(course.caution ? { caution: course.caution } : {}),
         ...(course.moved ? { moved: true } : {}),
         ...(course.conflicts ? { conflicts: course.conflicts } : {}),

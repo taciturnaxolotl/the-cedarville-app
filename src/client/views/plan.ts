@@ -347,9 +347,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
    * them, which is what the next write has to carry.
    */
   async function commit(changes: Change[]) {
-    const bar = el("progress");
-    bar.max = changes.length;
-    bar.value = 0;
+    // Two divs rather than <progress>, which takes no colour at all until it
+    // is given an appearance of none and a pair of vendor pseudo-elements —
+    // and then still renders its own idea of a bar. This one is a track and a
+    // fill, and does what the stylesheet says.
+    const fill = el("span");
+    fill.style.width = "0%";
+    const bar = el("div", "bar");
+    bar.append(fill);
     const doing = el("p", "muted");
     panel.replaceChildren(el("h3", undefined, "writing to your degree plan"), bar, doing);
 
@@ -369,7 +374,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         stopped = { change, why: err instanceof Error ? err.message : String(err) };
         break;
       }
-      bar.value = done.length;
+      // Painted from what came back rather than from where the loop is: the
+      // bar should say what has landed, which is the whole point of it.
+      fill.style.width = `${Math.round((done.length / changes.length) * 100)}%`;
     }
 
     await settle(changes, done, stopped);

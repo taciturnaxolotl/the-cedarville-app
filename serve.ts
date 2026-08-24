@@ -23,6 +23,7 @@ import {
   refreshTerm,
 } from "./src/server/crawler";
 import { CatalogStore, type RuleKey, ruleKey } from "./src/server/store";
+import { loopback } from "./src/where";
 
 const PORT = 5173;
 const ROOT = "public";
@@ -153,7 +154,12 @@ async function api(request: Request, pathname: string): Promise<Response | null>
     return json(Object.fromEntries(known), 200, accept);
   }
 
-  if (dev && pathname === "/dev/capture" && request.method === "POST") {
+  // Writes a transcript to the server's disk, which is the one thing this
+  // server promises never to hold. The page half already refuses to call it
+  // from anywhere but localhost; a promise kept only by the caller is not
+  // kept at all, so the route checks the host it was reached on too. A
+  // deployment that forgets NODE_ENV still cannot be handed a capture.
+  if (dev && loopback(request) && pathname === "/dev/capture" && request.method === "POST") {
     // Named, because evaluations and the catalog are different artifacts and
     // one file would mean the second dump silently ate the first.
     const raw = new URL(request.url).searchParams.get("name") ?? "capture";

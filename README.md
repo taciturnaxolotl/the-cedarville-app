@@ -16,6 +16,16 @@ bun run dev        # builds both, serves the planner on :5173
 Then load `dist/` unpacked at `chrome://extensions`, sign in to Self-Service in
 another tab, and click capture.
 
+The extension is built against one origin, because the manifest has to name it
+literally — `APP_ORIGIN=https://plan.example.edu bun run build` for a hosted
+copy, localhost otherwise. Anyone running this builds their own; there is
+nothing to install from a store.
+
+Reading is the whole of it until you press **send to Colleague** on the plan
+tab, which is the one thing here that writes to the registrar's system. It
+shows the entire diff first and writes nothing until you confirm it. See
+[writing a plan back](#writing-a-plan-back).
+
 ### shape
 
     src/client.ts        Self-Service endpoints + the antiforgery handshake
@@ -169,6 +179,13 @@ it lives in `STANDING_CREDITS` where one edit follows a policy change.
 The rest of those descriptions were left alone on purpose: only ten of the 261
 name a course code, and the other 251 are admissions and permissions that no
 amount of parsing turns into a date.
+
+Thirty-one courses do not even get a sentence. `HON-4910` Honors Senior
+Colloquium I has no description, no requisite and no rule; the only thing in
+Colleague saying it is a senior course is the word `Sr` in its title. Read
+literally it is open to a freshman, and the plan put the honours colloquium in
+a sophomore summer. A senior-sounding title now implies senior standing, and
+parsed prose still wins wherever there is any.
 
 ### two traps in the timetable
 
@@ -368,12 +385,57 @@ a heavier load, and a spring-only course cannot move to autumn.
 bun scripts/plan-doc.ts     # writes .data/plan.md
 ```
 
-The same engine backs the `plan_terms` and `critical_path` MCP tools. Four
-things it deliberately does not model, each of which can move a date: class
-standing (so senior capstones may be placed years early), coherence within a
-language sequence, the unpublished spring catalog, and shared-credit caps
-between programs. The generated doc lists them at the bottom rather than
-implying a precision it does not have.
+The same engine backs the `plan_terms` and `critical_path` MCP tools.
+
+Two things a prerequisite cannot say, and the planner reads both out of the
+catalog rather than from a table anyone maintains. **Class standing** gates 58
+courses and appears in no requisite record — it is a sentence of description
+("senior status in engineering"), or nothing but the word `Sr` in a title.
+**Sequences** run back to back: `CY-4820` says "Continuation of CY-4810" in its
+description, `HON-4920` is paired to `HON-4910` by nothing but the numeral in
+its title, and Making of the Modern Mind says it only by being one autumn
+course and one spring course of the same name. A prerequisite means "later",
+which is how a capstone ends up split across two academic years.
+
+What it still does not model, each of which can move a date: the unpublished
+spring catalog, and shared-credit caps between programs. The generated doc
+lists them at the bottom rather than implying a precision it does not have.
+
+### writing a plan back
+
+Everything above reads. One thing writes, and it writes to the registrar's
+system where an advisor will see it, so it is worth stating exactly.
+
+Self-Service's own Plan & Schedule page drives five endpoints, and its script
+bundle names their arguments; nothing here was guessed at.
+
+    AddCourse     { courseId, termId, credits, degreePlan }
+    UpdateCourse  { courseId, oldTerm, newTerm, degreePlan }
+    RemoveCourse  { removeCourseId, removeCourseTermId, removeCourseSectionId, degreePlan }
+    AddTerm       { addTermId, degreePlan }
+    RemoveTerm    { removeTermId, degreePlan }
+
+Each carries the whole plan and returns the updated copy — Ellucian's
+concurrency check, since the DTO holds a `Version` and a stale one is refused.
+So the writes run in sequence, each fed what the last one handed back.
+`RegisterSections` sits on the same controller and is deliberately wired to
+nothing: planning a course and registering for it are different promises, and
+only one of them is the planner's to make.
+
+**send to Colleague** shows the whole diff first and writes nothing until it
+is confirmed. The plan on the screen is the plan, and Colleague's copy is
+brought into line with it. Two things are never touched, and between them they
+are the whole safety of it:
+
+- a course carrying a **section**, which is a registration decision rather
+  than a plan
+- anything in a **term already under way**, or behind it — a course in
+  progress sits on the degree plan too, and a projection that starts next
+  spring never mentions it
+
+Everything else is arrangement. If there is a course you want that the
+projection does not know about, add it to the plan first; otherwise the next
+sync withdraws it.
 
 ### dumping a session (local only)
 

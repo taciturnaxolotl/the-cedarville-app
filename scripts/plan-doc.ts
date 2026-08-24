@@ -10,7 +10,7 @@
 
 import { absorbed, creditCeiling, impliedOverlap, matchProgram, totalCredits } from "../src/book";
 import { compareTerms, runsIn, seasonsOffered, yearsOffered } from "../src/catalog";
-import { criticalPath, projectPlan, type Season, type TermSlot, termsFrom } from "../src/planner";
+import { criticalPath, projectPlan, type TermSlot, termsFrom } from "../src/planner";
 import { addSitting, buildGraph, eligibility, nodeOf } from "../src/prereqs";
 import {
   baseCode,
@@ -25,7 +25,6 @@ import {
   sharedCredits,
   walkGroups,
 } from "../src/requirements";
-import { offeringsFromListing } from "../src/schedule";
 import { sequencesFrom } from "../src/sequences";
 import type { Book } from "../src/server/book";
 import { resolveGroup } from "../src/server/colleague";
@@ -67,10 +66,11 @@ const titles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, c.Tit
 const graph = buildGraph(records.map(nodeOf));
 const sequences = sequencesFrom(records);
 
-const inFall = new Set(offeringsFromListing(fall.sections).map((o) => o.courseName));
-const inSummer = new Set(offeringsFromListing(summer.sections).map((o) => o.courseName));
-/** Seen in fall implies both regular terms; spring is unpublished, so absence means spring. */
-const regularSeason: Season = regularTerm.includes("SP") ? "spring" : "fall";
+/*
+ * Seasons come from the registrar's own statement now rather than from which
+ * term a section was seen in — the inference this repo documents as wrong for
+ * 367 courses — so the listings themselves are no longer read here.
+ */
 const seasons = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, seasonsOffered(c)]));
 const cycles = new Map(records.map((c) => [`${c.SubjectCode}-${c.Number}`, yearsOffered(c)]));
 /** The registrar's own statement, rather than what one term's listing implies. */

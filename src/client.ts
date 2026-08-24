@@ -27,6 +27,21 @@ const JSON_CT = "application/json, charset=UTF-8";
 const TOKEN_PAGE = "/Student/Courses/Search";
 const TOKEN_RE = /name="__RequestVerificationToken"[^>]*value="([^"]+)"/;
 
+/**
+ * What a status code means to somebody who is not reading the network tab.
+ *
+ * Colleague answers a refused write with a plain 500 and no body, which as
+ * "POST /Student/Planning/DegreePlans/AddCourse -> 500" tells a student
+ * nothing they can act on.
+ */
+function plainly(status: number): string {
+  if (status === 403) return "Self-Service refused that; your session may have expired";
+  if (status === 404) return "Self-Service has no such record any more";
+  if (status === 409) return "your plan changed somewhere else; read it again and retry";
+  if (status >= 500) return `Self-Service could not do that (error ${status})`;
+  return `Self-Service refused that (error ${status})`;
+}
+
 export class UnauthorizedError extends Error {
   constructor(readonly endpoint: string) {
     super(`not signed in to Self-Service (${endpoint})`);
@@ -74,7 +89,11 @@ export class SelfService {
     if (res.url.includes("/Account/Unauthorized") || res.url.includes("signin.cedarville.edu")) {
       throw new UnauthorizedError(path);
     }
-    if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}`);
+    // These reach a student, sometimes mid-sync, so they say what happened
+    // rather than which verb hit which path. The path is still worth carrying
+    // for anyone reading a console, so it goes at the end where it can be
+    // ignored.
+    if (!res.ok) throw new Error(`${plainly(res.status)} (${path})`);
 
     const text = await res.text();
     try {
@@ -83,9 +102,9 @@ export class SelfService {
       // A stale token yields the antiforgery complaint as plain text.
       if (text.includes("antiforgery")) {
         this.#token = null;
-        throw new Error(`antiforgery token rejected on ${path}; retry`);
+        throw new Error("Self-Service rejected the request as stale; try again");
       }
-      throw new Error(`${path} returned non-JSON (${text.slice(0, 80)})`);
+      throw new Error(`Self-Service answered with a page rather than data (${path})`);
     }
   }
 

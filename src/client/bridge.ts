@@ -28,7 +28,9 @@ export const installed = () => Boolean(runtimeOf()?.sendMessage);
 function send<K extends Request["type"]>(msg: Request & { type: K }): Promise<ReplyMap[K]> {
   const runtime = runtimeOf();
   if (!runtime?.sendMessage) {
-    throw new BridgeError("extension not installed, or this origin is not whitelisted");
+    throw new BridgeError(
+      "the bridge extension is not installed here, or this page is not one it is allowed to talk to",
+    );
   }
 
   return new Promise((resolve, reject) => {
@@ -36,7 +38,9 @@ function send<K extends Request["type"]>(msg: Request & { type: K }): Promise<Re
       // Set when the extension is absent or refused the connection.
       const disconnect = runtime.lastError?.message;
       if (disconnect) return reject(new BridgeError(disconnect));
-      if (!reply) return reject(new BridgeError("no reply from the extension"));
+      if (!reply) {
+        return reject(new BridgeError("the extension did not answer; try reloading this page"));
+      }
       if (!reply.ok) return reject(new BridgeError(reply.error));
       resolve(reply.data as ReplyMap[K]);
     });

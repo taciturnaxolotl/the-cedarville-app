@@ -13,6 +13,7 @@ import {
   type TermCatalog,
   termCodeOf,
   termKey,
+  termNow,
   yearsOffered,
 } from "./catalog";
 
@@ -95,6 +96,17 @@ describe("ordering terms", () => {
 
   test("an unrecognised season sorts last within its year rather than throwing", () => {
     expect(["2026XX", "2026FA"].sort(compareTerms)).toEqual(["2026FA", "2026XX"]);
+  });
+});
+
+describe("the term happening now", () => {
+  // With nothing cached and no extension installed there is no term list to
+  // ask for, so a first run would offer a menu with no items in it.
+  test("names the season the calendar is in", () => {
+    expect(termNow(new Date("2026-08-23T12:00:00"))).toBe("2026FA");
+    expect(termNow(new Date("2026-12-01T12:00:00"))).toBe("2026FA");
+    expect(termNow(new Date("2027-02-14T12:00:00"))).toBe("2027SP");
+    expect(termNow(new Date("2027-06-01T12:00:00"))).toBe("2027SU");
   });
 });
 

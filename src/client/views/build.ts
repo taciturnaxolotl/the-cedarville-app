@@ -169,7 +169,7 @@ function delta(terms: number, credits: number): { text: string; kind: string; wh
 
 export function mount(root: HTMLElement, ctx: Ctx) {
   const subs = new Subscriptions();
-  const { trees, sections: catalog } = ctx;
+  const { trees } = ctx;
 
   // A program evaluated but not enrolled in is a what-if the student added.
   // Seeding the picker with them is what lets the same control take one away.

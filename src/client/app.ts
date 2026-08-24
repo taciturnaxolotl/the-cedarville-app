@@ -12,7 +12,7 @@
  * the extension and goes nowhere else.
  */
 
-import type { TermCatalog } from "../catalog";
+import { type TermCatalog, termNow } from "../catalog";
 import type { Capture } from "../content";
 import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
 import {
@@ -304,7 +304,13 @@ async function init() {
     for (const row of status.terms) {
       select.add(new Option(`${row.term} · ${row.sections} sections`, row.term));
     }
-    if (status.terms.length === 0) select.add(new Option("no catalog yet", ""));
+    // Nothing cached, and without the extension there is no term list to ask
+    // for either. Offering the term the calendar is in gives the fetch button
+    // something to act on, which is the whole of a stranger's first run.
+    if (status.terms.length === 0) {
+      const now = termNow(new Date());
+      select.add(new Option(`${now} · nothing cached yet`, now));
+    }
     select.disabled = false;
     $<HTMLButtonElement>("#load-sections").disabled = false;
     say("");

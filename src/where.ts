@@ -31,3 +31,17 @@ export const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}`;
  */
 export const COMPANION_PORT = Number(process.env.CEDARVILLE_PORT || 7749);
 export const COMPANION = `http://127.0.0.1:${COMPANION_PORT}`;
+
+/**
+ * Whether a request arrived over the loopback interface.
+ *
+ * The one route that writes a transcript to disk is a development
+ * convenience, and it is gated on this as well as on the environment. A
+ * promise kept only by the caller is not kept at all: the page half already
+ * refuses to post a capture from anywhere but localhost, and a deployment
+ * that forgets `NODE_ENV=production` must still refuse to accept one.
+ */
+export function loopback(request: { url: string }): boolean {
+  const host = new URL(request.url).hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+}

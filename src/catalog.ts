@@ -67,6 +67,24 @@ export function nextPlannableTerm(now: Date): { year: number; season: "spring" |
 }
 
 /**
+ * The term happening now, as Colleague names it.
+ *
+ * Distinct from `nextPlannableTerm`, which answers "where does a plan start".
+ * This one answers "what is on offer today", which is what an empty catalog
+ * needs before anyone can fetch anything: with no terms cached and no
+ * extension installed there is otherwise nothing to name, and a first run
+ * offers a menu with no items in it.
+ *
+ * Cedarville's autumn runs August to December, spring January to April, and
+ * the summer sessions fill the rest.
+ */
+export function termNow(now: Date): string {
+  const month = now.getMonth();
+  const season = month >= 7 ? "FA" : month <= 3 ? "SP" : "SU";
+  return `${now.getFullYear()}${season}`;
+}
+
+/**
  * The seasons a course is taught, as the registrar states them.
  *
  * `TermsOffered` is prose but a closed set of it: seven spellings cover all

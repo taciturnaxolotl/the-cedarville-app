@@ -3,9 +3,12 @@
  *
  * Everything else in this project reads. This is the one thing that writes,
  * and it writes to the registrar's system, where an advisor will see it. So
- * the rule it works by is narrow and worth stating at the top: it adds what
- * the plan projects, it moves and removes only what it put there itself, and
- * it never touches a course that carries a section.
+ * the rule it works by is worth stating at the top: the plan on the screen is
+ * the plan, and Colleague's copy is made to match it — adding, moving and
+ * withdrawing as that takes. Two things are never touched, and between them
+ * they are the whole safety of it: a course that carries a section, because
+ * that is a registration decision rather than a plan, and anything in a term
+ * that has already begun.
  *
  * Self-Service's own Plan & Schedule page drives these endpoints, and its
  * script bundle names their arguments exactly:
@@ -28,6 +31,8 @@
  * wired to anything. Planning a course and registering for it are different
  * promises, and only one of them is ours to make.
  */
+
+import { termKey } from "./catalog";
 
 /** A course as Colleague has it on the plan. */
 export interface PlannedCourse {
@@ -74,13 +79,15 @@ export interface SyncRequest {
   /** Terms Colleague would let us open, from `UnplannedTerms`. */
   addable: readonly string[];
   /**
-   * What a previous sync put there, as `courseId@termId`.
+   * The first term the projection covers.
    *
-   * The whole difference between a tool and a nuisance. A course this planner
-   * placed is ours to move or withdraw; a course the student placed by hand,
-   * or an advisor did, is theirs, and gets reported rather than rearranged.
+   * Everything before it is the term under way and the ones behind it, which
+   * are history however they are stored, and which this never touches. It is
+   * the difference between a plan that mirrors and a plan that vandalises: a
+   * course in progress is on the degree plan too, and it is not ours to
+   * withdraw because a projection starting next spring did not mention it.
    */
-  ours: ReadonlySet<string>;
+  from: string;
 }
 
 export const mark = (courseId: string, termId: string) => `${courseId}@${termId}`;
@@ -97,7 +104,10 @@ export interface SyncPlan {
  * student is shown before confirming is exactly what gets sent.
  */
 export function syncPlan(request: SyncRequest): SyncPlan {
-  const { wanted, planned, terms, addable, ours } = request;
+  const { wanted, planned, terms, addable, from } = request;
+  /** Ours to arrange: within the horizon, unregistered, unprotected. */
+  const arrangeable = (course: PlannedCourse) =>
+    termKey(course.termId) >= termKey(from) && !course.sectionId && !course.isProtected;
   const changes: Change[] = [];
   const skipped: Skipped[] = [];
 
@@ -148,18 +158,11 @@ export function syncPlan(request: SyncRequest): SyncPlan {
       continue;
     }
 
-    // Elsewhere on the plan. Ours to move, or theirs to leave alone.
-    const elsewhere = entries.find((c) => !matched.has(c) && !c.sectionId && !c.isProtected);
+    // Elsewhere on the plan, and ours to carry: the plan on this screen is the
+    // plan, and Colleague's copy is made to match it.
+    const elsewhere = entries.find((c) => !matched.has(c) && arrangeable(c));
     if (elsewhere) {
       matched.add(elsewhere);
-      if (!ours.has(mark(elsewhere.courseId, elsewhere.termId))) {
-        skipped.push({
-          code: sitting.code,
-          termId: sitting.termId,
-          why: `you have this planned in ${elsewhere.termId}; left where you put it`,
-        });
-        continue;
-      }
       if (!openTerm(sitting.termId)) {
         skipped.push({
           code: sitting.code,
@@ -209,14 +212,13 @@ export function syncPlan(request: SyncRequest): SyncPlan {
     });
   }
 
-  // Anything this planner put there and no longer wants. A course with a
-  // section is never withdrawn, whoever planned it: that is a registration
-  // decision wearing a plan's clothes.
+  // Anything planned that this plan does not call for. A course with a section
+  // is never withdrawn, whoever planned it: that is a registration decision
+  // wearing a plan's clothes. Nor is anything in a term already under way.
   const removals: Change[] = [];
   for (const course of planned) {
     if (matched.has(course)) continue;
-    if (!ours.has(mark(course.courseId, course.termId))) continue;
-    if (course.sectionId || course.isProtected) continue;
+    if (!arrangeable(course)) continue;
     removals.push({
       kind: "remove",
       code: course.courseId,

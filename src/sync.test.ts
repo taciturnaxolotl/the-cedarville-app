@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mark, type PlannedCourse, type Sitting, describe as say, syncPlan } from "./sync";
+import { type PlannedCourse, type Sitting, describe as say, syncPlan } from "./sync";
 
 const TERMS = ["2026FA", "2027SP", "2027FA", "2028SP"];
 const ADDABLE = ["2027SU", "2028SU"];
@@ -26,9 +26,9 @@ const have = (
 const run = (
   wanted: Sitting[],
   planned: PlannedCourse[] = [],
-  ours: string[] = [],
+  from = "2026FA",
   addable = ADDABLE,
-) => syncPlan({ wanted, planned, terms: TERMS, addable, ours: new Set(ours) });
+) => syncPlan({ wanted, planned, terms: TERMS, addable, from });
 
 describe("syncing the plan into Colleague", () => {
   test("adds what the projection wants and Colleague has not got", () => {
@@ -44,49 +44,44 @@ describe("syncing the plan into Colleague", () => {
     expect(changes).toEqual([]);
   });
 
-  test("moves a course it planned itself", () => {
-    const { changes } = run(
-      [want("CS-3310", "101", "2028SP")],
-      [have("101", "2027FA")],
-      [mark("101", "2027FA")],
-    );
+  test("carries a planned course to the term this plan puts it in", () => {
+    const { changes } = run([want("CS-3310", "101", "2028SP")], [have("101", "2027FA")]);
     expect(changes).toEqual([
       { kind: "move", code: "CS-3310", courseId: "101", from: "2027FA", to: "2028SP" },
     ]);
   });
 
   /*
-   * The line this whole module is written around. A student who put a course
-   * in the spring on purpose has said something, and a planner that quietly
-   * drags it to the autumn because its own arithmetic prefers that is not a
-   * tool anybody should install.
+   * The two lines this module is written around. A section means the student
+   * has chosen when they are sitting in a room, which is a registration
+   * decision rather than a plan, and a term already under way is history
+   * however the plan stores it. Everything else is arrangement.
    */
-  test("will not move a course the student planned by hand", () => {
-    const { changes, skipped } = run([want("CS-3310", "101", "2028SP")], [have("101", "2027FA")]);
-    expect(changes).toEqual([]);
-    expect(skipped[0]?.why).toContain("2027FA");
-    expect(skipped[0]?.why).toContain("left where you put it");
-  });
-
   test("will not touch a course that carries a section", () => {
     const { changes, skipped } = run(
       [want("CS-3310", "101", "2028SP")],
       [have("101", "2027FA", { sectionId: "55" })],
-      [mark("101", "2027FA")],
     );
     expect(changes).toEqual([]);
     expect(skipped[0]?.why).toContain("section");
   });
 
-  test("withdraws only what it put there, and never a registered course", () => {
+  test("leaves the term under way and everything behind it alone", () => {
+    // A course in progress sits on the degree plan too, and a projection that
+    // starts next spring never mentions it. Withdrawing it would be vandalism.
+    const { changes } = run([], [have("101", "2026FA"), have("202", "2027FA")], "2027SP");
+    expect(changes).toEqual([
+      { kind: "remove", code: "202", courseId: "202", termId: "2027FA", sectionId: null },
+    ]);
+  });
+
+  test("withdraws what the plan no longer calls for, and never a registered course", () => {
     const { changes } = run(
       [],
       [have("101", "2027FA"), have("202", "2027FA"), have("303", "2027FA", { sectionId: "7" })],
-      [mark("101", "2027FA"), mark("303", "2027FA")],
     );
-    expect(changes).toEqual([
-      { kind: "remove", code: "101", courseId: "101", termId: "2027FA", sectionId: null },
-    ]);
+    expect(changes.map((c) => "courseId" in c && c.courseId)).toEqual(["101", "202"]);
+    expect(changes.every((c) => c.kind === "remove")).toBe(true);
   });
 
   test("opens a summer before planning into it, once", () => {
@@ -132,11 +127,7 @@ describe("syncing the plan into Colleague", () => {
   });
 
   test("orders terms first and removals last", () => {
-    const { changes } = run(
-      [want("CS-1210", "101", "2027SU")],
-      [have("202", "2027FA")],
-      [mark("202", "2027FA")],
-    );
+    const { changes } = run([want("CS-1210", "101", "2027SU")], [have("202", "2027FA")]);
     expect(changes.map((c) => c.kind)).toEqual(["term", "add", "remove"]);
   });
 

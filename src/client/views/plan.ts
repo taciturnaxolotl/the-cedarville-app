@@ -240,12 +240,13 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   /*
    * The only thing this application writes anywhere. Everything above reads a
    * registrar's data and reasons about it; this puts the answer back where an
-   * advisor will see it, so it happens on purpose, once, after being shown in
-   * full — and it keeps a note of what it wrote so a later run can take its
-   * own work back without touching anybody else's.
+   * advisor will see it, so it happens on purpose, after being shown in full.
+   *
+   * What it writes, it also owns: the plan on this screen is the plan, and
+   * Colleague's copy is brought into line with it. Courses carrying a section
+   * and terms already under way are the exceptions, and they are exceptions
+   * because they are no longer planning decisions.
    */
-  const PUSHED = "cedarville:pushed";
-
   /** The projection as course ids and term codes, one entry per sitting. */
   function sittings(): { wanted: Sitting[]; unknown: string[] } {
     const { load, moves } = store.get();
@@ -301,7 +302,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       planned: theirs.planned,
       terms: theirs.terms,
       addable: theirs.addable,
-      ours: new Set(read<string[]>(PUSHED, [])),
+      // The projection's own first term. Everything before it is the term
+      // under way and the ones behind it, which this leaves alone.
+      from: termCodeOf(planning.slots(store.get().load)[0] ?? { year: 0, season: "spring" }),
     });
 
     panel.replaceChildren();
@@ -396,7 +399,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     done: Change[],
     stopped: { change: Change; why: string } | null,
   ) {
-    const wanted = new Set(
+    const meant = new Set(
       changes.flatMap((c) =>
         c.kind === "add"
           ? [mark(c.courseId, c.termId)]
@@ -405,8 +408,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             : [],
       ),
     );
+    const gone = changes.flatMap((c) =>
+      c.kind === "remove"
+        ? [mark(c.courseId, c.termId)]
+        : c.kind === "move"
+          ? [mark(c.courseId, c.from)]
+          : [],
+    );
 
-    let landed = new Set<string>();
+    let landed: Set<string> | null = null;
     try {
       const theirs = await colleaguePlan();
       landed = new Set(theirs.planned.map((c) => mark(c.courseId, c.termId)));
@@ -414,16 +424,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       /* Cannot check, so the count below falls back to what the calls said. */
     }
 
-    const confirmed = [...wanted].filter((entry) => landed.has(entry));
-    const pushed = new Set(read<string[]>(PUSHED, []));
-    for (const entry of confirmed) pushed.add(entry);
-    for (const change of done) {
-      if (change.kind === "remove") pushed.delete(mark(change.courseId, change.termId));
-      if (change.kind === "move") pushed.delete(mark(change.courseId, change.from));
-    }
-    localStorage.setItem(PUSHED, JSON.stringify([...pushed]));
-
-    const count = landed.size ? confirmed.length : done.length;
+    const count = landed
+      ? [...meant].filter((entry) => landed.has(entry)).length +
+        gone.filter((entry) => !landed.has(entry)).length
+      : done.length;
     panel.replaceChildren(el("h3", undefined, `${count} of ${changes.length} on your degree plan`));
     if (stopped) {
       panel.append(line(`stopped at "${sayChange(stopped.change)}" — ${stopped.why}`, "why"));

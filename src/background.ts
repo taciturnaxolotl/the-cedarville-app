@@ -34,18 +34,43 @@ chrome.action.onClicked.addListener(async () => {
 });
 
 /**
- * A Self-Service tab the content script is already living in. We deliberately
- * do not create one: signing in is the student's business, and a background
- * script silently opening their SIS is exactly the behaviour that makes
- * extensions untrustworthy.
+ * Sends a request to a Self-Service tab whose content script is actually
+ * listening, and returns its reply.
+ *
+ * There can be several tabs on the origin — a signed-in /Student page, the bare
+ * root the SSO dance lands on, something left open since before the extension
+ * updated — and only some are running this build's content script. Picking the
+ * first tab blindly meant one stale tab could mask a perfectly good one, so we
+ * try each in turn. Deeper /Student pages come first, being the likeliest to
+ * hold a live script.
+ *
+ * Retrying is safe even for a write: "Receiving end does not exist" means the
+ * tab received nothing, so moving on cannot apply a plan twice. We deliberately
+ * do not open a tab ourselves: signing in is the student's business.
  */
-async function selfServiceTab(): Promise<number> {
+async function sendToSelfService(msg: Request): Promise<Reply<unknown>> {
   const tabs = await chrome.tabs.query({ url: SELF_SERVICE_TAB });
-  const id = tabs.find((t) => t.id !== undefined)?.id;
-  if (id === undefined) {
+  const ids = tabs
+    .map((t) => ({ id: t.id, deep: (t.url ?? "").includes("/Student/") }))
+    .filter((t): t is { id: number; deep: boolean } => t.id !== undefined)
+    .sort((a, b) => Number(b.deep) - Number(a.deep))
+    .map((t) => t.id);
+
+  if (ids.length === 0) {
     throw new Error("open and sign in to selfservice.cedarville.edu in another tab");
   }
-  return id;
+
+  for (const id of ids) {
+    try {
+      return await chrome.tabs.sendMessage(id, msg);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      // No content script in this tab; nothing was delivered, so try the next.
+      if (reason.includes("Receiving end does not exist")) continue;
+      throw err;
+    }
+  }
+  throw new Error("reload your Self-Service tab, then try again");
 }
 
 /**
@@ -79,16 +104,13 @@ chrome.runtime.onMessageExternal.addListener((msg: Request, _sender, reply) => {
         return sent ? { ok: true, data: true } : { ok: false, error: "no companion is running" };
       }
 
-      const answer: Reply<unknown> = await chrome.tabs.sendMessage(await selfServiceTab(), msg);
+      const answer: Reply<unknown> = await sendToSelfService(msg);
       if (msg.type === "capture" && answer.ok)
         void offerToCompanion("capture", answer.data as Capture);
       return answer;
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
-      // A missing receiver means the tab exists but predates the extension.
-      return error.includes("Receiving end does not exist")
-        ? { ok: false, error: "reload your Self-Service tab, then try again" }
-        : { ok: false, error };
+      return { ok: false, error };
     }
   })().then(reply);
 

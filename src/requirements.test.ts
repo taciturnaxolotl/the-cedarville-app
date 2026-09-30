@@ -499,6 +499,86 @@ describe("what a student still owes", () => {
     expect([...need(normalize(raw)).courses]).toEqual(["EGCP-3010"]);
   });
 
+  test("a pinned course settles the choice it belongs to", () => {
+    // "Complete 1 of the following 2 items": the Honors Senior Colloquium (two
+    // one-credit halves) or the Honors Senior Project (one two-credit course).
+    // The colloquium is a credit cheaper, so cost alone takes it — and a
+    // student who pinned the project would then be shown both. Pinning names
+    // the branch; the other must not tag along.
+    const raw = program("A", []);
+    raw.Program.Requirements = [
+      {
+        Id: "r",
+        Code: "HON",
+        Description: "Research Proj/Thesis",
+        CompletionStatus: "NotStarted",
+        PlanningStatus: "NotPlanned",
+        MinSubrequirements: null,
+        MinGpa: null,
+        Subrequirements: [
+          {
+            ...sub("choose-one", [
+              group({ Courses: [course("1", "HON", "4910"), course("2", "HON", "4920")] }),
+              group({ FromCourses: [course("3", "HON", "4950")], MinCredits: 2 }),
+            ]),
+            MinGroups: 1,
+          },
+        ],
+      },
+    ] as never;
+
+    const credits = (c: string) => (baseCode(c) === "HON-4950" ? 2 : 1);
+    const pick = (pinned: string[]) =>
+      [...coursesNeeded(normalize(raw), { credits, have: new Set(), pinned: new Set(pinned) }).courses].sort();
+
+    // Cost alone would take the colloquium.
+    expect(pick([])).toEqual(["HON-4910", "HON-4920"]);
+    // Pinning the project takes it instead, and drops the colloquium.
+    expect(pick(["HON-4950"])).toEqual(["HON-4950"]);
+    // Pinning a colloquium half keeps the colloquium branch.
+    expect(pick(["HON-4910"])).toEqual(["HON-4910", "HON-4920"]);
+  });
+
+  test("choosing a branch drops a stale pin left in the other", () => {
+    // The same colloquium-or-project choice, but the student wants the
+    // colloquium while an old pin on the senior project lingers. Selecting the
+    // colloquium track must not schedule the project the pin points at: a pin
+    // stranded in the branch that lost is a contradiction, not a course.
+    const raw = program("A", []);
+    raw.Program.Requirements = [
+      {
+        Id: "r",
+        Code: "HON",
+        Description: "Research Proj/Thesis",
+        CompletionStatus: "NotStarted",
+        PlanningStatus: "NotPlanned",
+        MinSubrequirements: null,
+        MinGpa: null,
+        Subrequirements: [
+          {
+            ...sub("choose-one", [
+              group({
+                Id: "colloq",
+                Courses: [course("1", "HON", "4910"), course("2", "HON", "4920")],
+              }),
+              group({ Id: "project", FromCourses: [course("3", "HON", "4950")], MinCredits: 2 }),
+            ]),
+            MinGroups: 1,
+          },
+        ],
+      },
+    ] as never;
+
+    const credits = (c: string) => (baseCode(c) === "HON-4950" ? 2 : 1);
+    const solved = coursesNeeded(normalize(raw), {
+      credits,
+      have: new Set(),
+      pinned: new Set(["HON-4950"]),
+      tracks: new Map([["HON/choose-one", ["colloq"]]]),
+    });
+    expect([...solved.courses].sort()).toEqual(["HON-4910", "HON-4920"]);
+  });
+
   test("without a minimum, everything is required", () => {
     const raw = program("A", []);
     raw.Program.Requirements = [

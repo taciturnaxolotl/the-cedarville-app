@@ -1095,11 +1095,23 @@ function pickBranch<T>(
   done: (item: T) => boolean,
   cost: (item: T) => number,
   forced?: readonly string[],
+  /**
+   * A branch the student has already committed to by pinning a course inside
+   * it. Ranked after a finished branch but ahead of a merely cheaper one:
+   * pinning the senior project is the student saying which way this choice
+   * goes, and the colloquium it replaces should not be planned alongside it.
+   */
+  prefer?: (item: T) => boolean,
 ): T[] {
   const wanted = forced?.length ? items.filter((item) => forced.includes(id(item))) : [];
   const rest = [...items]
     .filter((item) => !wanted.includes(item))
-    .sort((a, b) => Number(done(b)) - Number(done(a)) || cost(a) - cost(b));
+    .sort(
+      (a, b) =>
+        Number(done(b)) - Number(done(a)) ||
+        Number(prefer?.(b) ?? false) - Number(prefer?.(a) ?? false) ||
+        cost(a) - cost(b),
+    );
   return [...wanted, ...rest].slice(0, Math.max(want, 0));
 }
 
@@ -1199,14 +1211,31 @@ function walkProgram(
   choices: OpenChoice[];
   branches: OpenBranch[];
   unenumerable: Unenumerable[];
+  /** Courses that live only in a branch the choice turned down. */
+  rejected: Set<string>;
+  /** Courses a chosen branch enumerates, which a rejection cannot override. */
+  offered: Set<string>;
 } {
   const courses = new Set<string>();
   const unenumerable: Unenumerable[] = [];
   const choices: OpenChoice[] = [];
   const branches: OpenBranch[] = [];
+  const rejected = new Set<string>();
+  const offered = new Set<string>();
   // Priced against what the plan already owes, so a branch whose courses are
   // required anyway is recognised as free rather than merely tied.
   const free = committed(tree, options);
+
+  // A course the student pinned marks the branch it lives in as the one they
+  // mean to take, so a "complete 1 of N" choice goes that way rather than to
+  // whichever side happens to cost a credit less.
+  const pinned = options.pinned ?? new Set<string>();
+  const enumerated = (g: Group): string[] =>
+    g.constraint.kind === "take-all" || g.constraint.kind === "choose-from"
+      ? g.constraint.courses.map((c) => c.CourseName)
+      : [];
+  const groupPinned = (g: Group) => enumerated(g).some((c) => pinned.has(c));
+  const subPinned = (s: Subrequirement) => s.groups.some(groupPinned);
 
   for (const requirement of tree.requirements) {
     const subs = [...requirement.subrequirements];
@@ -1220,6 +1249,7 @@ function walkProgram(
       (s) => s.status.completion === "Completed",
       (s) => s.groups.reduce((n, g) => n + groupCost(g, options, free), 0),
       options.tracks?.get(subKey),
+      subPinned,
     );
     if (wantSubs < subs.length) {
       branches.push({
@@ -1236,6 +1266,12 @@ function walkProgram(
       });
     }
 
+    // Courses stranded in a subrequirement the requirement did not take.
+    for (const s of subs) {
+      if (takenSubs.includes(s)) continue;
+      for (const g of s.groups) for (const code of enumerated(g)) rejected.add(code);
+    }
+
     for (const sub of takenSubs) {
       const wantGroups = sub.minGroups ?? sub.groups.length;
       const groupBranchKey = branchKey(requirement.code, sub.id);
@@ -1246,6 +1282,7 @@ function walkProgram(
         (g) => g.status.completion === "Completed",
         (g) => groupCost(g, options, free),
         options.tracks?.get(groupBranchKey),
+        groupPinned,
       );
       if (wantGroups < sub.groups.length) {
         branches.push({
@@ -1260,6 +1297,14 @@ function walkProgram(
           })),
           chosen: chosenGroups.map((g) => g.id),
         });
+      }
+
+      // What each side of this group choice enumerates: a chosen group's
+      // courses are offered, a turned-down group's are rejected, so a pin left
+      // behind in the losing branch can be told from one the plan still wants.
+      for (const g of sub.groups) {
+        const target = chosenGroups.includes(g) ? offered : rejected;
+        for (const code of enumerated(g)) target.add(code);
       }
 
       for (const group of chosenGroups) {
@@ -1330,7 +1375,7 @@ function walkProgram(
     }
   }
 
-  return { courses, choices, branches, unenumerable };
+  return { courses, choices, branches, unenumerable, rejected, offered };
 }
 
 /**
@@ -1375,6 +1420,8 @@ export function coursesNeededAcross(
   const choices: OpenChoice[] = [];
   const branches: OpenBranch[] = [];
   const unenumerable: Unenumerable[] = [];
+  const rejected = new Set<string>();
+  const offered = new Set<string>();
 
   for (const tree of trees) {
     const walked = walkProgram(tree, options);
@@ -1382,6 +1429,8 @@ export function coursesNeededAcross(
     choices.push(...walked.choices);
     branches.push(...walked.branches);
     unenumerable.push(...walked.unenumerable);
+    for (const code of walked.rejected) rejected.add(code);
+    for (const code of walked.offered) offered.add(code);
   }
 
   // Taken before the pins go in. A course the student chose is not a course
@@ -1389,7 +1438,14 @@ export function coursesNeededAcross(
   // literature elective turn it into an unpickable "already required" — the
   // interface telling them their own decision had been made for them.
   const required = new Set(courses);
-  for (const code of options.pinned ?? []) courses.add(code);
+  for (const code of options.pinned ?? []) {
+    // A pin stranded in a branch the student turned down is a contradiction,
+    // not a course to plan: choosing the colloquium must not also schedule the
+    // senior project it was chosen instead of. A pin that any chosen branch
+    // still offers stays, since then it is not really stranded.
+    if (rejected.has(code) && !offered.has(code) && !courses.has(code)) continue;
+    courses.add(code);
+  }
 
   // A choice its own pool cannot close is worth naming. Colleague states
   // "two sections of the Honors Seminar" as a four-credit group over a pool

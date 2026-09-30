@@ -19,7 +19,11 @@ import { ORIGIN } from "./client";
 import type { Capture, Reply, Request } from "./content";
 import { APP_ORIGIN, COMPANION } from "./where";
 
-const SELF_SERVICE_TAB = `${ORIGIN}/Student/*`;
+// Any page on the origin, not just /Student/*: after SSO a student can land on
+// the root or on /Student with no trailing slash, and the content script is
+// living in all of them. Matching only /Student/* reported "not signed in" to
+// someone who plainly was.
+const SELF_SERVICE_TAB = `${ORIGIN}/*`;
 const APP_URL = `${APP_ORIGIN}/`;
 
 /** Clicking the icon opens the planner rather than a cramped popup. */

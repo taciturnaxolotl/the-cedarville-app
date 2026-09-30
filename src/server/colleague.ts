@@ -61,6 +61,13 @@ export class GuestColleague {
     });
     const html = await res.text();
 
+    // Cedarville moved the whole catalog behind SSO: the search page now bounces
+    // to the login form, and a guest crawl cannot go further. Say that plainly
+    // rather than blaming a missing token the page was never going to render.
+    if (res.url.includes("/Account/Login") || html.includes("SAMLRequest")) {
+      throw new Error("Self-Service now requires sign-in; the anonymous catalog is gone");
+    }
+
     const token = TOKEN_RE.exec(html)?.[1];
     if (!token) throw new Error("no antiforgery token on the Self-Service search page");
 

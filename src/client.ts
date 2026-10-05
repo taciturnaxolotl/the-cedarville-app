@@ -6,6 +6,7 @@
  * here; the browser already has one.
  */
 
+import type { SearchCriteria, Searcher, SearchPage } from "./crawl";
 import type {
   CatalogVocabulary,
   DegreePlanDto,
@@ -13,8 +14,6 @@ import type {
   DegreePlanView,
   EvaluationResponse,
   ProgramSummary,
-  SearchCriteria,
-  SearchResponse,
   SectionsResponse,
 } from "./types";
 
@@ -49,7 +48,7 @@ export class UnauthorizedError extends Error {
   }
 }
 
-export class SelfService {
+export class SelfService implements Searcher {
   #token: string | null = null;
 
   /**
@@ -161,11 +160,22 @@ export class SelfService {
     });
   }
 
-  searchCourses(criteria: Partial<SearchCriteria>): Promise<SearchResponse> {
+  /**
+   * Course search, on the student's own session.
+   *
+   * The authenticated twin of the guest endpoint the server used to crawl:
+   * same body, same paging, one `/Student` more in the path. Cedarville put
+   * the guest half behind SSO, so this is now the only way the catalog can be
+   * read at all, which is why it satisfies the same `Searcher` shape the
+   * crawl loop takes, and why that loop runs here unchanged.
+   *
+   * No default view. The crawl asks for the one it wants, and choosing on its
+   * behalf is how a section crawl quietly comes back full of courses.
+   */
+  search(criteria: SearchCriteria): Promise<SearchPage> {
     return this.post("/Student/Student/Courses/PostSearchCriteria", {
       pageNumber: 1,
       quantityPerPage: 100,
-      searchResultsView: "CatalogListing",
       ...criteria,
     });
   }

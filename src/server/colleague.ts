@@ -11,6 +11,8 @@
  * file is allowed to exist on a server.
  */
 
+import { crawlGroup, type SearchCriteria, type Searcher, type SearchPage } from "../crawl";
+
 const ORIGIN = "https://selfservice.cedarville.edu";
 const TOKEN_PAGE = "/Student/Courses/Search";
 const TOKEN_RE = /name="__RequestVerificationToken"[^>]*value="([^"]+)"/;
@@ -18,28 +20,9 @@ const TOKEN_RE = /name="__RequestVerificationToken"[^>]*value="([^"]+)"/;
 /** Ellucian ships this exact malformed content type. Mirroring it. */
 const JSON_CT = "application/json, charset=UTF-8";
 
-export interface SearchCriteria {
-  terms?: string[];
-  subjects?: string[];
-  courseIds?: string[];
-  /** Degree-audit coordinates: asks Colleague to evaluate that group's rule. */
-  requirement?: string;
-  subrequirement?: string;
-  group?: string;
-  keyword?: string;
-  pageNumber?: number;
-  quantityPerPage?: number;
-  searchResultsView?: "SectionListing" | "CatalogListing";
-}
-
-export interface SearchPage {
-  Sections?: unknown[];
-  Courses?: unknown[];
-  CourseFullModels?: unknown[];
-  TotalItems: number;
-  TotalPages: number;
-  CurrentPageIndex: number;
-}
+// Defined with the crawl loop rather than here, because the planner's own
+// client has to satisfy the same shape and cannot import from `server/`.
+export type { SearchCriteria, SearchPage } from "../crawl";
 
 export interface Vocabulary {
   Subjects: { Code: string; Description: string; ShowInCourseSearch: boolean }[];
@@ -51,7 +34,7 @@ export interface Vocabulary {
  * no cookie jar, so the pairing is kept by hand: a token is only valid
  * alongside the .ColleagueSelfServiceAntiforgery cookie minted with it.
  */
-export class GuestColleague {
+export class GuestColleague implements Searcher {
   #cookies = "";
   #token = "";
 
@@ -153,29 +136,7 @@ const USER_AGENT = "the-cedarville-app (student course planner; github.com/tacit
  * No session is needed. The triple names a place in the catalog, not a
  * student, so one lookup serves everybody.
  */
-export async function resolveGroup(
+export const resolveGroup = (
   ids: { requirement: string; subrequirement: string; group: string },
-  client = new GuestColleague(),
-): Promise<string[]> {
-  const names = new Set<string>();
-  let page = 1;
-  let pages = 1;
-
-  while (page <= pages) {
-    const result = await client.search({
-      requirement: ids.requirement,
-      subrequirement: ids.subrequirement,
-      group: ids.group,
-      pageNumber: page,
-      searchResultsView: "CatalogListing",
-    });
-    pages = Math.max(result.TotalPages ?? 1, 1);
-
-    for (const raw of result.Courses ?? []) {
-      const course = raw as { SubjectCode?: string; Number?: string };
-      if (course.SubjectCode && course.Number) names.add(`${course.SubjectCode}-${course.Number}`);
-    }
-    page++;
-  }
-  return [...names].sort();
-}
+  client: Searcher = new GuestColleague(),
+): Promise<string[]> => crawlGroup(client, ids);

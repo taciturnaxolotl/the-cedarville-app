@@ -8,6 +8,7 @@
  */
 
 import { SelfService, UnauthorizedError } from "./client";
+import type { SearchCriteria, SearchPage } from "./crawl";
 import { normalize, programFor, unservedCredentials } from "./requirements";
 import type { Change, PlannedCourse } from "./sync";
 import type {
@@ -210,6 +211,19 @@ export type Request =
    */
   | { type: "applyPlan"; changes: Change[] }
   /**
+   * One page of the course catalog, read on the student's session.
+   *
+   * Cedarville put the public catalog behind SSO, so a signed-in browser is
+   * the only thing left that can read a timetable at all. This is a read of
+   * data that is identical for every student: it carries no transcript, and
+   * what comes back is the same page the "Search for courses" screen shows.
+   *
+   * One page per message rather than a whole term, so the paging, the delay
+   * between requests and the abort all stay on the page side where the
+   * student can see a progress bar and stop it.
+   */
+  | { type: "search"; criteria: SearchCriteria }
+  /**
    * What the student chose, on its way to their own machine. Never reaches
    * this file: the background answers it without troubling Self-Service,
    * which has no opinion about anybody's pins.
@@ -234,6 +248,7 @@ export interface ReplyMap {
   capture: Capture;
   colleaguePlan: ColleaguePlan;
   applyPlan: Applied;
+  search: SearchPage;
 }
 
 chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
@@ -262,6 +277,8 @@ chrome.runtime.onMessage.addListener((msg: Request, _sender, reply) => {
         }
         case "applyPlan":
           return { ok: true, data: await applyPlan(msg.changes) };
+        case "search":
+          return { ok: true, data: await api.search(msg.criteria) };
         default:
           /*
            * A request this build has never heard of, which in practice means

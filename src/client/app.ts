@@ -7,13 +7,15 @@
  * apart the moment a fourth thing needs to know about them. Here, setting
  * state is the only way to change what is on screen.
  *
- * Everything below runs on the student's own machine. The catalog comes from
- * this app's server, which fetched it anonymously; the evaluation comes from
- * the extension and goes nowhere else.
+ * Everything below runs on the student's own machine. The catalog is crawled
+ * through the extension, on this student's own session, and offered to the
+ * app's server so the next student does not have to crawl it again; the
+ * evaluation comes from the extension and goes nowhere else.
  */
 
 import { type TermCatalog, termNow } from "../catalog";
 import type { Capture } from "../content";
+import { crawlTerm } from "../crawl";
 import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
 import {
   capture,
@@ -22,8 +24,9 @@ import {
   fetchAllCourses,
   fetchCatalog,
   installed,
+  offerCatalog,
   programs,
-  refreshCatalog,
+  searcher,
   terms,
 } from "./bridge";
 import { $ } from "./dom";
@@ -229,6 +232,39 @@ async function awaitCrawl(term: string) {
   }
 }
 
+/**
+ * Crawls a term here, on this student's session, and offers it to the server.
+ *
+ * The server used to do this anonymously. Cedarville closed the guest
+ * endpoint, so the only session that can read a timetable is the one in this
+ * browser, and the crawl runs through the extension instead.
+ *
+ * The offer afterwards is what keeps the old promise: whoever opens a term
+ * first pays about sixty pages for it, and everybody after them reads the
+ * cache. A refusal costs nothing here — the sections are already in hand, and
+ * the server declining to share them is its business, not this student's.
+ */
+async function crawlHere(term: string): Promise<TermCatalog> {
+  const crawled = await crawlTerm(searcher, term, {
+    onProgress: ({ page, pages, sections, phase }) =>
+      store.set({
+        progress:
+          `${phase === "courses" ? "course details" : "sections"} ` +
+          `page ${page}/${pages}, ${sections} so far`,
+      }),
+  });
+
+  store.set({ progress: `offering ${crawled.sections.length} sections to the shared cache…` });
+  const shared = await offerCatalog(crawled);
+  say(
+    shared
+      ? `crawled ${crawled.sections.length} sections for ${term} and shared them`
+      : `crawled ${crawled.sections.length} sections for ${term}; the server kept its own copy`,
+    "ok",
+  );
+  return crawled;
+}
+
 $("#load-sections").addEventListener("click", async () => {
   const term = $<HTMLSelectElement>("#term").value;
   if (!term) return say("pick a term first", "err");
@@ -238,25 +274,33 @@ $("#load-sections").addEventListener("click", async () => {
     const status = await catalogStatus();
     const cached = status.terms.find((t) => t.term === term);
 
+    if (status.refreshing.includes(term)) await awaitCrawl(term);
+
+    let sections: TermCatalog;
     if (!cached || cached.sections === 0) {
-      say(`asking the server to fetch ${term}…`);
-      await refreshCatalog(term);
-      await awaitCrawl(term);
-    } else if (status.refreshing.includes(term)) {
-      await awaitCrawl(term);
+      // Nobody has crawled this term yet, so this student does. Needs the
+      // extension: it is the only thing holding a session.
+      if (!installed()) {
+        throw new Error(
+          `no catalog for ${term} yet, and the bridge extension is not installed. ` +
+            "Install it and sign in to Self-Service, then try again.",
+        );
+      }
+      say(`no catalog for ${term} yet; crawling it here…`);
+      sections = await crawlHere(term);
+    } else {
+      const courseIds = candidateCourseIds();
+      sections = await fetchCatalog(term, courseIds.length ? courseIds : undefined);
+      say(
+        `${sections.sections.length} sections for ${term}, ` +
+          `fetched ${new Date(sections.fetchedAt).toLocaleTimeString()}`,
+        "ok",
+      );
     }
 
-    const courseIds = candidateCourseIds();
-    const sections = await fetchCatalog(term, courseIds.length ? courseIds : undefined);
     localStorage.setItem(SECTIONS, JSON.stringify(sections));
     void dumpForDev("catalog", sections);
-
     store.set({ sections, view: "schedule" });
-    say(
-      `${sections.sections.length} sections for ${term}, ` +
-        `fetched ${new Date(sections.fetchedAt).toLocaleTimeString()}`,
-      "ok",
-    );
   } catch (err) {
     say(message(err), "err");
   } finally {

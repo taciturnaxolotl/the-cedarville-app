@@ -22,6 +22,7 @@ import {
   refreshAllCourses,
   refreshTerm,
 } from "./src/server/crawler";
+import { ingest } from "./src/server/ingest";
 import { CatalogStore, type RuleKey, ruleKey } from "./src/server/store";
 import { loopback } from "./src/where";
 
@@ -43,6 +44,16 @@ const store = new CatalogStore();
 
 /** Terms already being fetched, so a reload cannot start a second crawl. */
 const running = new Map<string, Promise<number>>();
+
+/**
+ * A term code the catalog has actually heard of.
+ *
+ * Guards the crawl trigger. Terms are a closed set the registrar publishes,
+ * so an arbitrary string is never a term, and accepting one meant any caller
+ * could start an unlimited number of outbound crawls by inventing spellings.
+ */
+const known = (term: string): boolean =>
+  term === ALL_COURSES || store.stats().some((row) => row.term === term);
 
 function refresh(term: string): Promise<number> {
   const existing = running.get(term);
@@ -98,9 +109,53 @@ async function api(request: Request, pathname: string): Promise<Response | null>
     });
   }
 
+  /**
+   * A term, crawled by a student and offered to everybody.
+   *
+   * The server cannot read the catalog any more: Cedarville put it behind
+   * SSO, so the only session that can page it belongs to a browser. This is
+   * where that crawl lands. Every guard on it lives in `ingest`, which is
+   * worth reading before changing anything here.
+   */
+  const ingestTerm = /^\/catalog\/([^/]+)\/ingest$/.exec(pathname)?.[1];
+  if (ingestTerm && request.method === "POST") {
+    const term = decodeURIComponent(ingestTerm);
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return json({ error: "not json" }, 400);
+    }
+    // The term is named twice, in the path and in the body, so say which one
+    // disagreed rather than silently trusting either.
+    if ((raw as { term?: string })?.term !== term) {
+      return json({ error: `body is for ${(raw as { term?: string })?.term}, not ${term}` }, 400);
+    }
+
+    const verdict = ingest(store, raw);
+    if (!verdict.ok) {
+      console.warn(`${term}: refused a crawl — ${verdict.why}`);
+      return json({ error: verdict.why }, 422);
+    }
+    console.log(
+      `${term}: ingested ${verdict.sections} sections and ${verdict.courses} courses` +
+        (verdict.replaced ? " (replacing what was held)" : " (first crawl of this term)"),
+    );
+    return json(verdict);
+  }
+
+  /**
+   * Re-crawl from the server, which only works while a guest endpoint does.
+   * Kept because it is how the catalog gets filled anywhere Self-Service is
+   * still open, and because it fails loudly rather than pretending.
+   */
   const refreshTermCode = /^\/catalog\/([^/]+)\/refresh$/.exec(pathname)?.[1];
   if (refreshTermCode && request.method === "POST") {
     const term = decodeURIComponent(refreshTermCode);
+    // Only a term the catalog already knows, or one a crawl has listed. An
+    // arbitrary string used to start its own crawl, and the dedupe map keys
+    // on the string, so N spellings of one term meant N crawls.
+    if (!known(term)) return json({ error: `unknown term ${term}` }, 404);
     void refresh(term);
     return json({ refreshing: term }, 202);
   }

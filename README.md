@@ -13,8 +13,16 @@ bun install
 bun run dev        # builds both, serves the planner on :5173
 ```
 
-Then load `dist/` unpacked at `chrome://extensions`, sign in to Self-Service in
-another tab, and click capture.
+Then turn on **Developer mode** at `chrome://extensions`, load `dist/`
+unpacked, sign in to Self-Service in another tab, and open the planner. The
+extension has no icon, so it is the grey puzzle piece in the toolbar.
+
+The first student to open a term crawls it, which takes a minute or so and
+fills the shared cache for everybody after them. Nothing is cached until
+somebody does; there is no catalog in this repo to start from.
+
+Optionally, `bun run companion` keeps a copy of your capture on your own
+machine for the scripts under `scripts/` to read. Nothing starts it for you.
 
 The extension is built against one origin, because the manifest has to name it
 literally — `APP_ORIGIN=https://plan.example.edu bun run build` for a hosted
@@ -32,14 +40,16 @@ shows the entire diff first and writes nothing until you confirm it. See
     src/content.ts       runs on selfservice.cedarville.edu; fetches, nothing else
     src/background.ts    the bridge; only whitelisted origins may call it
     src/types.ts         raw Colleague shapes, shared by both halves
+    src/crawl.ts         the paging loop, over whoever has a session
     src/requirements.ts  Ellucian's 40-field Group as a tagged union
     src/merge.ts         which course satisfies a requirement in both majors
     src/schedule.ts      meeting times, seat counts, and date-aware conflicts
     src/prereqs.ts       what a course needs, and what needs it
     src/planner.ts       which term each requirement lands in
     src/catalog.ts        the one shape that is public rather than personal
-    src/server/colleague.ts  guest client: the catalog needs no session
-    src/server/crawler.ts    one term per crawl, ~60 pages
+    src/server/colleague.ts  guest client, for wherever a guest endpoint is left
+    src/server/crawler.ts    the crawl loop bound to a guest session and the store
+    src/server/ingest.ts     what it takes to trust somebody else's crawl
     src/server/store.ts      SQLite cache of the section catalog
     src/client/          the planner: no framework, one CSS file, mount/destroy views
     src/client/planning.ts   one projection, shared by every tab that reads one
@@ -55,13 +65,18 @@ major recorded against the first one's program is not.
 
 The split is by change rate. Auth bridging is stable and security-sensitive;
 the planner changes every time we learn something new about Colleague. The two
-halves share only `types.ts`.
+halves share `types.ts` and `crawl.ts`.
 
 Two kinds of data, and only one of them is yours. Section times, seats and
 instructors are identical for every student, so they are cached in SQLite on
 the server and one student's crawl spares everyone else's. An evaluation is a
 student record and never leaves the machine it was fetched on. There is no
 account system because there is nothing here to attach to a person.
+
+The catalog half of that used to be the server's own work. Cedarville put the
+public course search behind SSO, so the crawl now runs in whichever student's
+browser gets there first and is offered back to the cache. See [crawled by
+whoever is signed in](#crawled-by-whoever-is-signed-in).
 
 ### deploying without deploying anyone's transcript
 
@@ -78,23 +93,27 @@ So the halves are split by what they may hold, not by where they run.
 `APP_ORIGIN=https://plan.example.edu bun run build` writes the manifest with
 that origin allowed to talk to the extension, alongside localhost so a
 development build keeps working. The extension posts each capture to a
-companion on `127.0.0.1:7749` — started by the MCP server under `--personal`,
-and by nothing else. It accepts `POST /capture` and only from
-`chrome-extension://<the pinned id>`; a page cannot set its own `Origin`, so no
-other tab can reach it. There is no way to read a capture back out over the
-port: it takes, it never gives.
+companion on `127.0.0.1:7749`, which runs only when you start it with
+`bun run companion` and by nothing else. It accepts `POST /capture` and only
+from `chrome-extension://<the pinned id>`; a page cannot set its own `Origin`,
+so no other tab can reach it. There is no way to read a capture back out over
+the port: it takes, it never gives.
 
 Nothing is lost when no companion runs. The post fails, the planner carries on
-in the browser, and the MCP server says which file it was looking for.
+in the browser, and the scripts under `scripts/` say which file they were
+looking for.
 
 The same channel carries what the student decided. "Copy my plan" sends the
 pins, tracks and credit load through the extension to `POST /picks`, so the
-planning tools answer about the degree you chose rather than the cheapest one
-that fits — and say which of the two they did.
+scripts answer about the degree you chose rather than the cheapest one that
+fits, and say which of the two they did.
 
     CEDARVILLE_CAPTURE   where a capture is kept (default: XDG data dir)
     CEDARVILLE_PORT      the companion's port
     CEDARVILLE_COMPANION 0 to decline the listener entirely
+    CATALOG_DB           the catalog cache (default: .data/catalog.sqlite)
+    CRAWL                "off" to skip the server's own boot crawl
+    NODE_ENV             "production" to close /dev/capture
 
 ### what it refuses to guess
 
@@ -202,58 +221,84 @@ weekday and an hour and never coexist. Every meeting carries its own date
 range and every comparison uses it; a day-and-time check alone invents clashes
 and makes half the catalog look unschedulable.
 
-### the catalog needs no login
+### the catalog used to need no login
 
-Self-Service gates `/Student/Student/Courses/*` but serves `/Student/Courses/*`
-to anyone: it is what the signed-out search page uses. One search in
-`SectionListing` view returns sections directly, so a whole term is about sixty
-pages rather than one request per course.
+It did, once. Self-Service gated `/Student/Student/Courses/*` and served
+`/Student/Courses/*` to anyone, because that is what the signed-out search
+page used. The server crawled the catalog itself, anonymously, and one pass
+served every student.
 
-The server therefore crawls the catalog itself, anonymously, on boot and then
-whenever a term's cache passes six hours old, and caches it in SQLite. It
-checks every thirty minutes rather than every six hours: ticking at exactly
-the staleness threshold means the catalog is always a few seconds too young
-when the timer fires, so every other cycle gets skipped and the real cadence
-quietly doubles. Fall 2026 is 1784 sections across 943
-courses and takes about thirty seconds. No student session is spent on data
-that is identical for all of them, and the registrar sees one crawl instead of
-one per user.
+Cedarville moved the whole catalog behind SSO. The guest search page now
+bounces to the login form, so that crawl is gone and no amount of retrying
+brings it back. `GuestColleague` says so in as many words rather than blaming
+a missing antiforgery token the page was never going to render.
 
-The extension is then only needed for the one thing that is genuinely
-personal: your own program evaluation.
+What is left with a session is a student's browser. So the crawl moved there.
 
-### mcp
+### crawled by whoever is signed in
 
-An MCP server exposes the catalog, and optionally your own requirements, as
-tools. Add it to Claude Code with:
+The loop did not have to be rewritten, because it never knew who it was
+talking to. Every crawl asks one question of one object:
 
-```sh
-claude mcp add cedarville -- bun /abs/path/to/the-cedarville-app/src/mcp/server.ts
-```
+    interface Searcher {
+      search(criteria: SearchCriteria): Promise<SearchPage>
+    }
 
-Seven tools are always available, over public catalog data:
-`list_terms`, `search_courses`, `course_details`, `list_sections`,
-`check_conflicts`, `live_seats`, `refresh_catalog`.
+`GuestColleague` satisfies it, for as long as there is a guest endpoint
+anywhere. So does `SelfService`, which is the authenticated twin: the same
+body and the same paging, one `/Student` more in the path. The planner wraps
+that in a `Searcher` whose `search` hops through the extension, and
+`src/crawl.ts` runs over either one without knowing the difference.
 
-Those last two are the ones that touch the network. `live_seats` asks the
-registrar for current seat counts on a handful of named courses and prints
-them beside what the last crawl saw, which is what you want during
-registration; `refresh_catalog` re-crawls a whole term and takes about a
-minute.
+One page per message, not one term, so the paging, the delay between requests
+and the stop button all stay on the page where the student can see them. A
+term is about sixty pages in `SectionListing` view, plus half as many again in
+`CatalogListing` for the requisite text.
 
-Five more read a captured evaluation, and are **only registered when the
-server is started with `--personal`** (or `CEDARVILLE_MCP_PERSONAL=1`):
-`my_requirements`, `my_eligibility`, `compare_programs`, `plan_terms`,
-`critical_path`.
+### ingesting somebody else's crawl
 
-The opt-in is structural, not a runtime check. Without the flag those tools do
-not appear in `tools/list` and calling one returns "tool not found" — there is
-nothing to refuse, because nothing is registered. Nothing writes to Colleague;
-no tool can register for a class or drop one, and the only writes are into the
-local catalog cache.
+Crawling per student would undo the thing the server-side crawl was for: sixty
+pages per student per term, against the registrar, every time. So a crawl is
+offered back.
 
-The server reads `.data/catalog.sqlite` directly, so the planner server does
-not need to be running, but a crawl must have happened at least once.
+    POST /catalog/:term/ingest
+
+Whoever opens a term first pays for it, and everybody after them reads the
+cache. The property the old design got by construction is bought back with
+three guards, because a crawl the server performed was true and a crawl posted
+to the server is a claim that every other student will read.
+
+    shape         every section checked field by field, and one bad section
+                  refuses the batch. A skipped section is indistinguishable
+                  from a cancelled one.
+
+    completeness  the client says whether it reached the last page, and only a
+                  complete crawl may replace a term. `store.replace` deletes
+                  what the crawl did not see, so a student closing the tab
+                  halfway would cancel half a term.
+
+    no shrinking  a crawl may lose up to a fifth of a term and no more.
+                  Without this one, three well-formed sections and
+                  `complete: true` empty the catalog for everybody.
+
+Sections must also carry the term they were posted under, or a Fall crawl
+could be written into the Spring cache, where the shrink guard counts rows
+rather than reading them.
+
+There is deliberately no identity here. There is no account system and nothing
+to attach one to, so every guard is about the claim rather than the claimant. A
+student with a real session can still post a plausible lie about the timetable;
+what they cannot do is quietly delete it. That is the honest limit of a shared
+cache with no accounts, and it is worth stating rather than implying otherwise.
+
+`POST /catalog/:term/refresh` still exists and still crawls server-side, for
+wherever a guest endpoint is open. It now refuses a term the catalog has never
+heard of: terms are a closed set the registrar publishes, and accepting any
+string meant one caller could start unlimited outbound crawls by inventing
+spellings.
+
+The extension is needed for two things now: your own program evaluation, which
+was always personal, and the catalog, which did not used to be.
 
 ### one course list, any major
 
@@ -363,10 +408,12 @@ for courses" button in the degree audit calls.
 POST /rules/resolve   [{requirement, subrequirement, group}, …]
 ```
 
-No session is needed — the triple names a place in the catalog, not a student
-— so the server resolves it anonymously and caches the answer in SQLite,
-shared by everyone. `DABIOL25` is five biology labs; the history elective is
-forty-seven courses.
+No session used to be needed here: the triple names a place in the catalog,
+not a student, so the server resolved it anonymously and cached the answer in
+SQLite, shared by everyone. The caching and the sharing still hold. The
+anonymous part does not, now that the search is behind SSO, so the server
+answers from cache and a miss has to wait for somebody signed in to fill it.
+`DABIOL25` is five biology labs; the history elective is forty-seven courses.
 
 One kind is deliberately not expanded. A filter naming no subject and no
 department ("32 hours of upper-division work") matches most of the catalog and
@@ -385,7 +432,8 @@ a heavier load, and a spring-only course cannot move to autumn.
 bun scripts/plan-doc.ts     # writes .data/plan.md
 ```
 
-The same engine backs the `plan_terms` and `critical_path` MCP tools.
+It reads whichever capture the companion wrote, so a capture that landed in
+the XDG data directory is found as readily as one in `.data/`.
 
 Two things a prerequisite cannot say, and the planner reads both out of the
 catalog rather than from a table anyone maintains. **Class standing** gates 58

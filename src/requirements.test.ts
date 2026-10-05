@@ -529,7 +529,10 @@ describe("what a student still owes", () => {
 
     const credits = (c: string) => (baseCode(c) === "HON-4950" ? 2 : 1);
     const pick = (pinned: string[]) =>
-      [...coursesNeeded(normalize(raw), { credits, have: new Set(), pinned: new Set(pinned) }).courses].sort();
+      [
+        ...coursesNeeded(normalize(raw), { credits, have: new Set(), pinned: new Set(pinned) })
+          .courses,
+      ].sort();
 
     // Cost alone would take the colloquium.
     expect(pick([])).toEqual(["HON-4910", "HON-4920"]);

@@ -8,10 +8,12 @@
 
 import type { TermCatalog } from "../catalog";
 import type { Applied, Capture, ColleaguePlan, Reply, ReplyMap, Request } from "../content";
+import type { SearchCriteria, SearchPage } from "../crawl";
 import type { Change } from "../sync";
 import type { ProgramSummary } from "../types";
+import { EXTENSION_ID } from "../where";
 
-export const EXTENSION_ID = "dijggphdklmdeegidljleaogedbahpjo";
+export { EXTENSION_ID };
 
 /** `chrome.runtime` appears on the page only when a connectable extension is installed. */
 interface Runtime {
@@ -71,6 +73,19 @@ export const applyPlan = (changes: Change[]): Promise<Applied> =>
   send({ type: "applyPlan", changes });
 
 /**
+ * A `Searcher` that reads the catalog through the student's own session.
+ *
+ * This is the whole of what the pivot to user crawls needed on this side.
+ * The crawl loop in `src/crawl.ts` asks for one method, and this is that
+ * method with an extension hop in the middle, so every crawl the server used
+ * to run anonymously now runs here instead and the loop does not know the
+ * difference.
+ */
+export const searcher = {
+  search: (criteria: SearchCriteria): Promise<SearchPage> => send({ type: "search", criteria }),
+};
+
+/**
  * Hands a capture to the local dev server, which writes it to .data/ so the
  * agent working on this code can read a real response instead of guessing at
  * the schema. Localhost only, gitignored, and a no-op anywhere else.
@@ -122,9 +137,32 @@ export interface CatalogStatus {
 export const catalogStatus = async (): Promise<CatalogStatus> =>
   (await fetch("/catalog")).json() as Promise<CatalogStatus>;
 
-/** Asks the server to re-crawl. Returns immediately; the crawl runs on. */
-export const refreshCatalog = (term: string) =>
-  fetch(`/catalog/${encodeURIComponent(term)}/refresh`, { method: "POST" });
+/**
+ * Offers a crawl this browser performed to the shared cache.
+ *
+ * The one write in this file that other students read, so it is the one the
+ * server is entitled to refuse: a crawl that stopped early, or that would
+ * shrink a term, is turned down and the reason logged there. Returns whether
+ * it was accepted, and never throws, because the sections are already in hand
+ * either way and a student who crawled a term should not be shown an error
+ * about somebody else's cache.
+ */
+export async function offerCatalog(catalog: TermCatalog & { complete: boolean }): Promise<boolean> {
+  try {
+    const res = await fetch(`/catalog/${encodeURIComponent(catalog.term)}/ingest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(catalog),
+    });
+    if (!res.ok) {
+      const { error } = (await res.json()) as { error?: string };
+      console.warn(`the server declined the crawl: ${error ?? res.status}`);
+    }
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 /** Current availability for the courses on screen. Never cached. */
 export async function liveSeats(

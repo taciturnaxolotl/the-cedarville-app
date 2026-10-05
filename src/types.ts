@@ -204,37 +204,11 @@ export interface DegreePlanResponse {
   StudentPrograms: { Code: string; Title: string; Catalog: string; StudentId: string }[];
 }
 
-export interface SearchCriteria {
-  keyword: string;
-  terms: string[];
-  subjects: string[];
-  courseIds: string[];
-  sectionIds: string[];
-  days: string[];
-  faculty: string[];
-  locations: string[];
-  academicLevels: string[];
-  courseLevels: string[];
-  /** Minutes since midnight. */
-  startTime: number;
-  endTime: number;
-  openSections: boolean;
-  openAndWaitlistedSections: boolean;
-  pageNumber: number;
-  quantityPerPage: number;
-  searchResultsView: string;
-}
-
-export interface SearchResponse {
-  Courses: (CourseRef & { MatchingSectionIds: string[]; MinimumCredits: number })[];
-  TotalItems: number;
-  TotalPages: number;
-  CurrentPageIndex: number;
-  Subjects: Facet[];
-  TermFilters: Facet[];
-  Faculty: Facet[];
-  DaysOfWeek: Facet[];
-}
+// The search criteria and its response live in `src/crawl.ts`, beside the loop
+// that pages them. Two copies of the shape lived here once, and the authenticated
+// one went stale: it declared `Courses` and never the `Sections` that
+// `SectionListing` view actually returns, which is the half the timetable
+// is built from.
 
 export interface Meeting {
   /** Sometimes names ("Monday"), sometimes 0-6 integers, depending on endpoint. */

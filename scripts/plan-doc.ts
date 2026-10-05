@@ -28,6 +28,7 @@ import {
 import { sequencesFrom } from "../src/sequences";
 import type { Book } from "../src/server/book";
 import { resolveGroup } from "../src/server/colleague";
+import { capturePath, readCapture } from "../src/server/companion";
 import { CatalogStore } from "../src/server/store";
 
 const store = new CatalogStore();
@@ -93,7 +94,11 @@ const books = (
 ).sort((a, b) => b.year.localeCompare(a.year));
 const book = books[0];
 
-const snapshot = await Bun.file(".data/evaluations.json").json();
+// Wherever the companion put it, not just the repo's own .data: a capture
+// that landed in the XDG directory is still the student's capture.
+const snapshot = await readCapture<{ evaluations: Record<string, unknown> }>();
+if (!snapshot)
+  throw new Error(`no capture found at ${capturePath()}; press capture in the planner`);
 // Whatever was captured, in capture order: no program code is named here.
 const trees = Object.values(snapshot.evaluations).map((raw) => normalize(raw as never));
 const cy = trees[0];

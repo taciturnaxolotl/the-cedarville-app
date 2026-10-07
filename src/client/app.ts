@@ -15,7 +15,7 @@
 
 import { slimCatalog, type TermCatalog, termNow } from "../catalog";
 import type { Capture } from "../content";
-import { crawlTerm } from "../crawl";
+import { ALL_COURSES, crawlAllCourses, crawlTerm } from "../crawl";
 import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
 import {
   BRIDGE_VERSION,
@@ -283,6 +283,50 @@ async function crawlHere(term: string): Promise<TermCatalog> {
     "ok",
   );
   return crawled;
+}
+
+/**
+ * Fills the list of every course the school offers, which is a different
+ * crawl from a term's timetable.
+ *
+ * A term says what is *offered*; this says what *exists*, and the difference
+ * is a third of the prerequisite graph: a requisite is routinely a course
+ * nobody is teaching this year. Without it a planned course outside the one
+ * cached term has no title, no credits and no requisites — which is exactly
+ * what a student saw the first time this was hosted, because the server used
+ * to crawl this itself and Cedarville's move to SSO ended that.
+ *
+ * So it happens once, here, on whoever opens a term first, and everybody
+ * after them reads the cache.
+ */
+async function crawlCourseList(): Promise<void> {
+  store.set({ progress: "course list: starting…" });
+  const { courses, complete } = await crawlAllCourses(searcher, {
+    onProgress: ({ page, pages, sections }) =>
+      store.set({ progress: `course list: page ${page}/${pages}, ${sections} courses` }),
+  });
+  if (!complete || courses.length === 0) {
+    // Offering a partial catalog would file "what exists" as a fraction of
+    // itself, and the server would rightly refuse it anyway.
+    say(`the course list crawl stopped at ${courses.length} courses; the plan will be thinner`);
+    return;
+  }
+
+  store.set({ progress: `offering ${courses.length} courses to the shared cache…` });
+  const shared = await offerCatalog({
+    term: ALL_COURSES,
+    fetchedAt: new Date().toISOString(),
+    sections: [],
+    courses,
+    complete: true,
+  });
+  store.set({ allCourses: courses });
+  say(
+    shared
+      ? `${courses.length} courses in the shared course list; the plan can read requisites now`
+      : `${courses.length} courses read; the server kept its own list`,
+    "ok",
+  );
 }
 
 $("#load-sections").addEventListener("click", () => {

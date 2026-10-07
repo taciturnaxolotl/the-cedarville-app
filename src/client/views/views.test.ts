@@ -2589,3 +2589,52 @@ describe("build view — sharing a plan", () => {
     expect(JSON.parse(copied).programs[0]?.code).toBe("BS.CYOPR");
   });
 });
+
+describe("plan view — a course the catalog does not know", () => {
+  /*
+   * The bug this exists for: hosted, the shared course list was empty, the
+   * graph fell back to one term's 925 courses, and a planned course outside
+   * that term rendered as a bare code — no title, no credits, no requisites,
+   * and nothing on screen saying why. A blank line reads as a rendering bug.
+   */
+  const asList = () => localStorage.setItem("cedarville:plan-shape", JSON.stringify("list"));
+
+  const tree = () => {
+    const raw = program("BS.CYOPR", [
+      group({ Courses: [course("1", "CS", "1210")] }),
+      group({ Courses: [course("9", "HON", "1010")] }),
+    ]);
+    raw.Program.Requirements[0]!.Subrequirements[0]!.MinGroups = null;
+    return normalize(raw);
+  };
+
+  beforeEach(() => {
+    localStorage.removeItem("cedarville:moves");
+    asList();
+  });
+
+  test("says so, rather than drawing an empty line", () => {
+    plan.mount(root, {
+      trees: [tree()],
+      // HON-1010 is in the degree and in no catalog this page holds.
+      sections: {
+        term: "2026FA",
+        fetchedAt: "",
+        sections: [],
+        courses: [
+          { Id: "1", SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
+        ],
+      },
+    } as unknown as Ctx);
+
+    const lines = Array.from(root.querySelectorAll(".plan-course"));
+    const hon = lines.find((l) => l.textContent?.includes("HON-1010"));
+    expect(hon?.textContent).toContain("no catalog record");
+    expect(hon?.querySelector(".tag.bad")?.getAttribute("title")).toContain("all guesses");
+
+    // And a course it does know is left alone.
+    const cs = lines.find((l) => l.textContent?.includes("CS-1210"));
+    expect(cs?.textContent).toContain("Intro");
+    expect(cs?.querySelector(".tag.bad")).toBeFalsy();
+  });
+});

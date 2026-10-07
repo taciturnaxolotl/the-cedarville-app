@@ -33,6 +33,19 @@
  *                 hosted cache would grow a new twenty-thousand-section
  *                 table for every name anyone cared to invent.
  *
+ * Two different things arrive here. A term is what is *offered*: sections,
+ * with their course records alongside. `ALL` is what *exists*: every course
+ * in the catalog and no sections at all, which is a separate crawl because a
+ * prerequisite is routinely a course nobody is teaching this year. Built from
+ * one term's courses alone the prerequisite graph loses a third of its nodes,
+ * and a student sees a planned course with no title, no credits and no
+ * requisites — which is what happened the first time this was hosted, because
+ * the server used to crawl the whole catalog itself and SSO ended that.
+ *
+ * So both are accepted, and each is checked for being the thing it claims to
+ * be: a term that brought no sections is a failed crawl, and an `ALL` that
+ * brought sections is confused about which crawl it ran.
+ *
  * What is deliberately not here is identity. There is no account system and
  * nothing to attach one to, so the guards are all about the claim rather than
  * the claimant. A determined student with a real session can still post a
@@ -99,11 +112,11 @@ export type Verdict =
 const SHRINK_LIMIT = 0.2;
 
 /**
- * The term under which the whole catalog lives, which never arrives by
- * ingest: it is 900-odd courses with no sections, and the shrink guard
- * counts sections. Refused by name rather than by accident.
+ * The term under which the whole catalog lives: every course the school
+ * lists, with no sections. Its guards count courses, because there are no
+ * sections here to count.
  */
-const SENTINELS = new Set(["ALL"]);
+const EVERY_COURSE = "ALL";
 
 /** "2027SP". The only shape the rest of this codebase can sort or compare. */
 const TERM_CODE = /^(\d{4})(SP|SU|FA)$/;
@@ -119,6 +132,53 @@ const TERM_CODE = /^(\d{4})(SP|SU|FA)$/;
 const YEARS_BACK = 10;
 const YEARS_AHEAD = 3;
 
+/**
+ * The course list rather than a term's timetable.
+ *
+ * Same three questions as a term, asked of the thing that is actually here:
+ * did the crawl finish, did it bring anything, and is it about to replace a
+ * larger list with a smaller one. Sections are refused outright because their
+ * presence means the caller ran the per-term crawl and posted it under the
+ * wrong name, and accepting that would file one term's offerings as the whole
+ * catalog.
+ */
+function everyCourse(store: CatalogStore, body: IngestBody): Verdict {
+  if (!body.complete) {
+    return { ok: false, why: "crawl did not reach the last page; a partial catalog is not one" };
+  }
+  if (body.sections.length) {
+    return {
+      ok: false,
+      why: `${EVERY_COURSE} is every course and no sections; ${body.sections.length} arrived`,
+    };
+  }
+  const courses = body.courses ?? [];
+  if (courses.length === 0) {
+    return { ok: false, why: "a catalog with no courses is a failed crawl" };
+  }
+
+  const held = store.readCourses(EVERY_COURSE).length;
+  const floor = Math.floor(held * (1 - SHRINK_LIMIT));
+  if (courses.length < floor) {
+    return {
+      ok: false,
+      why:
+        `refusing to shrink the course list from ${held} to ${courses.length}; ` +
+        `a crawl may lose up to ${Math.round(SHRINK_LIMIT * 100)}% of it, not more`,
+    };
+  }
+
+  store.replace({
+    term: EVERY_COURSE,
+    fetchedAt: new Date().toISOString(),
+    sections: [],
+    // Carried through whole, like a term's: the records hold far more than
+    // this file names, and the planner reads requisites out of them.
+    courses: courses as unknown as TermCatalog["courses"],
+  });
+  return { ok: true, sections: 0, courses: courses.length, replaced: held > 0 };
+}
+
 export function ingest(store: CatalogStore, raw: unknown): Verdict {
   const parsed = Ingest.safeParse(raw);
   if (!parsed.success) {
@@ -127,9 +187,7 @@ export function ingest(store: CatalogStore, raw: unknown): Verdict {
   }
   const body = parsed.data;
 
-  if (SENTINELS.has(body.term)) {
-    return { ok: false, why: `${body.term} is not a term and cannot be ingested` };
-  }
+  if (body.term === EVERY_COURSE) return everyCourse(store, body);
 
   const named = TERM_CODE.exec(body.term);
   if (!named) {

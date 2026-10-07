@@ -520,7 +520,24 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     line.addEventListener("dragend", unhint);
 
     line.append(el("b", undefined, baseCode(code)));
-    line.append(el("span", undefined, title(code)));
+    const named = title(code);
+    line.append(el("span", undefined, named));
+    /*
+     * A course the catalog we hold has never heard of.
+     *
+     * Everything about it is a guess: no title, three credits assumed, no
+     * seasons, no requisites — so it is placed earlier than it should be and
+     * nothing waits for it. That used to render as a blank line, which reads
+     * as a rendering bug rather than as the missing course list it is.
+     */
+    if (!named) {
+      const unknown = tag("no catalog record", "bad");
+      unknown.title =
+        "Nothing we hold lists this course, so its credits, seasons and prerequisites are all " +
+        "guesses. Load a term's catalog while the bridge is installed and the full course list " +
+        "is fetched with it.";
+      line.append(unknown);
+    }
     const nth = Number(code.split("#")[1] ?? 1);
     if (nth > 1) {
       const again = tag(`sitting ${nth}`, "rule");

@@ -193,12 +193,15 @@ describe("a crawl must be about the term it claims", () => {
     db.close();
   });
 
-  test("refuses the sentinel the whole catalog lives under", () => {
+  test("refuses sections posted as the whole course list", () => {
+    // Sections under ALL mean the caller ran the per-term crawl and filed it
+    // as the catalog, which would record one term's offerings as everything
+    // that exists.
     const db = store();
     const verdict = ingest(db, body({ term: "ALL", sections: [section("s1", { TermId: "ALL" })] }));
 
     expect(verdict).toMatchObject({ ok: false });
-    if (!verdict.ok) expect(verdict.why).toContain("not a term");
+    if (!verdict.ok) expect(verdict.why).toContain("every course and no sections");
     db.close();
   });
 
@@ -241,5 +244,101 @@ describe("a term the registrar could have issued", () => {
       const verdict = ingest(store(), body({ term, sections: [section("s1", { TermId: term })] }));
       expect(verdict.ok).toBe(true);
     }
+  });
+});
+
+describe("the whole course list", () => {
+  /*
+   * Separate from a term because a prerequisite is routinely a course nobody
+   * is teaching this year. The server used to crawl this itself and SSO ended
+   * that, so it arrives here instead — and until it did, a planned course
+   * outside the one cached term had no title, no credits and no requisites.
+   */
+  const courses = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      Id: `c${i}`,
+      SubjectCode: "HON",
+      Number: `10${i}`,
+      Title: `Honors ${i}`,
+    }));
+
+  const catalog = (over: Record<string, unknown> = {}) => ({
+    term: "ALL",
+    complete: true,
+    sections: [],
+    courses: courses(50),
+    ...over,
+  });
+
+  test("accepts every course with no sections at all", () => {
+    const db = store();
+    const verdict = ingest(db, catalog());
+
+    expect(verdict).toMatchObject({ ok: true, sections: 0, courses: 50, replaced: false });
+    expect(db.readCourses("ALL")).toHaveLength(50);
+    // And it is readable as the catalog the planner asks for by name.
+    expect(db.read("ALL").courses).toHaveLength(50);
+    db.close();
+  });
+
+  test("keeps the whole record, because requisites are read out of it", () => {
+    const db = store();
+    ingest(
+      db,
+      catalog({
+        courses: [
+          {
+            Id: "c1",
+            SubjectCode: "HON",
+            Number: "1010",
+            Title: "Making Modern Mind: Ancient",
+            MinimumCredits: 3,
+            TermsOffered: "Fall Only",
+            CourseRequisites: [{ DisplayText: "Take HON-1000", IsRequired: true }],
+          },
+        ],
+      }),
+    );
+
+    const [kept] = db.readCourses("ALL");
+    expect(kept?.Title).toBe("Making Modern Mind: Ancient");
+    expect(kept?.TermsOffered).toBe("Fall Only");
+    expect(kept?.CourseRequisites?.[0]?.DisplayText).toBe("Take HON-1000");
+    db.close();
+  });
+
+  test("refuses a crawl that stopped early", () => {
+    const db = store();
+    const verdict = ingest(db, catalog({ complete: false }));
+
+    expect(verdict).toMatchObject({ ok: false });
+    if (!verdict.ok) expect(verdict.why).toContain("a partial catalog is not one");
+    db.close();
+  });
+
+  test("refuses an empty one, which is a failure rather than a catalog", () => {
+    const db = store();
+    const verdict = ingest(db, catalog({ courses: [] }));
+
+    expect(verdict).toMatchObject({ ok: false });
+    if (!verdict.ok) expect(verdict.why).toContain("no courses is a failed crawl");
+    db.close();
+  });
+
+  test("and will not quietly replace a list with a fraction of one", () => {
+    const db = store();
+    ingest(db, catalog({ courses: courses(1000) }));
+
+    const verdict = ingest(db, catalog({ courses: courses(400) }));
+    expect(verdict).toMatchObject({ ok: false });
+    if (!verdict.ok) expect(verdict.why).toContain("refusing to shrink the course list");
+    expect(db.readCourses("ALL")).toHaveLength(1000);
+
+    // The ordinary churn of a catalog year is fine.
+    expect(ingest(db, catalog({ courses: courses(950) }))).toMatchObject({
+      ok: true,
+      replaced: true,
+    });
+    db.close();
   });
 });

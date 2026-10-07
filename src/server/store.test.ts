@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { ListingSection, TermCatalog } from "../catalog";
+import { isStale, type ListingSection, type TermCatalog } from "../catalog";
 import { dedupeByCode } from "./crawler";
 import { CatalogStore, ruleKey } from "./store";
 
 /** ":memory:" keeps each test's database to itself. */
 const store = () => new CatalogStore(":memory:");
+const HOUR = 3_600_000;
 
 const section = (id: string, courseId = "c1", name = "ACCT-2110"): ListingSection =>
   ({ Id: id, CourseId: courseId, CourseName: name, Number: "01" }) as ListingSection;
@@ -273,5 +274,43 @@ describe("courses that share a code", () => {
       { Id: "2", SubjectCode: "BB", Number: "1000", Title: "b" },
     ];
     expect(dedupeByCode(records)).toHaveLength(2);
+  });
+});
+
+describe("dating a catalog that has no sections", () => {
+  /*
+   * `ALL` is every course and no sections, and a timestamp read off the
+   * sections alone left it at the epoch: permanently stale to `isStale`, and
+   * 1970 to anyone reading it.
+   */
+  test("takes its date from the courses instead", () => {
+    const db = new CatalogStore(":memory:");
+    const fetchedAt = "2026-10-07T13:45:00.000Z";
+    db.replace({
+      term: "ALL",
+      fetchedAt,
+      sections: [],
+      courses: [
+        { Id: "c1", SubjectCode: "HON", Number: "1010", Title: "Making Modern Mind" },
+      ] as never,
+    });
+
+    const held = db.read("ALL");
+    expect(held.courses).toHaveLength(1);
+    expect(held.fetchedAt).toBe(fetchedAt);
+    expect(isStale(held, 6, Date.parse(fetchedAt) + HOUR)).toBe(false);
+    db.close();
+  });
+
+  test("and a term with sections still dates itself by those", () => {
+    const db = new CatalogStore(":memory:");
+    db.replace({
+      term: "2027SP",
+      fetchedAt: "2027-01-02T00:00:00.000Z",
+      sections: [{ Id: "s1", CourseId: "c1", CourseName: "HON-1010", TermId: "2027SP" }] as never,
+      courses: [{ Id: "c1", SubjectCode: "HON", Number: "1010", Title: "x" }] as never,
+    });
+    expect(db.read("2027SP").fetchedAt).toBe("2027-01-02T00:00:00.000Z");
+    db.close();
   });
 });

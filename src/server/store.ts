@@ -92,6 +92,22 @@ export class CatalogStore {
       ? courseIds
       : [...new Set(catalog.sections.map((s) => s.CourseId))];
     catalog.courses = this.readCourses(term, wanted);
+
+    /*
+     * The course list has no sections to date it by.
+     *
+     * `ALL` is every course the school offers and no sections at all, so a
+     * timestamp taken from the sections alone leaves it at the epoch —
+     * permanently stale to anything that asks, and 1970 to anyone reading it.
+     */
+    if (catalog.sections.length === 0) {
+      const latest = this.#db
+        .query<{ fetchedAt: string | null }, [string]>(
+          `SELECT MAX(fetched_at) AS fetchedAt FROM courses WHERE term = ?`,
+        )
+        .get(term)?.fetchedAt;
+      if (latest) catalog.fetchedAt = latest;
+    }
     return catalog;
   }
 

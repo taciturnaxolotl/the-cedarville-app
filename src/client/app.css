@@ -316,6 +316,70 @@ td {
   cursor: pointer;
 }
 
+/* ---- the install page, and the link to it ---- */
+
+#get-bridge {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--lavender);
+  border-radius: 3px;
+  color: var(--lavender);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+#get-bridge:hover {
+  background: color-mix(in oklch, var(--lavender) 14%, transparent);
+}
+
+#get-bridge[hidden] {
+  display: none;
+}
+
+.install {
+  max-width: 68ch;
+}
+
+.install h2 {
+  margin: 26px 0 8px;
+  color: var(--subtext);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.install ol,
+.install ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.install li {
+  margin-bottom: 8px;
+}
+
+.install code {
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--mantle);
+  color: var(--sky);
+}
+
+.install a.export {
+  display: inline-block;
+  margin-right: 8px;
+  text-decoration: none;
+}
+
+#version.ok {
+  color: var(--green);
+}
+
+#version.err {
+  color: var(--peach);
+}
+
 /* ---- the semester bar ---- */
 
 .term-bar {

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>install the bridge · the cedarville app</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header>
+      <h1>install the bridge</h1>
+      <p id="who"><a href="/">back to the planner</a></p>
+    </header>
+
+    <section class="install">
+      <p>
+        The planner reads the public course catalog on its own. To match it against
+        <em>your</em> degree it needs your own Self-Service session, and a web page cannot
+        borrow one. The bridge is a small extension that asks Colleague on your behalf
+        and hands the answer to this page.
+      </p>
+
+      <p class="muted">
+        Cedarville has not published it to the Chrome Web Store, so Chrome will only load
+        it as an unpacked folder. That is four steps and it is the same thing the Web
+        Store would do, minus the review.
+      </p>
+
+      <ol>
+        <li>
+          <a id="download" class="export" href="cedarville-bridge.zip" download
+            >download the bridge</a
+          >
+          <span id="version" class="muted"></span>
+        </li>
+        <li>Unzip it, and keep the folder somewhere you will not delete by accident.</li>
+        <li>
+          Open <code>chrome://extensions</code>, and turn on <b>Developer mode</b> at the
+          top right.
+        </li>
+        <li>
+          Press <b>Load unpacked</b> and pick the folder you unzipped. It should contain
+          <code>manifest.json</code> directly.
+        </li>
+      </ol>
+
+      <p>
+        Then open
+        <a href="https://selfservice.cedarville.edu/Student/Planning/DegreePlans"
+          >Self-Service</a
+        >
+        in another tab and sign in. Come back here and press <b>capture requirements</b>.
+      </p>
+
+      <h2>what it can and cannot do</h2>
+      <ul>
+        <li>
+          It reads your degree evaluations and the course catalog on your session, and
+          hands them to this page and to a companion on your own machine if you run one.
+        </li>
+        <li>
+          It can write courses onto your Colleague degree plan, and only ones you have
+          confirmed on screen first. It never registers you for anything.
+        </li>
+        <li>
+          It talks to Self-Service, to this planner, and to <code>127.0.0.1</code>. Nothing
+          else, which the manifest states and Chrome enforces.
+        </li>
+        <li>
+          Your transcript is never written to the planner's server. The server holds the
+          course catalog, which is the same for everybody.
+        </li>
+      </ul>
+
+      <h2>when a capture stops working</h2>
+      <p class="muted">
+        Almost always the same thing: the extension updated and a Self-Service tab is
+        still running the old copy of it. Reload the extension at
+        <code>chrome://extensions</code>, then reload the Self-Service tab. The planner
+        says so when it can tell.
+      </p>
+    </section>
+
+    <script type="module" src="install.js"></script>
+  </body>
+</html>

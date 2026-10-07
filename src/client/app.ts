@@ -18,6 +18,8 @@ import type { Capture } from "../content";
 import { crawlTerm } from "../crawl";
 import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
 import {
+  BRIDGE_VERSION,
+  bridgeVersion,
   capture,
   catalogStatus,
   fetchAllCourses,
@@ -442,12 +444,39 @@ async function init() {
   }
 
   if (!installed()) {
+    $("#get-bridge").hidden = false;
     // Never step on an error with a lesser message.
     if (store.get().tone !== "err") {
-      say("browse the catalog freely; install the bridge extension to match it to your degree");
+      say("browse the catalog freely; install the bridge to match it against your degree");
     }
     return;
   }
+
+  /*
+   * Whether the extension answering is the one this page was built against.
+   *
+   * The commonest failure in this application is not a bug in either half,
+   * it is the two halves being different ages: an extension updates, a
+   * Self-Service tab keeps the content script it loaded this morning, and the
+   * symptom is a reply in a shape the page stopped expecting. That is worth
+   * one request at startup to say plainly.
+   */
+  void bridgeVersion().then(
+    (theirs) => {
+      if (!BRIDGE_VERSION || theirs === BRIDGE_VERSION) return;
+      $("#get-bridge").hidden = false;
+      say(
+        `your bridge is ${theirs} and this planner expects ${BRIDGE_VERSION}; ` +
+          "update it before capturing anything",
+        "err",
+      );
+    },
+    () => {
+      // Old enough never to have heard the question, which answers it.
+      $("#get-bridge").hidden = false;
+      say("your bridge is older than this planner; update it before capturing anything", "err");
+    },
+  );
 
   try {
     const [list, available] = await Promise.all([programs(), terms()]);

@@ -97,8 +97,12 @@ async function offerToCompanion(path: "capture" | "picks", body: unknown): Promi
 chrome.runtime.onMessageExternal.addListener((msg: Request, _sender, reply) => {
   (async (): Promise<Reply<unknown>> => {
     try {
-      // Picks never leave for Self-Service; they are only passing through on
-      // the way to the student's own machine.
+      // Neither of these troubles Self-Service. The version is this file's
+      // own, and picks are only passing through on the way to the student's
+      // own machine.
+      if (msg.type === "version") {
+        return { ok: true, data: chrome.runtime.getManifest().version };
+      }
       if (msg.type === "picks") {
         const sent = await offerToCompanion("picks", msg.picks);
         return sent ? { ok: true, data: true } : { ok: false, error: "no companion is running" };

@@ -200,6 +200,16 @@ export interface Applied {
 
 export type Request =
   | { type: "ping" }
+  /**
+   * What build of the extension is answering.
+   *
+   * The background answers this one itself, so it works with no Self-Service
+   * tab open at all — which is the point, since the commonest reason a
+   * capture fails is an extension older than the page asking it. A page that
+   * can read the version can say so instead of failing in a way that reads
+   * as the planner being broken.
+   */
+  | { type: "version" }
   | { type: "programs" }
   | { type: "terms" }
   | { type: "capture"; whatIf?: string[] }
@@ -242,6 +252,7 @@ export type Reply<T> =
 
 export interface ReplyMap {
   ping: true;
+  version: string;
   picks: true;
   programs: ProgramSummary[];
   terms: { code: string; description: string }[];

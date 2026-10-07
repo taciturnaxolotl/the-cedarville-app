@@ -1,7 +1,14 @@
 /**
- * Two artifacts from one source tree:
+ * Three artifacts from one source tree:
  *   dist/    the extension, loaded unpacked in chrome://extensions
  *   public/  the planner, a static page served by `bun run serve`
+ *   public/cedarville-bridge.zip  the same extension, to be downloaded
+ *
+ * The zip is how a hosted planner hands the extension to a student. Chrome
+ * refuses to install one from a web page — no `.crx` over HTTP since version
+ * 75, and dragging one in is refused too — so the only route that does not
+ * go through the Web Store is "load unpacked", and what gets loaded is a
+ * folder. A folder travels as a zip.
  *
  * They share the raw Colleague types and nothing else. The extension fetches;
  * the page interprets.
@@ -12,10 +19,17 @@
  * `APP_ORIGIN=https://plan.example.edu bun run build`.
  */
 
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, mkdir, readdir, rm } from "node:fs/promises";
 import { APP_ORIGIN, COMPANION } from "./src/where";
+import { zip } from "./src/zip";
+
+/** What the extension calls itself, which the page compares against. */
+const VERSION = ((await Bun.file("src/manifest.json").json()) as { version: string }).version;
 
 const watch = process.argv.includes("--watch");
+
+/** What a student downloads. Named so it is recognisable in ~/Downloads. */
+const BUNDLE = "cedarville-bridge.zip";
 
 async function bundle(entrypoints: string[], outdir: string, assets: [string, string][]) {
   await rm(outdir, { recursive: true, force: true });
@@ -33,6 +47,10 @@ async function bundle(entrypoints: string[], outdir: string, assets: [string, st
     define: {
       "process.env.APP_ORIGIN": JSON.stringify(APP_ORIGIN),
       "process.env.CEDARVILLE_PORT": JSON.stringify(new URL(COMPANION).port),
+      // The page is built knowing which extension it was built against, so
+      // it can say "yours is older than this planner" rather than failing in
+      // a way that reads as the planner being broken.
+      "process.env.BRIDGE_VERSION": JSON.stringify(VERSION),
     },
   });
 
@@ -66,14 +84,40 @@ async function manifest(): Promise<string> {
   );
 }
 
+/**
+ * The extension, archived for download.
+ *
+ * Built after `dist` and written into `public`, so the planner serves the
+ * exact bundle it was built alongside. Sorted by name rather than by whatever
+ * order the directory came back in, because an archive that reshuffles itself
+ * between builds is a fresh download for everyone who already has it.
+ */
+async function archive(): Promise<number> {
+  const names = (await readdir("dist")).sort();
+  const entries = await Promise.all(
+    names.map(async (name) => ({
+      name,
+      data: new Uint8Array(await Bun.file(`dist/${name}`).arrayBuffer()),
+    })),
+  );
+  const bytes = zip(entries);
+  await Bun.write(`public/${BUNDLE}`, bytes);
+  return bytes.length;
+}
+
 async function build() {
   await bundle(["src/content.ts", "src/background.ts"], "dist", []);
   await Bun.write("dist/manifest.json", await manifest());
-  await bundle(["src/client/app.ts"], "public", [
+  await bundle(["src/client/app.ts", "src/client/install.ts"], "public", [
     ["src/client/index.html", "index.html"],
+    ["src/client/install.html", "install.html"],
     ["src/client/app.css", "app.css"],
   ]);
-  console.log(`built dist/ (extension) and public/ (planner) for ${APP_ORIGIN}`);
+  const size = await archive();
+  console.log(
+    `built dist/ (extension ${VERSION}), public/ (planner) and ${BUNDLE} ` +
+      `(${(size / 1024).toFixed(0)}kb) for ${APP_ORIGIN}`,
+  );
 }
 
 await build();

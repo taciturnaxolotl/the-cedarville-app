@@ -113,6 +113,20 @@ function json(body: unknown, status = 200, accept = ""): Response {
 
 async function api(request: Request, pathname: string): Promise<Response | null> {
   const accept = request.headers.get("accept-encoding") ?? "";
+
+  /*
+   * Enough for a deployment to tell running from serving.
+   *
+   * A process that is up but holds no catalog is useless to a student, and
+   * the difference does not show in a port being open. So this answers with
+   * what it has rather than with the word "ok": a health check that cannot
+   * fail is a health check nobody should trust.
+   */
+  if (pathname === "/health") {
+    const terms = store.stats();
+    const sections = terms.reduce((n, row) => n + row.sections, 0);
+    return json({ ok: true, terms: terms.length, sections });
+  }
   if (pathname === "/catalog" && request.method === "GET") {
     return json({
       terms: store.stats(),

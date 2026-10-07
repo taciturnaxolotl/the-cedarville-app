@@ -119,6 +119,21 @@ the guard asked the attacker whether they were an attacker — and hosting the
 planner anywhere meant shipping it. The route is gone. The server writes its
 SQLite catalog and nothing else, which is the whole of what it is for.
 
+Chrome will not install an extension from a web page: a `.crx` offered over
+HTTP has been refused since version 75, and dragging one in is refused too.
+So `bun run build` also writes `public/cedarville-bridge.zip`, the planner
+serves `/install.html` beside it, and a student unzips the folder and loads it
+unpacked. The archive is stored rather than deflated and dated to the zip
+epoch, so a rebuild from the same source is the same bytes and not a fresh
+download for everybody who already has it.
+
+The page is built knowing which extension it was built against, and asks the
+installed one for its version at startup. The two being different ages is the
+commonest failure in this application — an extension updates, a Self-Service
+tab keeps the content script it loaded this morning, and the symptom is a
+reply in a shape the page stopped expecting — so it is said out loud rather
+than left to be diagnosed.
+
     CEDARVILLE_CAPTURE   where a capture is kept (default: XDG data dir)
     CEDARVILLE_PORT      the companion's port
     CEDARVILLE_COMPANION 0 to decline the listener entirely

@@ -61,6 +61,18 @@ async function send<K extends Request["type"]>(msg: Request & { type: K }): Prom
 }
 
 export const ping = () => send({ type: "ping" });
+
+/**
+ * The build of the extension the planner was built alongside.
+ *
+ * Baked in rather than fetched, because the two are released together: the
+ * page knows which bridge it expects, and `bridgeVersion` says which one
+ * answered. When they differ, the student needs the newer bundle.
+ */
+export const BRIDGE_VERSION = process.env.BRIDGE_VERSION ?? "";
+
+/** What the installed extension calls itself. Needs no Self-Service tab. */
+export const bridgeVersion = () => send({ type: "version" });
 export const terms = () => send({ type: "terms" });
 /**
  * Every program the school offers.

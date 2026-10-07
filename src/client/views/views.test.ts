@@ -414,14 +414,14 @@ describe("semester view", () => {
    * morning still draws, and the only tell was a seat count a student had no
    * reason to distrust.
    */
-  test("says how long ago the timetable was read", () => {
+  test("says when the timetable was last updated", () => {
     const hourAgo = new Date(Date.now() - 2 * 3_600_000).toISOString();
     const ctx = ctxOf([sectionOf()]) as unknown as { sections: { fetchedAt: string } };
     ctx.sections.fetchedAt = hourAgo;
     semester.mount(root, ctx as unknown as Ctx);
 
     const age = root.querySelector(".term-bar .tag") as HTMLElement;
-    expect(age.textContent).toBe("read 2 hours ago");
+    expect(age.textContent).toBe("last updated 2 hours ago");
     expect(age.className).toContain("rule");
     expect(age.title).toContain("re-crawls it whatever its age");
   });
@@ -432,7 +432,7 @@ describe("semester view", () => {
     semester.mount(root, ctx as unknown as Ctx);
 
     const age = root.querySelector(".term-bar .tag") as HTMLElement;
-    expect(age.textContent).toBe("read 3 days ago");
+    expect(age.textContent).toBe("last updated 3 days ago");
     expect(age.className).toContain("bad");
     expect(age.title).toContain("worth refreshing");
   });

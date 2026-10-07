@@ -747,7 +747,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
      * before re-crawling, so stale is visible rather than merely stated.
      */
     const stale = olderThan(TERM_HOURS, crawledAt);
-    const age = tag(`read ${since(crawledAt)}`, stale ? "bad" : "rule");
+    const age = tag(`last updated ${since(crawledAt)}`, stale ? "bad" : "rule");
     age.title =
       `${term} was crawled ${new Date(crawledAt).toLocaleString()}.` +
       (stale

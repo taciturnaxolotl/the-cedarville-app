@@ -27,6 +27,12 @@
  *                 safe to leave open: without it, three well-formed sections
  *                 and `complete: true` empty the catalog for everyone.
  *
+ *   a real term   the term is a code the registrar could actually issue, in
+ *                 a year somebody could actually be enrolled in. Without
+ *                 this the route accepts any 32-character string, so a
+ *                 hosted cache would grow a new twenty-thousand-section
+ *                 table for every name anyone cared to invent.
+ *
  * What is deliberately not here is identity. There is no account system and
  * nothing to attach one to, so the guards are all about the claim rather than
  * the claimant. A determined student with a real session can still post a
@@ -99,6 +105,20 @@ const SHRINK_LIMIT = 0.2;
  */
 const SENTINELS = new Set(["ALL"]);
 
+/** "2027SP". The only shape the rest of this codebase can sort or compare. */
+const TERM_CODE = /^(\d{4})(SP|SU|FA)$/;
+
+/**
+ * How far either side of now a term may be.
+ *
+ * Generous on purpose: a catalog is published a year or so ahead, and an old
+ * term is worth keeping for anyone reading their own history. What this
+ * refuses is the year 9999, which is not a term but a way to make a hosted
+ * cache grow for as long as somebody keeps asking.
+ */
+const YEARS_BACK = 10;
+const YEARS_AHEAD = 3;
+
 export function ingest(store: CatalogStore, raw: unknown): Verdict {
   const parsed = Ingest.safeParse(raw);
   if (!parsed.success) {
@@ -109,6 +129,19 @@ export function ingest(store: CatalogStore, raw: unknown): Verdict {
 
   if (SENTINELS.has(body.term)) {
     return { ok: false, why: `${body.term} is not a term and cannot be ingested` };
+  }
+
+  const named = TERM_CODE.exec(body.term);
+  if (!named) {
+    return { ok: false, why: `"${body.term}" is not a term code; Colleague writes them "2027SP"` };
+  }
+  const year = Number(named[1]);
+  const now = new Date().getFullYear();
+  if (year < now - YEARS_BACK || year > now + YEARS_AHEAD) {
+    return {
+      ok: false,
+      why: `${body.term} is outside the years this catalog keeps (${now - YEARS_BACK}-${now + YEARS_AHEAD})`,
+    };
   }
   if (!body.complete) {
     return { ok: false, why: "crawl did not reach the last page; a partial term is not a term" };

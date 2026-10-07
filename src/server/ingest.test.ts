@@ -208,3 +208,38 @@ describe("a crawl must be about the term it claims", () => {
     db.close();
   });
 });
+
+describe("a term the registrar could have issued", () => {
+  /*
+   * The route is open by design — there is no account system and nothing to
+   * attach one to — so every guard is about the claim rather than the
+   * claimant. This is the one that keeps a hosted cache from growing a table
+   * per invented name.
+   */
+  test("refuses a term that is not a term code", () => {
+    for (const term of ["LOL", "2026", "FA2026", "2026fa", "2026FALL", "../etc"]) {
+      const verdict = ingest(store(), body({ term, sections: [section("s1", { TermId: term })] }));
+      expect(verdict.ok).toBe(false);
+      if (!verdict.ok) expect(verdict.why).toContain("not a term code");
+    }
+  });
+
+  test("refuses a term nobody could be enrolled in", () => {
+    const far = `${new Date().getFullYear() + 40}SP`;
+    const verdict = ingest(
+      store(),
+      body({ term: far, sections: [section("s1", { TermId: far })] }),
+    );
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.why).toContain("outside the years this catalog keeps");
+  });
+
+  test("and takes the three seasons Colleague actually names", () => {
+    const year = new Date().getFullYear() + 1;
+    for (const season of ["SP", "SU", "FA"]) {
+      const term = `${year}${season}`;
+      const verdict = ingest(store(), body({ term, sections: [section("s1", { TermId: term })] }));
+      expect(verdict.ok).toBe(true);
+    }
+  });
+});

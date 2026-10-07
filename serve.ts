@@ -29,7 +29,17 @@ import {
 import { ingest } from "./src/server/ingest";
 import { CatalogStore, type RuleKey, ruleKey } from "./src/server/store";
 
-const PORT = 5173;
+/**
+ * Where to listen, and on which interface.
+ *
+ * Loopback by default, because the deployment this is written for puts a
+ * reverse proxy in front: binding every interface there means the raw port
+ * answers the internet alongside the proxy, with none of the proxy's
+ * terminating, logging or rate limiting. `HOST=0.0.0.0` is the opt out, which
+ * is what a container wants.
+ */
+const PORT = Number(process.env.PORT ?? 5173);
+const HOST = process.env.HOST ?? "127.0.0.1";
 const ROOT = "public";
 /**
  * How often to *consider* refreshing, deliberately much shorter than how
@@ -216,6 +226,7 @@ async function api(request: Request, pathname: string): Promise<Response | null>
 
 Bun.serve({
   port: PORT,
+  hostname: HOST,
   async fetch(request) {
     const { pathname } = new URL(request.url);
 
@@ -233,7 +244,7 @@ Bun.serve({
   },
 });
 
-console.log(`planner on http://localhost:${PORT}`);
+console.log(`planner on http://${HOST}:${PORT}`);
 for (const row of store.stats()) {
   console.log(`  ${row.term}: ${row.sections} sections, ${row.courses} courses, ${row.fetchedAt}`);
 }

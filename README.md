@@ -124,6 +124,10 @@ SQLite catalog and nothing else, which is the whole of what it is for.
     CEDARVILLE_COMPANION 0 to decline the listener entirely
     CATALOG_DB           the catalog cache (default: .data/catalog.sqlite)
     CRAWL                "off" to skip the server's own boot crawl
+    PORT                 the planner's port (default: 5173)
+    HOST                 interface to bind (default: 127.0.0.1; 0.0.0.0 in a
+                         container, behind nothing)
+    APP_ORIGIN           build-time: the origin the extension may talk to
 
 ### what it refuses to guess
 

@@ -20,6 +20,7 @@ import {
   type TermCatalog,
   yearsOffered,
 } from "../catalog";
+import { crawlGroup } from "../crawl";
 import {
   type Plan,
   type PlanRequest,
@@ -43,7 +44,7 @@ import {
   type Unenumerable,
 } from "../requirements";
 import { sequencesFrom } from "../sequences";
-import { resolveRules } from "./bridge";
+import { installed, resolveRules, searcher } from "./bridge";
 import type { Ctx } from "./ctx";
 import { FULL_TIME, type Load } from "./load";
 import { editsOf, type Moves } from "./moves";
@@ -58,6 +59,14 @@ export { baseCode } from "../requirements";
 /** Where the build view keeps what the student has settled on. */
 export const PINS = "cedarville:pins";
 export const TRACKS = "cedarville:tracks";
+/**
+ * Rule pools this browser has already resolved.
+ *
+ * Course codes keyed by requirement coordinates: a catalog fact, the same for
+ * every student, and unchanged between page loads. Worth keeping because the
+ * answer now costs a request on the student's own session.
+ */
+const POOLS = "cedarville:rule-pools";
 
 /** The first term a plan may use. Everything before it is history or now. */
 const START = nextPlannableTerm(new Date());
@@ -77,6 +86,24 @@ export interface Picks {
   pinned: Set<string>;
   tracks: Map<string, string[]>;
 }
+
+const readPools = (): Record<string, string[]> => {
+  const held = read<Record<string, string[]>>(POOLS, {});
+  // A record read off disk is only as good as whatever wrote it.
+  return Object.fromEntries(
+    Object.entries(held ?? {}).filter(
+      ([key, pool]) => typeof key === "string" && Array.isArray(pool),
+    ),
+  );
+};
+
+const writePools = (pools: Record<string, string[]>) => {
+  try {
+    localStorage.setItem(POOLS, JSON.stringify(pools));
+  } catch {
+    /* A cache that will not fit is a cache we do without. */
+  }
+};
 
 export const storedPicks = (): Picks => ({
   pinned: new Set(read<string[]>(PINS, [])),
@@ -251,15 +278,57 @@ export function planningFrom(ctx: Ctx): Planning {
       const asked = groups.filter((u) => !u.bucket).map((u) => u.ids);
       const found = new Map<string, string[]>();
       if (!asked.length) return found;
+
+      /** A pool is only useful as the courses the student has not taken. */
+      const take = (key: string, pool: readonly string[] | undefined) => {
+        const owed = pool?.filter((code) => !have.has(code));
+        if (owed?.length) found.set(key, owed);
+      };
+
+      // Anything this browser has already worked out. A rule's pool is a
+      // catalog fact and does not change between page loads, so asking twice
+      // is a round trip for an answer already in hand.
+      const remembered = readPools();
+      const unanswered = asked.filter((ids) => {
+        const key = groupKey(ids);
+        take(key, remembered[key]);
+        return !found.has(key);
+      });
+      if (!unanswered.length) return found;
+
       try {
-        const answers = await resolveRules(asked);
-        for (const key of Object.keys(answers)) {
-          const pool = answers[key]?.filter((code) => !have.has(code));
-          if (pool?.length) found.set(key, pool);
-        }
+        const answers = await resolveRules(unanswered);
+        for (const key of Object.keys(answers)) take(key, answers[key]);
       } catch {
-        /* Leave the group listed as unresolved rather than guessing at it. */
+        /* The server may have none of these; the session below might. */
       }
+
+      /*
+       * Whatever the server could not expand, asked on the student's own
+       * session.
+       *
+       * Colleague states a handful of requirements as a rule it will not
+       * enumerate — "one laboratory course from the biological sciences" —
+       * and answers them only through the search its own pages use. The
+       * server used to ask anonymously; SSO ended that, and a hosted planner
+       * then listed five requirements as unplannable that worked perfectly
+       * well on a laptop whose cache still held yesterday's answers.
+       *
+       * One page per group, and the answer is kept, so this is a few requests
+       * once per browser rather than a crawl.
+       */
+      const missing = unanswered.filter((ids) => !found.has(groupKey(ids)));
+      if (missing.length && installed()) {
+        for (const ids of missing) {
+          try {
+            take(groupKey(ids), await crawlGroup(searcher, ids));
+          } catch {
+            /* Leave the group listed as unresolved rather than guess at it. */
+          }
+        }
+      }
+
+      writePools({ ...remembered, ...Object.fromEntries(found) });
       return found;
     },
   };

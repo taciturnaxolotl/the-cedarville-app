@@ -22,7 +22,7 @@ import {
   unreadModifications,
 } from "../../requirements";
 import type { ProgramSummary } from "../../types";
-import { capture, dumpForDev, installed, programs, sendPicks } from "../bridge";
+import { BridgeError, capture, dumpForDev, installed, programs, sendPicks } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
@@ -250,8 +250,13 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   if (installed()) {
     void programs()
       .then((list) => store.set({ available: list.filter((p) => p.IsActive) }))
-      .catch(() => {
-        /* Signed out: the picker stays empty, the ranking still works. */
+      .catch((err) => {
+        // Signed out is ordinary and says so elsewhere; anything else is a
+        // shape we failed to read, and a picker that is quietly empty teaches
+        // a student that the feature does not work.
+        if (err instanceof BridgeError) return;
+        const why = err instanceof Error ? err.message : String(err);
+        notes.append(el("p", "swap muted", `could not read the program list — ${why}`));
       });
   }
 

@@ -2,7 +2,7 @@
  * The shell. Owns the controls and swaps one of the views into #outlet;
  * each view exports mount(root, ctx) -> { destroy }.
  *
- * Shell state lives in a store for the same reason the schedule view's does:
+ * Shell state lives in a store for the same reason the semester view's does:
  * a status line, a busy flag, and a mounted view kept in sync by hand drift
  * apart the moment a fourth thing needs to know about them. Here, setting
  * state is the only way to change what is on screen.
@@ -13,7 +13,7 @@
  * evaluation comes from the extension and goes nowhere else.
  */
 
-import { type TermCatalog, termNow } from "../catalog";
+import { slimCatalog, type TermCatalog, termNow } from "../catalog";
 import type { Capture } from "../content";
 import { crawlTerm } from "../crawl";
 import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
@@ -34,17 +34,21 @@ import { createStore } from "./store";
 import * as build from "./views/build";
 import * as plan from "./views/plan";
 import * as record from "./views/record";
-import * as schedule from "./views/schedule";
+import * as semester from "./views/semester";
 
 const STORE = "cedarville:last-capture";
 const SECTIONS = "cedarville:last-sections";
-const VIEWS = { build, plan, schedule, record } as const;
+/** Which term the sections above are for, kept even when they will not fit. */
+const TERM = "cedarville:last-term";
+const VIEWS = { build, plan, semester, record } as const;
 
 /** Where the tabs that were folded into others went. */
 const MOVED: Record<string, keyof typeof VIEWS> = {
   map: "plan",
   overlap: "build",
   requirements: "record",
+  // The section builder became one term at a time, and said so in its name.
+  schedule: "semester",
 };
 type ViewName = keyof typeof VIEWS;
 
@@ -70,6 +74,13 @@ interface Shell {
   unmatched: string[];
   sections?: TermCatalog;
   allCourses?: TermCatalog["courses"];
+  /**
+   * Terms there is any point asking for: cached here, or named by the
+   * registrar. The semester view offers these rather than every term its
+   * projection reaches, because Colleague publishes a term or two ahead and a
+   * crawl of the autumn after next comes back empty.
+   */
+  terms: string[];
   view: ViewName;
   status: string;
   tone: "" | "err" | "ok";
@@ -83,6 +94,7 @@ const store = createStore<Shell>({
   enrolled: [],
   unmatched: [],
   allCourses: [],
+  terms: [],
   view: viewInUrl() ?? "build",
   status: "",
   tone: "",
@@ -100,9 +112,9 @@ let mounted: { destroy(): void } | null = null;
 /** Remount when the view changes or the data under it does. */
 store.watch(
   (s) =>
-    `${s.view}:${s.trees.map((t) => t.code).join(",")}:${s.unmatched.join(",")}:${s.sections?.fetchedAt ?? ""}:${s.allCourses?.length ?? 0}`,
+    `${s.view}:${s.trees.map((t) => t.code).join(",")}:${s.unmatched.join(",")}:${s.sections?.fetchedAt ?? ""}:${s.allCourses?.length ?? 0}:${s.terms.join(",")}`,
   () => {
-    const { view, trees, enrolled, unmatched, sections, allCourses } = store.get();
+    const { view, trees, enrolled, unmatched, sections, allCourses, terms: known } = store.get();
     mounted?.destroy();
     mounted = VIEWS[view].mount($("#outlet"), {
       trees,
@@ -110,7 +122,9 @@ store.watch(
       unmatched,
       sections,
       allCourses,
+      terms: known,
       adopt,
+      loadTerm,
     });
     for (const button of Array.from($("#tabs").querySelectorAll("button"))) {
       button.classList.toggle("on", button.dataset.view === view);
@@ -175,7 +189,13 @@ store.watch(
  * combination the student was last looking at.
  */
 function adopt(snapshot: Capture) {
-  localStorage.setItem(STORE, JSON.stringify(snapshot));
+  try {
+    localStorage.setItem(STORE, JSON.stringify(snapshot));
+  } catch {
+    // An evaluation is worth having on screen even when there is no room to
+    // keep it; the alternative is a capture that throws after it worked.
+    say("no room to remember this capture; it will need capturing again after a reload");
+  }
   store.set({
     trees: Object.values(snapshot.evaluations).map(normalize),
     enrolled: (snapshot.enrolled ?? []).map((p) => p.code),
@@ -265,9 +285,29 @@ async function crawlHere(term: string): Promise<TermCatalog> {
   return crawled;
 }
 
-$("#load-sections").addEventListener("click", async () => {
+$("#load-sections").addEventListener("click", () => {
   const term = $<HTMLSelectElement>("#term").value;
   if (!term) return say("pick a term first", "err");
+  void loadTerm(term);
+});
+
+/**
+ * Brings a term's timetable in, from wherever it can be had.
+ *
+ * The shell owns this rather than the semester view, even though that view is
+ * the one asking: there is one term control, one status line and one copy of
+ * the catalog in the store, and a view that fetched its own would be a second
+ * answer to "which term am I looking at".
+ */
+async function loadTerm(term: string, { focus = true }: { focus?: boolean } = {}) {
+  // The control at the top and the one in the view are the same decision.
+  const select = $<HTMLSelectElement>("#term");
+  if (select.value !== term) {
+    if (!Array.from(select.options).some((o) => o.value === term)) {
+      select.add(new Option(term, term));
+    }
+    select.value = term;
+  }
 
   store.set({ busy: true });
   try {
@@ -298,23 +338,56 @@ $("#load-sections").addEventListener("click", async () => {
       );
     }
 
-    localStorage.setItem(SECTIONS, JSON.stringify(sections));
+    // The store first, and the cache afterwards. A sixty-page crawl that
+    // succeeded was being thrown away by the line that tried to remember it:
+    // a term of raw sections is ten megabytes, a browser allows five for
+    // everything a site stores, and the throw happened before the handover.
+    store.set({ sections, ...(focus ? { view: "semester" as const } : {}) });
     void dumpForDev("catalog", sections);
-    store.set({ sections, view: "schedule" });
+    remember(sections);
   } catch (err) {
     say(message(err), "err");
   } finally {
     store.set({ busy: false, progress: null });
   }
-});
+}
 
-// ---- start -------------------------------------------------------------
+// ---- remembering across reloads ---------------------------------------
+
+/**
+ * Keeps a term's timetable for the next reload, and never more than that.
+ *
+ * The catalog is the one thing here that is not personal, which means it is
+ * also the one thing that can always be had again: it lives on the server,
+ * fetched in a hundred milliseconds. So this is a convenience and is written
+ * as one — slimmed to the fields the app parses, and abandoned without
+ * complaint when it still will not fit, because the alternative is a crawl
+ * reported as an error.
+ */
+function remember(catalog: TermCatalog) {
+  try {
+    localStorage.setItem(TERM, catalog.term);
+  } catch {
+    /* Out of room for eight bytes is out of room for anything. */
+  }
+  try {
+    localStorage.setItem(SECTIONS, JSON.stringify(slimCatalog(catalog)));
+  } catch {
+    // Freeing it is the point: a blob already in there is what filled the
+    // quota, and the term above is enough to fetch this one again.
+    localStorage.removeItem(SECTIONS);
+  }
+}
 
 function restoreCached() {
   const sections = localStorage.getItem(SECTIONS);
   if (sections) {
     try {
-      store.set({ sections: JSON.parse(sections) as TermCatalog });
+      const catalog = JSON.parse(sections) as TermCatalog;
+      store.set({ sections: catalog });
+      // Shrinks what an older version of this page left behind, which is
+      // what was filling the quota on every load since.
+      remember(catalog);
     } catch {
       localStorage.removeItem(SECTIONS);
     }
@@ -348,6 +421,7 @@ async function init() {
     for (const row of status.terms) {
       select.add(new Option(`${row.term} · ${row.sections} sections`, row.term));
     }
+    store.set({ terms: status.terms.map((row) => row.term) });
     // Nothing cached, and without the extension there is no term list to ask
     // for either. Offering the term the calendar is in gives the fetch button
     // something to act on, which is the whole of a stranger's first run.
@@ -358,6 +432,13 @@ async function init() {
     select.disabled = false;
     $<HTMLButtonElement>("#load-sections").disabled = false;
     say("");
+
+    // The catalog is the server's to hand back, so a copy too big to keep is
+    // not a copy lost: fetch the term that was last open and carry on.
+    const last = localStorage.getItem(TERM);
+    if (!store.get().sections && last && status.terms.some((t) => t.term === last)) {
+      void loadTerm(last, { focus: false });
+    }
   } catch {
     say("the planner server is not reachable", "err");
     return;
@@ -382,6 +463,10 @@ async function init() {
     // Colleague lists terms oldest first; the one you are planning is last.
     const select = $<HTMLSelectElement>("#term");
     if (!select.value && available.length) select.value = available[available.length - 1]!.code;
+    // The registrar's own list, which is wider than whatever has been cached.
+    store.set({
+      terms: [...new Set([...store.get().terms, ...available.map((t) => t.code)])],
+    });
 
     say(hadCache ? "showing your last capture" : `${active.length} programs available`);
   } catch (err) {

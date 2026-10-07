@@ -7,17 +7,20 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Window } from "happy-dom";
+import { nextPlannableTerm, shortTerm, termCodeOf } from "../../catalog";
+import { termsFrom } from "../../planner";
 import { normalize, type ProgramTree } from "../../requirements";
 import type { EvaluationResponse, RawGroup } from "../../types";
 import type { Ctx } from "../ctx";
+import { SUMMERS } from "../load";
 import * as build from "./build";
 import * as plan from "./plan";
 import * as record from "./record";
-import * as schedule from "./schedule";
+import * as semester from "./semester";
 
 // The dev dump only fires on localhost, which is where the app runs.
 const window = new Window({ url: "http://localhost:5173/" });
-// The views call document.createElement, and the schedule view persists picks.
+// The views call document.createElement, and the semester view persists picks.
 // Without localStorage here its try/catch would hide a real failure.
 Object.assign(globalThis, {
   document: window.document,
@@ -209,213 +212,640 @@ describe("record view", () => {
   });
 });
 
-describe("schedule view", () => {
-  const withSections = (): Ctx =>
+/*
+ * The semester view: one term, on the clock.
+ *
+ * These assert the three things the mode is for — the week is drawn before
+ * anything is picked, a course holds one section, and choosing a seat tells
+ * the plan which term the course is in — plus the gating the old builder had.
+ */
+/*
+ * The semester view: the plan's term, laid out on the clock.
+ *
+ * What the mode promises is that the week arrives already arranged — one
+ * section per planned course, nothing overlapping, nothing you cannot get
+ * into — and that anything the student pins is kept while the rest moves
+ * around it. Each test here is one of those promises.
+ */
+/*
+ * The semester view: the plan's term, laid out on the clock.
+ *
+ * The mode promises three things. The week arrives already arranged — one
+ * section per planned course, nothing overlapping, nothing you cannot get
+ * into. The list beside it is one line per course, not a timetable written
+ * out in prose. And changing it works the way the plan tab works: offer a
+ * course up to the week, and every section it could sit in becomes somewhere
+ * to put it.
+ */
+describe("semester view", () => {
+  /** The first term a plan may use, so these never go stale with the year. */
+  const TERM = termCodeOf(nextPlannableTerm(new Date()));
+  const SLOT = shortTerm(TERM);
+
+  let next = 0;
+
+  /** A listing entry, meeting on the days and at the hour asked for. */
+  const sectionOf = (over: Record<string, unknown> = {}, meets = "M, W", hour = "9:00 AM") =>
     ({
-      // Course id "1" is CS-1210 in the take-all group of everyKind.
-      trees: [treeOf("BS.CYOPR")],
-      sections: {
-        term: "2026FA",
-        fetchedAt: "2026-08-12T00:00:00.000Z",
-        sections: [
-          {
-            Id: "s1",
-            CourseId: "1",
-            CourseName: "CS-1210",
-            Number: "01",
-            Title: "Intro",
-            Synonym: "40123",
-            TermId: "2026FA",
-            MinimumCredits: 3,
-            MaximumCredits: null,
-            Capacity: 30,
-            Enrolled: 30,
-            Available: 0,
-            Waitlisted: 2,
-            AvailabilityStatus: "Waitlisted",
-            IsNonStandardDates: false,
-            StartDate: "2026-08-19T00:00:00-04:00",
-            EndDate: "2026-12-11T00:00:00-05:00",
-            FacultyDisplay: ["Dr Who"],
-            Meetings: [
-              {
-                Days: [1, 3],
-                // UTC, as Colleague really sends it: 13:00Z is 9am on campus.
-                StartTime: "2026-08-11T13:00:00+00:00",
-                EndTime: "2026-08-11T13:50:00+00:00",
-                StartDate: "2026-08-19T00:00:00-04:00",
-                EndDate: "2026-12-11T00:00:00-05:00",
-                Room: "234",
-                Frequency: "W",
-                IsOnline: false,
-                InstructionalMethodCode: "LEC",
-              },
-            ],
-            FormattedMeetingTimes: [],
-          },
-        ],
-      },
+      Id: `s${next++}`,
+      CourseId: "1",
+      CourseName: "CS-1210",
+      Number: "01",
+      Title: "Intro",
+      Synonym: "40123",
+      TermId: TERM,
+      MinimumCredits: 3,
+      MaximumCredits: null,
+      Capacity: 30,
+      Enrolled: 20,
+      Available: 10,
+      Waitlisted: 0,
+      AvailabilityStatus: "Open",
+      IsNonStandardDates: false,
+      StartDate: "2027-01-12T00:00:00-05:00",
+      EndDate: "2027-04-30T00:00:00-04:00",
+      FacultyDisplay: ["Dr Who"],
+      Meetings: [],
+      FormattedMeetingTimes: [
+        {
+          DaysOfWeekDisplay: meets,
+          StartTimeDisplay: hour,
+          EndTimeDisplay: hour.replace(":00", ":50"),
+          BuildingDisplay: "ENS",
+          Room: "234",
+        },
+      ],
+      ...over,
+    }) as unknown;
+
+  /** The same section as Colleague really sends it: UTC, no display strings. */
+  const inUtc = () =>
+    sectionOf({
+      FormattedMeetingTimes: [],
+      Meetings: [
+        {
+          Days: [1, 3],
+          // 14:00Z is 9am on campus, which is the whole point of the test.
+          StartTime: "2027-01-12T14:00:00+00:00",
+          EndTime: "2027-01-12T14:50:00+00:00",
+          StartDate: "2027-01-12T00:00:00-05:00",
+          EndDate: "2027-04-30T00:00:00-04:00",
+          Room: "234",
+          Frequency: "W",
+          IsOnline: false,
+          InstructionalMethodCode: "LEC",
+        },
+      ],
+    });
+
+  /** Take-all groups, so the projection actually owes these courses. */
+  const treeNeeding = (courses: { id: string; subject: string; number: string }[]) => {
+    const raw = program(
+      "BS.CYOPR",
+      courses.map((c) => group({ Courses: [course(c.id, c.subject, c.number)] })),
+    );
+    raw.Program.Requirements[0]!.Subrequirements[0]!.MinGroups = null;
+    return normalize(raw);
+  };
+
+  const CHAIN = [
+    { Id: "1", SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
+    {
+      Id: "2",
+      SubjectCode: "CS",
+      Number: "2210",
+      Title: "Data Structures",
+      MinimumCredits: 3,
+      CourseRequisites: [
+        {
+          DisplayText: "Take CS-1210",
+          DisplayTextExtension: "- Must be completed prior to taking this course.",
+          IsRequired: true,
+        },
+      ],
+    },
+  ];
+
+  /** Two courses with no requisites, so the plan puts both in the first term. */
+  const PAIR = [
+    { Id: "1", SubjectCode: "CS", Number: "1210", Title: "Intro", MinimumCredits: 3 },
+    { Id: "9", SubjectCode: "MATH", Number: "1710", Title: "Calc", MinimumCredits: 4 },
+  ];
+  const pairTree = () => [
+    treeNeeding([
+      { id: "1", subject: "CS", number: "1210" },
+      { id: "9", subject: "MATH", number: "1710" },
+    ]),
+  ];
+
+  const ctxOf = (
+    sections: unknown[],
+    courses: unknown[] = CHAIN,
+    trees = [
+      treeNeeding([
+        { id: "1", subject: "CS", number: "1210" },
+        { id: "2", subject: "CS", number: "2210" },
+      ]),
+    ],
+    over: Partial<Ctx> = {},
+  ): Ctx =>
+    ({
+      trees,
+      sections: { term: TERM, fetchedAt: "2027-01-02T00:00:00.000Z", sections, courses },
+      ...over,
     }) as unknown as Ctx;
 
-  test("asks for a term before it can build anything", () => {
-    schedule.mount(root, { trees: [treeOf("BS.CYOPR")] });
+  const cards = () => Array.from(root.querySelectorAll("details.course")) as HTMLDetailsElement[];
+  const codes = () => cards().map((c) => c.dataset.code);
+  const cardFor = (code: string) =>
+    root.querySelector(`details.course[data-code="${code}"]`) as HTMLDetailsElement;
+  const headFor = (code: string) => cardFor(code).querySelector("summary") as HTMLElement;
+  const slotOf = (code: string) => cardFor(code).querySelector(".slot")?.textContent ?? "";
+  /** The radio group: one row per section, after the "whichever fits" row. */
+  const options = (code: string) =>
+    Array.from(cardFor(code).querySelectorAll(".option:not(.auto)")) as HTMLElement[];
+  const radios = (code: string) =>
+    options(code).map((o) => o.querySelector("input") as HTMLInputElement);
+  const autoOf = (code: string) =>
+    cardFor(code).querySelector(".option.auto input") as HTMLInputElement;
+  const blocksOf = (kind: string) =>
+    Array.from(root.querySelectorAll(`.block.${kind}`)) as HTMLElement[];
+  const titlesOf = (kind: string) => blocksOf(kind).map((b) => b.getAttribute("title") ?? "");
+  const moves = () => JSON.parse(localStorage.getItem("cedarville:moves") ?? "{}");
+  const fire = (node: Element, type: string) =>
+    node.dispatchEvent(new window.Event(type, { bubbles: true }) as unknown as Event);
+
+  beforeEach(() => {
+    localStorage.clear();
+    next = 0;
+  });
+
+  test("asks for a term before it can lay anything out", () => {
+    semester.mount(root, { trees: [treeOf("BS.CYOPR")] });
     expect(root.textContent).toContain("pick a term");
   });
 
-  test("groups sections under a course card inside its requirement", () => {
-    schedule.mount(root, withSections());
-    expect(root.querySelectorAll("details.req").length).toBeGreaterThan(0);
-    expect(root.querySelectorAll("details.course").length).toBe(1);
-    expect(root.textContent).toContain("CS-1210");
-    expect(root.textContent).toContain("MonWed 9:00am\u20139:50am");
-    expect(root.textContent).toContain("Dr Who");
+  test("asks for a capture before it plans a semester", () => {
+    semester.mount(root, { trees: [], sections: { term: TERM, fetchedAt: "", sections: [] } });
+    expect(root.textContent).toContain("capture your requirements");
   });
 
-  test("shows a full section as full rather than hiding it", () => {
-    schedule.mount(root, withSections());
-    expect(root.querySelector(".tag.full")).toBeTruthy();
-    expect(root.textContent).toContain("0/30");
-    expect(root.querySelector(".tag.seats")?.getAttribute("title")).toContain("0 of 30 seats open");
+  // The list is the plan's term, not a catalogue of everything a requirement
+  // might one day accept.
+  test("lists the courses the plan put in this term and no others", () => {
+    semester.mount(
+      root,
+      ctxOf([
+        inUtc(),
+        sectionOf({ CourseId: "2", CourseName: "CS-2210", Title: "Data Structures" }),
+      ]),
+    );
+
+    // CS-2210 waits on CS-1210, so the plan holds it for a later term.
+    expect(codes()).toEqual(["CS-1210"]);
+    expect(root.querySelector(".term-bar h2")?.textContent).toContain(SLOT);
+    expect(root.textContent).toContain("cr planned");
   });
 
-  // The point of the overhaul: a course says whether you can take it.
-  test("a course with no requisites reads as ready", () => {
-    schedule.mount(root, withSections());
-    const card = root.querySelector("details.course") as HTMLElement;
-    expect(card.dataset.state).toBe("open");
-    expect(root.querySelector(".gate.open")?.textContent).toBe("ready");
+  // And it arrives arranged, which is the other half.
+  test("lays the term out without being asked", () => {
+    semester.mount(root, ctxOf([inUtc()]));
+
+    expect(blocksOf("suggested")).toHaveLength(2); // Monday and Wednesday
+    expect(root.textContent).toContain("1 of 1 courses placed");
+    expect(root.textContent).toContain("3 cr of sections");
+    // One line, with the section it settled on spelled out and nothing else.
+    expect(slotOf("CS-1210")).toBe("01 · MonWed 9:00am–9:50am");
   });
 
-  test("starts with an empty week", () => {
-    schedule.mount(root, withSections());
-    expect(root.textContent).toContain("nothing picked yet");
+  test("a course is an accordion, shut until there is a choice to make", () => {
+    semester.mount(root, ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]));
+    const card = cardFor("CS-1210");
+    expect(card.open).toBe(false);
+    // The detail is inside, ready to be opened rather than spread on the page.
+    expect(options("CS-1210")).toHaveLength(2);
+    expect(card.textContent).toContain("Dr Who");
+    expect(card.textContent).toContain("ENS 234");
   });
 
-  test("destroy clears the outlet", () => {
-    schedule.mount(root, withSections()).destroy();
-    expect(root.children).toHaveLength(0);
+  test("opens itself when the choice has gone wrong", () => {
+    // No section at all is the case a student has to act on.
+    semester.mount(root, ctxOf([sectionOf()], PAIR, pairTree()));
+    expect(cardFor("MATH-1710").open).toBe(true);
+    expect(cardFor("CS-1210").open).toBe(false);
   });
 
-  /**
-   * The whole reason for the overhaul: a course whose prerequisite the
-   * student has not completed must say so, name the missing course, and not
-   * simply look identical to one they can take.
+  test("chooses sections that do not collide", () => {
+    // Both courses teach at nine on Monday; only one pairing works.
+    semester.mount(
+      root,
+      ctxOf(
+        [
+          sectionOf(),
+          sectionOf({ Number: "02" }, "M, W", "11:00 AM"),
+          sectionOf({ CourseId: "9", CourseName: "MATH-1710", Title: "Calc", Number: "01" }),
+        ],
+        PAIR,
+        pairTree(),
+      ),
+    );
+
+    expect(root.querySelector(".clash")).toBeFalsy();
+    expect(root.textContent).toContain("2 of 2 courses placed");
+    expect(slotOf("CS-1210")).toContain("02");
+    expect(slotOf("MATH-1710")).toContain("01");
+  });
+
+  /*
+   * The gesture the plan tab taught: offer the thing up, and the places it
+   * could go appear.
    */
-  const withPrereq = (): Ctx => {
-    const ctx = withSections() as any;
-    ctx.sections.courses = [
-      // CS-1000 must exist in the catalog, or the requisite reads as a stale
-      // reference and the course is reported unknown rather than blocked.
-      { Id: "0", SubjectCode: "CS", Number: "1000", Title: "Prereq", MinimumCredits: 3 },
+  /*
+   * The week is next to the list so that a row of times can be seen rather
+   * than read. Hovering one draws it where it would fall.
+   */
+  test("hovering an option draws it on the week", () => {
+    semester.mount(root, ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]));
+    expect(blocksOf("ghost")).toHaveLength(0);
+
+    fire(options("CS-1210")[1]!, "mouseenter");
+    expect(titlesOf("ghost").every((t) => t.includes("CS-1210 02"))).toBe(true);
+    expect(blocksOf("ghost")).toHaveLength(2); // Monday and Wednesday
+
+    fire(options("CS-1210")[1]!, "mouseleave");
+    // Still the course's own sections, because the pointer is in its card.
+    expect(titlesOf("ghost").every((t) => t.includes("CS-1210 02"))).toBe(true);
+    fire(headFor("CS-1210"), "mouseleave");
+    expect(blocksOf("ghost")).toHaveLength(0);
+  });
+
+  test("a hover says when taking it would cost something else its place", () => {
+    semester.mount(
+      root,
+      ctxOf(
+        [
+          sectionOf(),
+          sectionOf({ Number: "02" }, "M, W", "11:00 AM"),
+          sectionOf({ CourseId: "9", CourseName: "MATH-1710", Title: "Calc", Number: "01" }),
+        ],
+        PAIR,
+        pairTree(),
+      ),
+    );
+    // MATH-1710 is at nine, so CS-1210 01 would collide with it.
+    fire(options("CS-1210")[0]!, "mouseenter");
+    expect(blocksOf("ghost").every((b) => b.classList.contains("clash"))).toBe(true);
+    expect(options("CS-1210")[0]!.title).toContain("Overlaps MATH-1710");
+  });
+
+  test("the radio group chooses, and its first row hands the choice back", () => {
+    semester.mount(root, ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]));
+    // Nothing taken yet, so the arranger holds the choice.
+    expect(autoOf("CS-1210").checked).toBe(true);
+    expect(radios("CS-1210").some((r) => r.checked)).toBe(false);
+    expect(options("CS-1210")[0]!.querySelector(".mark")?.textContent).toBe("chosen for you");
+
+    radios("CS-1210")[1]!.click();
+    expect(radios("CS-1210")[1]!.checked).toBe(true);
+    expect(autoOf("CS-1210").checked).toBe(false);
+    expect(options("CS-1210")[1]!.querySelector(".mark")?.textContent).toBe("yours");
+    expect(titlesOf("pinned").every((t) => t.includes("CS-1210 02"))).toBe(true);
+
+    autoOf("CS-1210").click();
+    expect(autoOf("CS-1210").checked).toBe(true);
+    expect(blocksOf("pinned")).toHaveLength(0);
+    expect(blocksOf("suggested")).toHaveLength(2);
+  });
+
+  test("clicking a block takes it, and clicking it again hands it back", () => {
+    semester.mount(root, ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]));
+    blocksOf("suggested")[0]!.click();
+    expect(blocksOf("pinned")).toHaveLength(2);
+    expect(cardFor("CS-1210").classList.contains("mine")).toBe(true);
+
+    blocksOf("pinned")[0]!.click();
+    expect(blocksOf("pinned")).toHaveLength(0);
+    expect(blocksOf("suggested")).toHaveLength(2);
+  });
+
+  test("a course holds one section, so taking a second lets the first go", () => {
+    semester.mount(root, ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]));
+    radios("CS-1210")[0]!.click();
+    expect(titlesOf("pinned").every((t) => t.includes("CS-1210 01"))).toBe(true);
+
+    radios("CS-1210")[1]!.click();
+    expect(titlesOf("pinned").every((t) => t.includes("CS-1210 02"))).toBe(true);
+    expect(blocksOf("pinned")).toHaveLength(2);
+    expect(options("CS-1210")[0]!.classList.contains("mine")).toBe(false);
+    expect(options("CS-1210")[1]!.classList.contains("mine")).toBe(true);
+  });
+
+  test("a section kept is a section the rest of the week works around", () => {
+    semester.mount(
+      root,
+      ctxOf(
+        [
+          sectionOf(),
+          sectionOf({ Number: "02" }, "M, W", "11:00 AM"),
+          sectionOf({ CourseId: "9", CourseName: "MATH-1710", Title: "Calc", Number: "01" }),
+        ],
+        PAIR,
+        pairTree(),
+      ),
+    );
+    // MATH-1710 only teaches at nine, which is where CS-1210 01 is.
+    expect(slotOf("CS-1210")).toContain("02");
+
+    radios("CS-1210")[0]!.click();
+    expect(slotOf("CS-1210")).toContain("01");
+    // Nothing is left for MATH-1710, and the view says so rather than
+    // quietly dropping it.
+    expect(slotOf("MATH-1710")).toBe("nowhere it fits");
+    expect(root.querySelector(".clash")?.textContent).toContain("MATH-1710");
+    expect(root.textContent).toContain("clashes with a section you pinned");
+  });
+
+  test("starting over hands every section back to the arranger", () => {
+    semester.mount(root, ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]));
+    radios("CS-1210")[1]!.click();
+    const over = root.querySelector(".regenerate") as HTMLButtonElement;
+    expect(over.hidden).toBe(false);
+    expect(over.textContent).toContain("1 chosen");
+
+    over.click();
+    expect(blocksOf("pinned")).toHaveLength(0);
+    expect((root.querySelector(".regenerate") as HTMLButtonElement).hidden).toBe(true);
+  });
+
+  test("what to aim for picks a different week", () => {
+    const choices = [
+      sectionOf({ Number: "early" }, "M, W", "8:00 AM"),
+      sectionOf({ Number: "late" }, "M, W", "4:00 PM"),
+    ];
+    semester.mount(root, ctxOf(choices));
+    const aim = Array.from(root.querySelectorAll("select"))[1] as HTMLSelectElement;
+
+    aim.value = "early";
+    fire(aim, "change");
+    expect(slotOf("CS-1210")).toContain("early");
+
+    aim.value = "late";
+    fire(aim, "change");
+    expect(slotOf("CS-1210")).toContain("late");
+  });
+
+  test("prefers a section with seats left in it", () => {
+    semester.mount(
+      root,
+      ctxOf([
+        sectionOf({ Number: "full", Available: 0, Enrolled: 30, AvailabilityStatus: "Waitlisted" }),
+        sectionOf({ Number: "open" }, "M, W", "11:00 AM"),
+      ]),
+    );
+    expect(slotOf("CS-1210")).toContain("open");
+    expect(cardFor("CS-1210").querySelector(".tag.seats.open")).toBeTruthy();
+  });
+
+  // Moving between terms is the shell's job, because the shell owns the one
+  // copy of the catalog. The view only asks.
+  test("offers the plan's other terms and asks the shell for one", () => {
+    const asked: string[] = [];
+    semester.mount(
+      root,
+      ctxOf([sectionOf()], CHAIN, undefined, { loadTerm: (t: string) => asked.push(t) }),
+    );
+
+    const terms = root.querySelector("select") as HTMLSelectElement;
+    const offered = Array.from(terms.options).map((o) => o.value);
+    expect(terms.value).toBe(TERM);
+    expect(offered.length).toBeGreaterThan(1);
+
+    const other = offered.find((code) => code !== TERM)!;
+    terms.value = other;
+    fire(terms, "change");
+    expect(asked).toEqual([other]);
+  });
+
+  test("offers only terms the registrar has actually published", () => {
+    const [, second] = termsFrom(nextPlannableTerm(new Date()), 2, { summers: SUMMERS });
+    const soon = termCodeOf(second!);
+    semester.mount(
+      root,
+      ctxOf([sectionOf()], CHAIN, undefined, { loadTerm: () => {}, terms: [TERM, soon] }),
+    );
+
+    const terms = root.querySelector("select") as HTMLSelectElement;
+    expect(Array.from(terms.options).map((o) => o.value)).toEqual([TERM, soon]);
+  });
+
+  test("with nowhere else to go, the term control stays shut", () => {
+    semester.mount(
+      root,
+      ctxOf([sectionOf()], CHAIN, undefined, { loadTerm: () => {}, terms: [TERM] }),
+    );
+    expect((root.querySelector("select") as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  /*
+   * The geometry, measured rather than eyeballed. A grid whose blocks are a
+   * row out is not visibly broken, it is quietly wrong, and the only way to
+   * know is to do the arithmetic: the day opens at eight, a row is half an
+   * hour of twenty pixels, and the weekday heading takes the first 26.
+   */
+  test("a nine o'clock class lands two rows below the eight o'clock line", () => {
+    semester.mount(root, ctxOf([sectionOf()]));
+    const block = blocksOf("suggested")[0]!;
+    expect(Number.parseFloat(block.style.top)).toBeCloseTo(66, 3);
+    // Fifty minutes, which is five-sixths of two rows.
+    expect(Number.parseFloat(block.style.height)).toBeCloseTo(33.333, 2);
+  });
+
+  test("two classes at the same hour sit side by side rather than on top", () => {
+    // Keeping both halves of a clash is allowed: it is the student's call,
+    // and the week has to show them what they have done.
+    semester.mount(
+      root,
+      ctxOf(
+        [sectionOf(), sectionOf({ CourseId: "9", CourseName: "MATH-1710", Title: "Calc" })],
+        PAIR,
+        pairTree(),
+      ),
+    );
+    // One section each, both at nine on a Monday. Taking the second is the
+    // student overruling the arranger, which it is allowed to do.
+    radios("CS-1210")[0]!.click();
+    radios("MATH-1710")[0]!.click();
+
+    const monday = root.querySelectorAll(".day")[0] as HTMLElement;
+    const sideBySide = Array.from(monday.querySelectorAll(".block")) as HTMLElement[];
+    expect(sideBySide).toHaveLength(2);
+    expect(sideBySide.map((b) => b.style.width)).toEqual(["50%", "50%"]);
+    expect(sideBySide.map((b) => b.style.left)).toEqual(["0%", "50%"]);
+    // Two courses, each meeting Monday and Wednesday.
+    expect(blocksOf("clash")).toHaveLength(4);
+    expect(root.querySelector(".clash")?.textContent).toContain("overlap Mon");
+  });
+
+  test("a course the plan wants and the term does not teach says so", () => {
+    semester.mount(root, ctxOf([sectionOf()], PAIR, pairTree()));
+    expect(root.textContent).toContain(`not taught in ${TERM}`);
+    expect(root.textContent).toContain("no section is offered this term");
+  });
+
+  // A gate is only worth the words when it is shut.
+  test("a course you are ready for says nothing about it", () => {
+    semester.mount(root, ctxOf([sectionOf()]));
+    expect(root.querySelector(".gate")).toBeFalsy();
+  });
+
+  /*
+   * The plan only ever places a course it is ready for, so a blocked one in a
+   * term means the student put it there — which is allowed, and has to be
+   * said out loud rather than quietly corrected.
+   */
+  test("a course pinned into a term it is not ready for says what it needs", () => {
+    localStorage.setItem("cedarville:moves", JSON.stringify({ "CS-2210": SLOT }));
+    semester.mount(
+      root,
+      ctxOf([
+        sectionOf(),
+        sectionOf({ CourseId: "2", CourseName: "CS-2210", Title: "Data Structures" }, "T, R"),
+      ]),
+    );
+
+    expect(cardFor("CS-2210").querySelector(".gate.blocked")?.textContent).toBe("needs CS-1210");
+
+    // And the ⤺ hands it back to the projection.
+    const back = cardFor("CS-2210").querySelector(".release") as HTMLButtonElement;
+    expect(back.textContent).toBe("⤺");
+    back.click();
+    expect(moves()["CS-2210"]).toBeUndefined();
+  });
+
+  test("an unparseable condition reads as check, not as ready", () => {
+    localStorage.setItem("cedarville:moves", JSON.stringify({ "CS-1210": SLOT }));
+    const courses = [
       {
         Id: "1",
         SubjectCode: "CS",
         Number: "1210",
         Title: "Intro",
+        MinimumCredits: 3,
         CourseRequisites: [
           {
-            DisplayText: "Take CS-1000",
+            DisplayText: "Permission of the instructor.",
             DisplayTextExtension: "- Must be completed prior to taking this course.",
             IsRequired: true,
           },
         ],
       },
     ];
-    return ctx as Ctx;
-  };
+    semester.mount(
+      root,
+      ctxOf([sectionOf()], courses, [treeNeeding([{ id: "1", subject: "CS", number: "1210" }])]),
+    );
 
-  test("a blocked course names what it is waiting on", () => {
-    localStorage.clear();
-    schedule.mount(root, withPrereq());
-
-    const card = root.querySelector("details.course") as HTMLElement;
-    expect(card.dataset.state).toBe("blocked");
-    expect(root.querySelector(".gate.blocked")?.textContent).toBe("blocked");
-    expect(root.textContent).toContain("needs CS-1000");
+    const gate = cardFor("CS-1210").querySelector(".gate.unknown") as HTMLElement;
+    expect(gate.textContent).toBe("check");
+    expect(gate.title).toContain("Permission of the instructor");
   });
 
-  test("hiding blocked courses removes them from view", () => {
-    localStorage.clear();
-    schedule.mount(root, withPrereq());
-    const card = root.querySelector("details.course") as HTMLElement;
-    expect(card.hidden).toBe(false);
+  /*
+   * A prerequisite the plan satisfies in an earlier term is not a blocker in
+   * this one. Judging a future term against today's transcript alone reported
+   * half a degree as blocked by courses the plan already had in hand.
+   */
+  test("a prerequisite met earlier in the plan is not a blocker", () => {
+    const [, , third] = termsFrom(nextPlannableTerm(new Date()), 3, { summers: SUMMERS });
+    const thirdTerm = termCodeOf(third!);
 
-    const filter = root.querySelector(".toggle input") as HTMLInputElement;
-    filter.click();
-    expect(card.hidden).toBe(true);
-
-    filter.click();
-    expect(card.hidden).toBe(false);
-  });
-
-  test("an unparseable condition reads as check, not as ready", () => {
-    localStorage.clear();
-    const ctx = withPrereq() as any;
-    // Index 1 is CS-1210; index 0 is now the CS-1000 it depends on.
-    ctx.sections.courses[1].CourseRequisites = [
+    const chain = [
+      ...CHAIN,
       {
-        DisplayText: "Permission of the instructor.",
-        DisplayTextExtension: "- Must be completed prior to taking this course.",
-        IsRequired: true,
+        Id: "3",
+        SubjectCode: "CS",
+        Number: "3310",
+        Title: "Algorithms",
+        MinimumCredits: 3,
+        CourseRequisites: [
+          {
+            DisplayText: "Take CS-2210",
+            DisplayTextExtension: "- Must be completed prior to taking this course.",
+            IsRequired: true,
+          },
+        ],
       },
     ];
-    schedule.mount(root, ctx as Ctx);
+    const trees = [
+      treeNeeding([
+        { id: "1", subject: "CS", number: "1210" },
+        { id: "2", subject: "CS", number: "2210" },
+        { id: "3", subject: "CS", number: "3310" },
+      ]),
+    ];
+    const ctx = ctxOf(
+      [sectionOf({ CourseId: "3", CourseName: "CS-3310", Title: "Algorithms" })],
+      chain,
+      trees,
+    ) as unknown as { sections: { term: string } };
+    ctx.sections.term = thirdTerm;
+    semester.mount(root, ctx as unknown as Ctx);
 
-    const card = root.querySelector("details.course") as HTMLElement;
-    expect(card.dataset.state).toBe("unknown");
-    expect(root.textContent).toContain("Permission of the instructor");
+    expect(codes()).toEqual(["CS-3310"]);
+    expect(root.querySelector(".gate")).toBeFalsy();
   });
 
-  // The refactor this replaced ran a full DOM sweep on every tick. These
-  // assert the reactive path: an event sets state, state repaints the parts
-  // that depend on it, and nothing else is touched.
-  test("ticking a section updates the week without a manual sweep", () => {
-    localStorage.clear();
-    schedule.mount(root, withSections());
-    expect(root.textContent).toContain("nothing picked yet");
+  test("a planned course can be dropped without leaving the term", () => {
+    semester.mount(root, ctxOf([sectionOf()]));
+    const drop = cardFor("CS-1210").querySelector(".release") as HTMLButtonElement;
+    expect(drop.textContent).toBe("×");
+    drop.click();
 
-    const box = root.querySelector("label.section input") as HTMLInputElement;
-    box.click();
-
-    expect(root.textContent).toContain("1 sections · 3 credits");
-    expect(root.querySelector(".grid")).toBeTruthy();
-    expect(root.textContent).toContain("Mon");
+    expect(moves()["CS-1210"]).toBe("out");
+    // And the semester does not keep a list of what the plan is not doing.
+    expect(root.textContent).not.toContain("out of your plan");
   });
 
-  test("unticking puts the week back", () => {
-    localStorage.clear();
-    schedule.mount(root, withSections());
-    const box = root.querySelector("label.section input") as HTMLInputElement;
-
-    box.click();
-    expect(root.querySelector(".grid")).toBeTruthy();
-
-    box.click();
-    expect(root.textContent).toContain("nothing picked yet");
-    expect(root.querySelector(".grid")).toBeFalsy();
-  });
-
-  test("a pick survives a remount", () => {
-    localStorage.clear();
-    const first = schedule.mount(root, withSections());
-    const box = root.querySelector("label.section input") as HTMLInputElement;
-    box.click();
+  test("pins are kept per term", () => {
+    const first = semester.mount(root, ctxOf([sectionOf()]));
+    blocksOf("suggested")[0]!.click();
+    expect(blocksOf("pinned")).toHaveLength(2);
     first.destroy();
 
-    schedule.mount(root, withSections());
-    const restored = root.querySelector("label.section input") as HTMLInputElement;
-    expect(restored.checked).toBe(true);
-    expect(root.textContent).toContain("1 sections");
+    // Same section id, a different term: the pin does not follow it over.
+    const other = ctxOf([sectionOf()]) as unknown as { sections: { term: string } };
+    other.sections.term = "1999FA";
+    semester.mount(root, other as unknown as Ctx);
+    expect(blocksOf("pinned")).toHaveLength(0);
+  });
+
+  test("a pin survives a remount", () => {
+    const first = semester.mount(
+      root,
+      ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]),
+    );
+    radios("CS-1210")[1]!.click();
+    first.destroy();
+
+    // The same catalog, so the ids line up the way a reload would.
+    next = 0;
+    semester.mount(root, ctxOf([sectionOf(), sectionOf({ Number: "02" }, "M, W", "11:00 AM")]));
+    expect(slotOf("CS-1210")).toContain("02");
+    expect(radios("CS-1210")[1]!.checked).toBe(true);
+  });
+
+  test("destroy clears the outlet", () => {
+    semester.mount(root, ctxOf([sectionOf()])).destroy();
+    expect(root.children).toHaveLength(0);
   });
 
   test("destroy detaches subscriptions so a stale view cannot repaint", () => {
-    localStorage.clear();
-    const view = schedule.mount(root, withSections());
-    const box = root.querySelector("label.section input") as HTMLInputElement;
+    const view = semester.mount(root, ctxOf([sectionOf()]));
+    const block = blocksOf("suggested")[0]!;
     view.destroy();
 
     // The node is detached; clicking it must not throw or resurrect anything.
-    expect(() => box.click()).not.toThrow();
+    expect(() => block.click()).not.toThrow();
     expect(root.children).toHaveLength(0);
   });
 });

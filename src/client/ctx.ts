@@ -23,6 +23,8 @@ export interface Ctx {
    * one term's offerings loses about a third of its depth.
    */
   allCourses?: TermCatalog["courses"];
+  /** Terms worth asking for: cached on the server, or named by the registrar. */
+  terms?: string[];
   /**
    * Hands a fresh capture back to the shell, which owns the trees.
    *
@@ -31,4 +33,13 @@ export interface Ctx {
    * than let it write to the shell's store directly, it asks.
    */
   adopt?: (snapshot: Capture) => void;
+  /**
+   * Asks the shell for a term's timetable, crawling it if nobody has yet.
+   *
+   * The semester view has to move between terms, and the shell already owns
+   * the term control, the status line and the one copy of the catalog. So the
+   * view asks rather than fetching for itself: two fetchers would be two
+   * answers to "which term am I looking at".
+   */
+  loadTerm?: (term: string) => void;
 }

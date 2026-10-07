@@ -28,15 +28,17 @@ import {
   type TermSlot,
   termsFrom,
 } from "../planner";
-import { addSitting, buildGraph, type Graph, nodeOf } from "../prereqs";
+import { addSitting, buildGraph, type Graph, nodeOf, prerequisitesOf } from "../prereqs";
 import {
   baseCode,
   completedCourses,
   coursesNeededAcross,
   expectedCredits,
+  groupKey,
   inProgressCourses,
   type NeedOptions,
   type ProgramTree,
+  type Shortfall,
   sittingCode,
   type Unenumerable,
 } from "../requirements";
@@ -44,6 +46,7 @@ import { sequencesFrom } from "../sequences";
 import { resolveRules } from "./bridge";
 import type { Ctx } from "./ctx";
 import { FULL_TIME, type Load } from "./load";
+import { editsOf, type Moves } from "./moves";
 
 /**
  * A second sitting of a course is a code of its own, and everything that
@@ -258,6 +261,107 @@ export function planningFrom(ctx: Ctx): Planning {
         /* Leave the group listed as unresolved rather than guessing at it. */
       }
       return found;
+    },
+  };
+}
+
+// ---- the projection itself ---------------------------------------------
+
+/*
+ * The same reason `planningFrom` exists, one layer up.
+ *
+ * A projection is not just the graph and the prices: it is the solve, the
+ * prerequisite closure over what the solve asked for, and the student's own
+ * moves laid on top. Two views now draw that — the term-by-term and the
+ * semester — and the first time they each assembled it themselves they
+ * disagreed about which courses the autumn held.
+ */
+export interface Projection {
+  planning: Planning;
+  /** Courses still owed, with the prerequisites they drag along. */
+  readonly need: ReadonlySet<string>;
+  readonly unenumerable: readonly Unenumerable[];
+  readonly shortfalls: readonly Shortfall[];
+  /**
+   * What the plan schedules once the student has had their say.
+   *
+   * An inserted course brings its prerequisites with it — asking for a
+   * capstone and being handed only the capstone would be a lie — and a
+   * dropped one leaves even if something else's chain wants it back, because
+   * a drop is a decision and the closure is only an inference.
+   */
+  scheduled(moves: Moves): Set<string>;
+  project(moves: Moves, load: Load): Plan;
+  /**
+   * Asks the server what the rule-based groups hold, then solves again over
+   * the answer, so a course bought for one requirement can pay for a
+   * rule-based one too. True when anything moved and the view should repaint.
+   */
+  refine(): Promise<boolean>;
+}
+
+export function projectionFrom(planning: Planning): Projection {
+  const { graph, have } = planning;
+
+  /** A pool names what satisfies it, never what that costs to reach. */
+  const closed = (courses: Set<string>) => {
+    for (const code of [...courses]) {
+      for (const p of prerequisitesOf(graph, code, have, courses)) courses.add(p);
+    }
+    return courses;
+  };
+
+  const first = planning.solve();
+  let need = closed(first.courses);
+  let unenumerable: Unenumerable[] = first.unenumerable;
+  /**
+   * Requirements their own pool cannot close, which is nearly always a course
+   * meant to be taken twice: "Honors Integrative Seminars (4 credit hours)"
+   * draws on a pool whose seminar is worth two. Colleague can say that; a set
+   * of course codes cannot, so the plan says it in words and offers the
+   * second sitting as something to add.
+   */
+  let shortfalls: Shortfall[] = first.shortfalls;
+
+  const scheduled = (moves: Moves) => {
+    const { placements, dropped } = editsOf(moves);
+    // A sitting the student added is only plannable once the graph can answer
+    // for it, and the moves outlive the session that made them.
+    for (const code of placements.keys()) {
+      if (code.includes("#")) planning.sitting(code, Number(code.split("#")[1]));
+    }
+    const set = closed(new Set([...need, ...placements.keys()]));
+    for (const code of dropped) set.delete(code);
+    return set;
+  };
+
+  return {
+    planning,
+    get need() {
+      return need;
+    },
+    get unenumerable() {
+      return unenumerable;
+    },
+    get shortfalls() {
+      return shortfalls;
+    },
+    scheduled,
+
+    project: (moves, load) => planning.project(scheduled(moves), load, editsOf(moves).placements),
+
+    async refine() {
+      const resolved = await planning.expandRules(first.unenumerable);
+      if (resolved.size === 0) return false;
+      for (const u of first.unenumerable) {
+        const pool = resolved.get(groupKey(u.ids));
+        if (pool?.length) u.resolved = pool;
+      }
+      const second = planning.solve({ resolved });
+      need = closed(second.courses);
+      unenumerable = second.unenumerable;
+      shortfalls = second.shortfalls;
+      return true;
     },
   };
 }

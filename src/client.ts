@@ -48,6 +48,46 @@ export class UnauthorizedError extends Error {
   }
 }
 
+/** Something with a program code on it, which is all this has to recognise. */
+const looksLikeProgram = (value: unknown) =>
+  Boolean(value) &&
+  typeof value === "object" &&
+  typeof (value as { Code?: unknown }).Code === "string";
+
+/**
+ * Colleague's program list, however it chose to wrap it today.
+ *
+ * `GetActivePrograms` answers with a bare array on the build this was written
+ * against and with something else on at least one build since: the planner
+ * reported "list.filter is not a function", which is a TypeError standing
+ * where a sentence should be.
+ *
+ * Rather than guess at the wrapper, take any object carrying an array of
+ * things with program codes on them — the same tolerance `#written` already
+ * applies to a degree plan that arrives bare or inside a property. And when it
+ * is none of those, say what did arrive: a reader with the keys in front of
+ * them can fix this in a minute, where a TypeError tells them nothing.
+ */
+export function programsIn(answer: unknown): ProgramSummary[] {
+  if (Array.isArray(answer)) return answer as ProgramSummary[];
+
+  if (answer && typeof answer === "object") {
+    const arrays = Object.values(answer).filter(Array.isArray) as unknown[][];
+    const programs = arrays.find((entries) => looksLikeProgram(entries[0]));
+    if (programs) return programs as ProgramSummary[];
+    // A school with no active programs is not a thing, but an empty answer is
+    // still an answer when there is only one array to be wrong about.
+    if (arrays.length === 1 && arrays[0]!.length === 0) return [];
+
+    const keys = Object.keys(answer).join(", ") || "no keys at all";
+    throw new Error(
+      `Self-Service answered the program list with an object rather than a list (${keys})`,
+    );
+  }
+
+  throw new Error(`Self-Service answered the program list with ${typeof answer}, not a list`);
+}
+
 export class SelfService implements Searcher {
   #token: string | null = null;
 
@@ -134,8 +174,8 @@ export class SelfService implements Searcher {
   }
 
   /** Every program the school offers, with the codes ProgramEvaluation wants. */
-  activePrograms(): Promise<ProgramSummary[]> {
-    return this.get("/Student/Planning/Programs/GetActivePrograms");
+  async activePrograms(): Promise<ProgramSummary[]> {
+    return programsIn(await this.get<unknown>("/Student/Planning/Programs/GetActivePrograms"));
   }
 
   /** Carries the signed-in student's id, which most other calls need. */

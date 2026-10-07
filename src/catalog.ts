@@ -196,3 +196,111 @@ export const isStale = (catalog: TermCatalog, maxAgeHours = 6, now = Date.now())
 export function forCourses(catalog: TermCatalog, courseIds: Set<string>): ListingSection[] {
   return catalog.sections.filter((s) => courseIds.has(s.CourseId));
 }
+
+/*
+ * ---- keeping a copy in the browser -------------------------------------
+ *
+ * Colleague returns about eighty fields per section, and most of them are
+ * prose this application never reads: the whole course record nested inside
+ * every one of its sections, the term's own description repeated each time, a
+ * bookstore URL, two more renderings of the meeting times. A term of 1,800
+ * sections comes to ten megabytes, and a browser allows five for everything a
+ * site stores — so writing one to localStorage throws, and used to throw
+ * *after* a sixty-page crawl had succeeded and before it was handed over.
+ *
+ * The split is the same one as everywhere else in this file. The server keeps
+ * the raw crawl, where a normalizer bug stays diagnosable from the cache
+ * alone. The browser keeps the part it actually parses, which is a sixth of
+ * the size, and refetches from the server if even that will not fit.
+ */
+
+const SECTION_FIELDS = [
+  "Id",
+  "CourseId",
+  "CourseName",
+  "Number",
+  "Title",
+  "Synonym",
+  "TermId",
+  "MinimumCredits",
+  "MaximumCredits",
+  "Capacity",
+  "Enrolled",
+  "Available",
+  "Waitlisted",
+  "AvailabilityStatus",
+  "IsNonStandardDates",
+  "StartDate",
+  "EndDate",
+  "FacultyDisplay",
+] as const;
+
+/** What a structured meeting contributes: days, times, dates, room, online. */
+const MEETING_FIELDS = [
+  "Days",
+  "StartTime",
+  "EndTime",
+  "StartDate",
+  "EndDate",
+  "Room",
+  "IsOnline",
+] as const;
+
+/** And the display half, which carries times the structured one leaves null. */
+const FORMATTED_FIELDS = [
+  "DaysOfWeekDisplay",
+  "StartTimeDisplay",
+  "EndTimeDisplay",
+  "BuildingDisplay",
+  "Room",
+] as const;
+
+/** Requisites and seasons, which the graph and the projection need. */
+const COURSE_FIELDS = [
+  "Id",
+  "SubjectCode",
+  "Number",
+  "Title",
+  "MinimumCredits",
+  "MaximumCredits",
+  "TermsOffered",
+  "YearsOffered",
+  "CourseRequisites",
+] as const;
+
+const pick = <T extends object>(from: T | undefined, keys: readonly (keyof T | string)[]) => {
+  const out: Record<string, unknown> = {};
+  if (!from) return out;
+  for (const key of keys) {
+    const value = (from as Record<string, unknown>)[key as string];
+    if (value !== undefined) out[key as string] = value;
+  }
+  return out;
+};
+
+/**
+ * The same catalog with only the fields this application reads.
+ *
+ * Every field kept here is one `toOffering`, the prerequisite graph or the
+ * projection asks for, which is what the round-trip test asserts: a slimmed
+ * section must parse into exactly the offering the raw one did.
+ */
+export function slimCatalog(catalog: TermCatalog): TermCatalog {
+  return {
+    term: catalog.term,
+    fetchedAt: catalog.fetchedAt,
+    sections: catalog.sections.map(
+      (section) =>
+        ({
+          ...pick(section, SECTION_FIELDS),
+          Meetings: (section.Meetings ?? []).map((m) => pick(m, MEETING_FIELDS)),
+          FormattedMeetingTimes: (section.FormattedMeetingTimes ?? []).map((m) =>
+            pick(m, FORMATTED_FIELDS),
+          ),
+        }) as unknown as ListingSection,
+    ),
+    courses: (catalog.courses ?? []).map(
+      (course) => pick(course, COURSE_FIELDS) as unknown as CatalogCourseRecord,
+    ),
+  };
+}

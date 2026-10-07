@@ -7,6 +7,7 @@
  */
 
 import type { TermCatalog } from "../catalog";
+import { programsIn } from "../client";
 import type { Applied, Capture, ColleaguePlan, Reply, ReplyMap, Request } from "../content";
 import type { SearchCriteria, SearchPage } from "../crawl";
 import type { Change } from "../sync";
@@ -51,7 +52,17 @@ function send<K extends Request["type"]>(msg: Request & { type: K }): Promise<Re
 
 export const ping = () => send({ type: "ping" });
 export const terms = () => send({ type: "terms" });
-export const programs = (): Promise<ProgramSummary[]> => send({ type: "programs" });
+/**
+ * Every program the school offers.
+ *
+ * Normalised again on this side, even though the extension already does it:
+ * the content script answering is whatever was loaded into that Self-Service
+ * tab, which can be an older build than the page asking. A tab left open since
+ * this morning is the ordinary case, not the exotic one, and the symptom was
+ * "list.filter is not a function" on a page that looked fine.
+ */
+export const programs = async (): Promise<ProgramSummary[]> =>
+  programsIn(await send({ type: "programs" }));
 export const capture = (whatIf: string[] = []): Promise<Capture> =>
   send({ type: "capture", whatIf });
 

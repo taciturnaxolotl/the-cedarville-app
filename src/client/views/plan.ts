@@ -15,17 +15,16 @@
  * "regenerate" mean something — the moves stay, everything else reflows.
  */
 
-import { termCodeOf } from "../../catalog";
+import { shortTerm, termCodeOf } from "../../catalog";
 import { STANDING_CREDITS } from "../../planner";
-import { prerequisitesOf } from "../../prereqs";
 import { groupKey, type ProgramTree } from "../../requirements";
 import { type Change, mark, type Sitting, describe as sayChange, syncPlan } from "../../sync";
 import { applyPlan, colleaguePlan, installed } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
-import { type Edits, editsOf, type Moves, OUT, readMoves, writeMoves } from "../moves";
-import { baseCode, planningFrom, read } from "../planning";
+import { editsOf, type Moves, OUT, readMoves, writeMoves } from "../moves";
+import { baseCode, planningFrom, projectionFrom, read } from "../planning";
 import { createStore, Subscriptions } from "../store";
 import { mountGraph } from "./graph";
 
@@ -62,43 +61,15 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   // One projection, assembled where every view can share it. This tab used to
   // build its own and quietly disagreed with the other two about the date.
   const planning = planningFrom(ctx);
-  const { graph, have, title } = planning;
+  const { graph, title } = planning;
+  const projection = projectionFrom(planning);
+  /** The one term that has a timetable to open, if any. */
+  const loadedTerm = ctx.sections ? shortTerm(ctx.sections.term) : null;
 
-  // First pass names the groups the evaluation will not enumerate; the server
-  // asks Colleague what qualifies; the second pass runs one cover over
-  // everything, so a course bought for one requirement can pay for a
-  // rule-based one too.
-  /** A pool names what satisfies it, never what that costs to reach. */
-  const closed = (courses: Set<string>) => {
-    for (const code of [...courses]) {
-      for (const p of prerequisitesOf(graph, code, have, courses)) courses.add(p);
-    }
-    return courses;
-  };
-
-  const first = planning.solve();
-  let need = closed(first.courses);
-  let unenumerable = first.unenumerable;
-  /**
-   * Requirements their own pool cannot close, which is nearly always a course
-   * meant to be taken twice: "Honors Integrative Seminars (4 credit hours)"
-   * draws on a pool whose seminar is worth two. Colleague can say that; a set
-   * of course codes cannot, so the plan says it in words and offers the
-   * second sitting as something to add.
-   */
-  let shortfalls = first.shortfalls;
-
-  void planning.expandRules(first.unenumerable).then((resolved) => {
-    if (resolved.size === 0) return;
-    for (const u of first.unenumerable) {
-      const pool = resolved.get(groupKey(u.ids));
-      if (pool?.length) u.resolved = pool;
-    }
-    const second = planning.solve({ resolved });
-    need = closed(second.courses);
-    unenumerable = second.unenumerable;
-    shortfalls = second.shortfalls;
-    store.set({ resolvedAt: Date.now() });
+  // The first solve named the groups the evaluation will not enumerate; this
+  // asks Colleague what qualifies and solves again over the answer.
+  void projection.refine().then((changed) => {
+    if (changed) store.set({ resolvedAt: Date.now() });
   });
 
   const store = createStore<State>({
@@ -108,29 +79,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     moves: readMoves(),
   });
 
-  /**
-   * What the plan schedules once the student has had their say.
-   *
-   * An inserted course brings its prerequisites with it — asking for a
-   * capstone and being handed only the capstone would be a lie — and a
-   * dropped one leaves even if something else's chain wants it back, because
-   * a drop is a decision and the closure is only an inference.
-   */
-  const scheduled = ({ placements, dropped }: Edits) => {
-    // A sitting the student added is only plannable once the graph can answer
-    // for it, and the moves outlive the session that made them.
-    for (const code of placements.keys()) {
-      if (code.includes("#")) planning.sitting(code, Number(code.split("#")[1]));
-    }
-    const set = closed(new Set([...need, ...placements.keys()]));
-    for (const code of dropped) set.delete(code);
-    return set;
-  };
-
-  const projectWith = (moves: Moves, load: Load) => {
-    const edits = editsOf(moves);
-    return planning.project(scheduled(edits), load, edits.placements);
-  };
+  const projectWith = (moves: Moves, load: Load) => projection.project(moves, load);
 
   // ---- chrome ----------------------------------------------------------
 
@@ -539,7 +488,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
       // it, which is the only way to say "two Honors Seminars" in a language
       // whose nouns are course codes.
       const { moves } = store.get();
-      const held = scheduled(editsOf(moves));
+      const held = projection.scheduled(moves);
       let nth = 1;
       while (held.has(planning.sitting(asked, nth))) nth++;
       place(planning.sitting(asked, nth), name);
@@ -717,6 +666,19 @@ export function mount(root: HTMLElement, ctx: Ctx) {
             head.append(light);
           }
           head.append(...adder(slot.name));
+          // The term-by-term says what to take; the semester says when it
+          // meets and which seat to be in. One of those is a timetable, and
+          // the only terms that have one are the ones a catalog is loaded for.
+          if (slot.name === loadedTerm) {
+            const open = el("button", "open-term");
+            open.type = "button";
+            open.textContent = "sections →";
+            open.title = `Lay ${slot.name} out on the clock and pick sections.`;
+            open.addEventListener("click", () => {
+              location.hash = "#semester";
+            });
+            head.append(open);
+          }
           box.append(head);
 
           for (const c of term?.courses ?? []) {
@@ -754,10 +716,10 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         // A pool that cannot close its own requirement is a hole in the date
         // above, so the plan owns up to it here rather than only in the build
         // tab — and says what to do about it, since the student can now do it.
-        if (shortfalls.length) {
+        if (projection.shortfalls.length) {
           const box = el("div", "term unenumerable");
           box.append(el("h3", undefined, "not closed by its own list"));
-          for (const short of shortfalls) {
+          for (const short of projection.shortfalls) {
             const held = short.pool.filter((c) =>
               plan.terms.some((t) => t.courses.some((c2) => baseCode(c2.code) === c)),
             );
@@ -805,9 +767,9 @@ export function mount(root: HTMLElement, ctx: Ctx) {
           body.append(box);
         }
 
-        if (unenumerable.length) {
+        if (projection.unenumerable.length) {
           const box = el("div", "term unenumerable");
-          const pending = unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
+          const pending = projection.unenumerable.filter((u) => !u.bucket && !u.resolved?.length);
           if (pending.length) {
             box.append(el("h3", undefined, "not plannable"));
             box.append(

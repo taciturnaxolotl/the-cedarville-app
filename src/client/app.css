@@ -316,6 +316,188 @@ td {
   cursor: pointer;
 }
 
+/* ---- the semester bar ---- */
+
+.term-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.term-bar h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ---- the term's courses, one accordion each ---- */
+
+.here {
+  margin-top: 18px;
+}
+
+details.course {
+  border-left: 2px solid var(--surface);
+  margin-bottom: 2px;
+}
+
+details.course.mine {
+  border-left-color: var(--lavender);
+}
+
+summary.course-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+summary.course-head:hover {
+  background: var(--mantle);
+}
+
+/* The section the week is holding, which is the only one worth spelling out. */
+.slot {
+  color: var(--sky);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.slot.mine {
+  color: var(--lavender);
+}
+
+.slot.none {
+  color: var(--red);
+}
+
+.slot-seats {
+  font-size: 11px;
+}
+
+summary.course-head .release {
+  margin-left: auto;
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  color: var(--overlay);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+summary.course-head .release:hover {
+  color: var(--red);
+}
+
+summary.course-head .release + .release {
+  margin-left: 0;
+}
+
+/* ---- choosing between the sections ---- */
+
+.options {
+  padding: 2px 0 8px 12px;
+}
+
+.option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.option:hover {
+  background: var(--mantle);
+}
+
+.option input {
+  accent-color: var(--lavender);
+}
+
+.option .num {
+  min-width: 3ch;
+  color: var(--subtext);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.option.in {
+  background: color-mix(in oklch, var(--sky) 8%, transparent);
+}
+
+.option.in .num,
+.option.in .when {
+  color: var(--sky);
+}
+
+.option.mine {
+  background: color-mix(in oklch, var(--lavender) 14%, transparent);
+}
+
+.option.mine .num,
+.option.mine .when {
+  color: var(--lavender);
+}
+
+/* Taking this one would cost something else its place. */
+.option.clashes .when {
+  color: var(--peach);
+}
+
+.option.clashes:not(.mine) .num {
+  color: var(--peach);
+}
+
+/* Whose choice it is, in two words at the end of the row. */
+.mark {
+  margin-left: auto;
+  color: var(--overlay);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.option.in .mark {
+  color: var(--sky);
+}
+
+.option.mine .mark {
+  color: var(--lavender);
+}
+
+.option.auto .when {
+  color: var(--overlay);
+  font-style: italic;
+}
+
+.term h3 .open-term {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--surface);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--subtext);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.term h3 .open-term:hover {
+  border-color: var(--lavender);
+  color: var(--lavender);
+}
+
 /* ---- the week grid ---- */
 
 .grid {
@@ -343,6 +525,14 @@ td {
   position: relative;
   flex: 1 0 132px;
   border-left: 1px solid var(--surface);
+  /* An hour rule every two rows, so a block can be read against the clock
+     without tracking back to the gutter. Offset by the weekday heading. */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    color-mix(in oklch, var(--surface) 55%, transparent) 0 1px,
+    transparent 1px 40px
+  );
+  background-position: 0 26px;
 }
 
 .day h3 {
@@ -355,15 +545,67 @@ td {
 
 .block {
   position: absolute;
-  left: 4px;
-  right: 4px;
+  left: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+  width: 100%;
+  margin-right: 4px;
   overflow: hidden;
   padding: 3px 6px;
   border-radius: 3px;
-  border-left: 2px solid var(--lavender);
-  background: color-mix(in oklch, var(--lavender) 14%, var(--mantle));
+  border-left: 2px solid var(--surface);
+  background: var(--mantle);
   font-size: 11px;
   line-height: 1.3;
+}
+
+/* The three things a block can be, in order of how settled it is. */
+.block.pinned {
+  border-left-color: var(--lavender);
+  background: color-mix(in oklch, var(--lavender) 16%, var(--mantle));
+}
+
+.block.pinned b {
+  color: var(--lavender);
+}
+
+/* The arranger's, until the student says otherwise. */
+.block.suggested {
+  border-left-color: var(--sky);
+  background: color-mix(in oklch, var(--sky) 10%, var(--mantle));
+}
+
+.block.suggested b {
+  color: var(--sky);
+}
+
+/* The section being hovered, where it would fall if it were taken. */
+.block.ghost {
+  border: 1px dashed var(--overlay);
+  border-left: 2px dashed var(--green);
+  background: color-mix(in oklch, var(--green) 10%, var(--mantle));
+}
+
+.block.ghost b {
+  color: var(--green);
+}
+
+.block.ghost.clash {
+  border-left-color: var(--peach);
+  background: color-mix(in oklch, var(--peach) 12%, var(--mantle));
+}
+
+.block.ghost.clash b {
+  color: var(--peach);
+}
+
+.block.clash {
+  border-left-color: var(--red);
+  background: color-mix(in oklch, var(--red) 13%, var(--mantle));
+}
+
+.block.clash b {
+  color: var(--red);
 }
 
 .block b {
@@ -386,41 +628,6 @@ details.req {
 details.req > summary {
   padding: 5px 0;
   color: var(--subtext);
-}
-
-details.course {
-  margin: 3px 0 3px 12px;
-  padding-left: 0;
-  border-left: 2px solid var(--surface);
-}
-
-details.course > summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 10px;
-  padding: 5px 10px;
-  border-radius: 3px;
-}
-
-details.course > summary:hover {
-  background: var(--mantle);
-}
-
-details.course[data-state="open"] {
-  border-left-color: var(--green);
-}
-
-details.course[data-state="blocked"] {
-  border-left-color: var(--surface);
-}
-
-details.course[data-state="blocked"] > summary {
-  opacity: 0.62;
-}
-
-details.course[data-state="unknown"] {
-  border-left-color: var(--yellow);
 }
 
 .code {
@@ -473,37 +680,6 @@ details.course[data-state="unknown"] {
   margin: 0 0 4px 10px;
   color: var(--peach);
   font-size: 11px;
-}
-
-/* ---- section rows ---- */
-
-label.section {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-left: 10px;
-  padding: 3px 8px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: background 0.1s ease;
-}
-
-label.section:hover {
-  background: var(--mantle);
-}
-
-label.section:has(input:checked) {
-  background: color-mix(in oklch, var(--lavender) 14%, transparent);
-}
-
-label.section:has(input:checked) .when {
-  color: var(--lavender);
-}
-
-label.section.clashes:not(:has(input:checked)) .when {
-  color: var(--overlay);
-  text-decoration: line-through;
 }
 
 .when {

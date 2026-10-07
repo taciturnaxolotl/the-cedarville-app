@@ -10,12 +10,14 @@ import {
   runsIn,
   seasonsOffered,
   shortTerm,
+  slimCatalog,
   type TermCatalog,
   termCodeOf,
   termKey,
   termNow,
   yearsOffered,
 } from "./catalog";
+import { offeringsFromListing } from "./schedule";
 
 const HOUR = 3_600_000;
 const at = (iso: string, sections = 1): TermCatalog => ({
@@ -183,5 +185,112 @@ describe("where a plan starts", () => {
     for (const day of ["2026-06-15", "2026-07-04", "2026-08-01"]) {
       expect(nextPlannableTerm(new Date(day)).season).not.toBe("summer");
     }
+  });
+});
+
+describe("the copy the browser keeps", () => {
+  /*
+   * Colleague returns about eighty fields per section and this application
+   * reads eighteen of them, so a term is ten megabytes where it needs to be
+   * one and a half — and a browser allows five for everything a site stores.
+   * Writing the raw thing threw *after* a sixty-page crawl had succeeded.
+   *
+   * The invariant that makes slimming safe is not a list of field names, it
+   * is that the copy kept parses into exactly the offering the raw one did.
+   */
+  const raw = {
+    Id: "158722",
+    CourseId: "1051",
+    CourseName: "COM-2300",
+    Number: "01",
+    Title: "Voices of Diversity",
+    Synonym: "7568",
+    TermId: "2027SP",
+    MinimumCredits: 3,
+    MaximumCredits: null,
+    Capacity: 50,
+    Enrolled: 2,
+    Available: 48,
+    Waitlisted: 0,
+    AvailabilityStatus: "Open",
+    IsNonStandardDates: false,
+    StartDate: "2027-01-05T00:00:00-05:00",
+    EndDate: "2027-04-30T00:00:00-04:00",
+    FacultyDisplay: ["Mr. Derrick L. Green"],
+    Meetings: [
+      {
+        Days: [1, 3, 5],
+        StartTime: "2026-10-06T19:00:00+00:00",
+        EndTime: "2026-10-06T19:50:00+00:00",
+        StartDate: "2027-01-05T00:00:00-05:00",
+        EndDate: "2027-04-30T00:00:00-04:00",
+        Room: "244",
+        Frequency: "W",
+        IsOnline: false,
+        InstructionalMethodCode: "LEC",
+      },
+    ],
+    FormattedMeetingTimes: [
+      {
+        DaysOfWeekDisplay: "M, W, F",
+        StartTimeDisplay: "2:00 PM",
+        EndTimeDisplay: "2:50 PM",
+        BuildingDisplay: "Milner",
+        Room: "244",
+        DatesDisplay: "1/5/2027 - 4/30/2027",
+      },
+    ],
+    // The fat: a whole course record inside every one of its sections, the
+    // term's description repeated each time, and the catalog prose.
+    Course: { Id: "1051", Description: "x".repeat(600), Title: "Voices of Diversity" },
+    Term: { Code: "2027SP", Description: "Spring 2027", ReportingYear: 2027 },
+    CourseDescription: "y".repeat(600),
+    BookstoreUrl: "https://example.test/bookstore?section=158722",
+    MeetingsDisplay: ["MWF 2:00 PM - 2:50 PM"],
+  } as unknown as ListingSection;
+
+  const catalog: TermCatalog = {
+    term: "2027SP",
+    fetchedAt: "2027-01-02T00:00:00.000Z",
+    sections: [raw],
+    courses: [
+      {
+        Id: "1051",
+        SubjectCode: "COM",
+        Number: "2300",
+        Title: "Voices of Diversity",
+        MinimumCredits: 3,
+        TermsOffered: "Fall/Spring",
+        YearsOffered: "All Years",
+        Description: "z".repeat(600),
+        CourseRequisites: [{ DisplayText: "Take COM-1100", IsRequired: true }],
+      },
+    ],
+  };
+
+  test("parses into exactly the offering the raw copy did", () => {
+    const [kept] = offeringsFromListing(slimCatalog(catalog).sections);
+    const [thrown] = offeringsFromListing(catalog.sections);
+    expect(kept).toEqual(thrown!);
+  });
+
+  test("keeps the requisites and seasons the planner reads", () => {
+    const [course] = slimCatalog(catalog).courses ?? [];
+    expect(course?.CourseRequisites?.[0]?.DisplayText).toBe("Take COM-1100");
+    expect(seasonsOffered(course!)).toEqual(["fall", "spring"]);
+    expect(yearsOffered(course!)).toBe("all");
+  });
+
+  test("drops the prose, which is the whole point", () => {
+    const slim = slimCatalog(catalog);
+    const text = JSON.stringify(slim);
+    expect(text).not.toContain("x".repeat(600));
+    expect(text).not.toContain("BookstoreUrl");
+    expect(text.length).toBeLessThan(JSON.stringify(catalog).length / 3);
+  });
+
+  test("says which term it is, so a copy too big to keep can be fetched again", () => {
+    expect(slimCatalog(catalog).term).toBe("2027SP");
+    expect(slimCatalog(catalog).fetchedAt).toBe(catalog.fetchedAt);
   });
 });

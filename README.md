@@ -44,6 +44,7 @@ shows the entire diff first and writes nothing until you confirm it. See
     src/requirements.ts  Ellucian's 40-field Group as a tagged union
     src/merge.ts         which course satisfies a requirement in both majors
     src/schedule.ts      meeting times, seat counts, and date-aware conflicts
+    src/timetable.ts     which section of each, so that nothing collides
     src/prereqs.ts       what a course needs, and what needs it
     src/planner.ts       which term each requirement lands in
     src/catalog.ts        the one shape that is public rather than personal
@@ -56,8 +57,10 @@ shows the entire diff first and writes nothing until you confirm it. See
 
 Four tabs, one per question a student actually asks. `build` is what is left
 to decide and what each choice costs. `plan` is when it all happens, drawn as
-a graph or listed by term — one computation, two renderings. `schedule` is
-what to register for. `record` is what the registrar holds.
+a graph or listed by term — one computation, two renderings. `semester` takes
+one term off that plan and lays it on the clock, already arranged: one section
+per course, nothing overlapping, and pins where the student has chosen.
+`record` is what the registrar holds.
 
 There were six. `map` and `plan` turned out to be the same projection rendered
 two ways, and `overlap` could only compare two enrolments, which a second
@@ -156,7 +159,51 @@ are not is the one failure worth engineering against.
 The graph gives three things worth planning around: whether you can take a
 course now, which courses it would unlock, and how deep its chain runs. A
 course gating eleven others belongs earlier in a degree than one gating none,
-and the schedule view sorts on exactly that.
+and the plan places it accordingly.
+
+### which section to be in
+
+The planner answers "what am I taking in the spring", which leaves a second
+problem with the same shape and a much smaller search space. Each of those
+courses runs in two or six or eleven sections, at most one of which you can be
+in, and no two of them may put you in two rooms at once. Students do this on
+paper, badly, once a semester.
+
+`src/timetable.ts` solves it as the constraint problem it is: depth-first over
+the courses with the fewest places to go first, pruning on conflict, which
+searches a five-course term exhaustively in a few thousand steps. A greedy
+pass that takes the nicest-looking section for the first course routinely
+paints the last one into a corner, and the student cannot see why.
+
+Which conflict-free week is better is a judgement, so it is stated rather than
+buried, and compared term by term rather than weighted:
+
+    seats   a section you cannot get into is worth less than one you can
+    days    a day with nothing on it is worth more than a tidy hour
+    gaps    an hour between classes is an hour spent waiting
+    shape   and then whatever the student asked for
+
+Pins come first and are never weighed at all. A student who has decided to be
+in the eight o'clock section has decided; the arranger works around it and
+reports what it cost — including a course it can no longer place, which is the
+answer a student needs rather than a silent omission.
+
+Seat counts are refreshed live where the extension can reach Self-Service, and
+the term is arranged again when they land: "prefer a section you can get into"
+is only true if the arranger knows which those are.
+
+The interface follows from that. The week is the object, drawn the moment the
+tab opens, and the course list beside it is one line each — a list of every
+section's days, room, instructor and seat count is a timetable written out as
+prose, and the timetable is right there. A course opens to its sections as a
+radio group, hovering one draws it on the week so you can see where it would
+fall, and the first option in every group hands the choice back to the
+arranger. So "whose decision was this" is something you can see and change
+rather than infer.
+
+A draft in between asked for a drag onto the week. It read well written down
+and badly in the hand: a section's time is fixed, so the only honest places to
+drop it were the few it could already go.
 
 ### what an advisor changed by hand
 

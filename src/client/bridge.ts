@@ -6,10 +6,11 @@
  * extension gets a fresh random id each install and this could not address it.
  */
 
-import type { TermCatalog } from "../catalog";
+import { emptyCatalog, type TermCatalog } from "../catalog";
 import { programsIn } from "../client";
 import type { Applied, Capture, ColleaguePlan, Reply, ReplyMap, Request } from "../content";
 import type { SearchCriteria, SearchPage } from "../crawl";
+import { ALL_COURSES } from "../crawl";
 import type { Change } from "../sync";
 import type { ProgramSummary } from "../types";
 import { EXTENSION_ID } from "../where";
@@ -133,12 +134,15 @@ export async function fetchCatalog(term: string, courseIds?: string[]): Promise<
 }
 
 /** Every course the school lists, offered or not. The graph needs all of them. */
-export async function fetchAllCourses(): Promise<TermCatalog["courses"]> {
+export async function fetchAllCourses(): Promise<TermCatalog> {
+  const empty = emptyCatalog(ALL_COURSES);
   try {
-    const res = await fetch("/catalog/ALL");
-    return res.ok ? ((await res.json()) as TermCatalog).courses : [];
+    const res = await fetch(`/catalog/${ALL_COURSES}`);
+    // Carried whole rather than reduced to its courses, because when it was
+    // last crawled decides whether to crawl it again.
+    return res.ok ? ((await res.json()) as TermCatalog) : empty;
   } catch {
-    return [];
+    return empty;
   }
 }
 

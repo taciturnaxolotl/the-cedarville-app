@@ -31,6 +31,7 @@ import {
   terms,
 } from "./bridge";
 import { $ } from "./dom";
+import { COURSE_LIST_HOURS, olderThan, planFor, TERM_HOURS } from "./freshness";
 import { createStore } from "./store";
 import * as build from "./views/build";
 import * as plan from "./views/plan";
@@ -318,10 +319,12 @@ async function crawlCourseList(): Promise<void> {
   );
 }
 
+// Pressing it is a decision: a student who asks for the catalog wants today's,
+// not yesterday's that happened to be in hand.
 $("#load-sections").addEventListener("click", () => {
   const term = $<HTMLSelectElement>("#term").value;
   if (!term) return say("pick a term first", "err");
-  void loadTerm(term);
+  void loadTerm(term, { force: true });
 });
 
 /**
@@ -332,7 +335,7 @@ $("#load-sections").addEventListener("click", () => {
  * the catalog in the store, and a view that fetched its own would be a second
  * answer to "which term am I looking at".
  */
-async function loadTerm(term: string) {
+async function loadTerm(term: string, { force = false }: { force?: boolean } = {}) {
   // The control at the top and the one in the view are the same decision.
   const select = $<HTMLSelectElement>("#term");
   if (select.value !== term) {
@@ -349,18 +352,28 @@ async function loadTerm(term: string) {
 
     if (status.refreshing.includes(term)) await awaitCrawl(term);
 
+    const held = {
+      sections: cached?.sections ?? 0,
+      ...(cached ? { fetchedAt: cached.fetchedAt } : {}),
+    };
+    const empty = held.sections === 0;
+    const stale = empty || olderThan(TERM_HOURS, held.fetchedAt);
+
     let sections: TermCatalog;
-    if (!cached || cached.sections === 0) {
-      // Nobody has crawled this term yet, so this student does. Needs the
-      // extension: it is the only thing holding a session.
-      if (!installed()) {
-        throw new Error(
-          `no catalog for ${term} yet, and the bridge extension is not installed. ` +
-            "Install it and sign in to Self-Service, then try again.",
-        );
-      }
-      say(`no catalog for ${term} yet; crawling it here…`);
+    const plan = planFor(held, { force, installed: installed() });
+    if (plan === "crawl") {
+      say(
+        empty
+          ? `no catalog for ${term} yet; crawling it here…`
+          : `re-crawling ${term} on your session…`,
+      );
       sections = await crawlHere(term);
+    } else if (plan === "refuse") {
+      // Nothing to serve and nothing to crawl with.
+      throw new Error(
+        `no catalog for ${term} yet, and the bridge extension is not installed. ` +
+          "Install it and sign in to Self-Service, then try again.",
+      );
     } else {
       /*
        * The whole term, not the courses a requirement happens to enumerate.
@@ -374,23 +387,32 @@ async function loadTerm(term: string) {
        * term. That is not a saving worth a wrong answer.
        */
       sections = await fetchCatalog(term);
+      const age = new Date(sections.fetchedAt).toLocaleString();
       say(
-        `${sections.sections.length} sections for ${term}, ` +
-          `fetched ${new Date(sections.fetchedAt).toLocaleTimeString()}`,
+        stale
+          ? `${sections.sections.length} sections for ${term}, from ${age}. ` +
+              "Install the bridge to refresh it."
+          : `${sections.sections.length} sections for ${term}, fetched ${age}`,
         "ok",
       );
     }
 
     /*
-     * The course list, if nobody has filled it yet.
+     * The course list, on the same two rules and its own clock.
      *
-     * Checked whether or not the term itself had to be crawled, because the
-     * two are filled independently: a server can hold a complete timetable
-     * and no course list at all, which is the state that draws a planned
-     * course with no title and no requisites. Nothing but a signed-in
-     * browser can fill it now.
+     * Checked whether or not the term had to be crawled, because the two are
+     * filled independently: a server can hold a complete timetable and no
+     * course list at all, which is the state that draws a planned course with
+     * no title and no requisites.
      */
-    if (!store.get().allCourses?.length && installed()) await crawlCourseList();
+    if (installed()) {
+      const held = await fetchAllCourses();
+      if (force || !held.courses?.length || olderThan(COURSE_LIST_HOURS, held.fetchedAt)) {
+        await crawlCourseList();
+      } else {
+        store.set({ allCourses: held.courses });
+      }
+    }
 
     // The store first, and the cache afterwards. A sixty-page crawl that
     // succeeded was being thrown away by the line that tried to remember it:
@@ -461,9 +483,9 @@ function restoreCached() {
   }
 }
 
-/** The full course list backs the prerequisite graph; fetch it once. */
-void fetchAllCourses().then((allCourses) => {
-  if (allCourses?.length) store.set({ allCourses });
+/** The full course list backs the prerequisite graph; read what is shared. */
+void fetchAllCourses().then((held) => {
+  if (held.courses?.length) store.set({ allCourses: held.courses });
 });
 
 async function init() {
@@ -490,10 +512,24 @@ async function init() {
     $<HTMLButtonElement>("#load-sections").disabled = false;
     say("");
 
-    // The catalog is the server's to hand back, so a copy too big to keep is
-    // not a copy lost: fetch the term that was last open and carry on.
+    /*
+     * The term that was last open, brought up to date.
+     *
+     * Two reasons to act, and `loadTerm` tells them apart on its own: there
+     * is no local copy at all, because the catalog was too big for this
+     * browser to keep and the server is the one holding it; or the copy we
+     * have has gone a day stale, which during registration means sections
+     * have opened, filled and been cancelled since.
+     *
+     * Not forced, so a fresh shared copy costs a fetch rather than a crawl:
+     * the first student each day pays the pages and the rest read what they
+     * shared. And not awaited, because a page that will not paint until it
+     * has re-read a timetable is a page that looks broken.
+     */
     const last = localStorage.getItem(TERM);
-    if (!store.get().sections && last && status.terms.some((t) => t.term === last)) {
+    const held = store.get().sections;
+    const known = last && status.terms.some((t) => t.term === last);
+    if (known && (!held || olderThan(TERM_HOURS, held.fetchedAt))) {
       void loadTerm(last);
     }
   } catch {

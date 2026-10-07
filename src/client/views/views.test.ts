@@ -2667,3 +2667,79 @@ describe("plan view — a course the catalog does not know", () => {
     expect(cs?.querySelector(".tag.bad")).toBeFalsy();
   });
 });
+
+describe("build view — why the program list is empty", () => {
+  /*
+   * "Connect the extension to add programs you are not enrolled in" was
+   * shown for all of these, and it is only true for one. The commonest is a
+   * bridge that cannot reach Self-Service — it needs a signed-in tab — and
+   * telling a student to install something they have installed sends them to
+   * fix the wrong thing.
+   */
+  const tree = () =>
+    normalize(program("BS.CYOPR", [group({ Courses: [course("1", "CS", "1210")] })]));
+  const message = () =>
+    Array.from(root.querySelectorAll(".picker p.muted"))
+      .map((p) => p.textContent)
+      .join(" | ");
+
+  /** An extension that answers `programs` however the test wants. */
+  const bridge = (answer: (cb: (r: unknown) => void) => void) =>
+    Object.assign(globalThis, {
+      chrome: {
+        runtime: {
+          sendMessage: (_id: string, msg: { type: string }, cb: (r: unknown) => void) => {
+            if (msg.type === "programs") return answer(cb);
+            cb({ ok: true, data: [] });
+          },
+        },
+      },
+    });
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test("with no extension, says to install the bridge", () => {
+    Object.assign(globalThis, { chrome: undefined });
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    expect(message()).toContain("install the bridge");
+  });
+
+  test("while the answer is in flight, says it is reading", () => {
+    bridge(() => {
+      /* never answers, which is what in-flight looks like */
+    });
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    expect(message()).toContain("reading the list of programs");
+    Object.assign(globalThis, { chrome: undefined });
+  });
+
+  test("when the bridge cannot reach Self-Service, says that instead", async () => {
+    bridge((cb) => cb({ ok: false, error: "open and sign in to selfservice.cedarville.edu" }));
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    await settle();
+
+    expect(message()).toContain("could not read the list of programs");
+    expect(message()).toContain("sign in to selfservice.cedarville.edu");
+    expect(message()).not.toContain("install the bridge");
+    Object.assign(globalThis, { chrome: undefined });
+  });
+
+  test("and with the list in hand, offers the programs", async () => {
+    bridge((cb) =>
+      cb({
+        ok: true,
+        data: [
+          { Code: "BA.ENG", Title: "English", IsActive: true, Majors: [], Minors: [] },
+          { Code: "BA.OLD", Title: "Retired", IsActive: false, Majors: [], Minors: [] },
+        ],
+      }),
+    );
+    build.mount(root, { trees: [tree()], enrolled: ["BS.CYOPR"] });
+    await settle();
+
+    const options = Array.from(root.querySelectorAll(".picker option")).map((o) => o.textContent);
+    expect(options).toEqual(["BA.ENG — English"]);
+    expect(message()).not.toContain("install the bridge");
+    Object.assign(globalThis, { chrome: undefined });
+  });
+});

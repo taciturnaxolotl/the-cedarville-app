@@ -22,7 +22,7 @@ import {
   unreadModifications,
 } from "../../requirements";
 import type { ProgramSummary } from "../../types";
-import { BridgeError, capture, installed, programs, sendPicks } from "../bridge";
+import { capture, installed, programs, sendPicks } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
@@ -41,6 +41,16 @@ interface State {
    */
   tracks: Record<string, string>;
   available: ProgramSummary[];
+  /**
+   * Why the program list is empty, when it is.
+   *
+   * "Connect the extension" was shown for all three reasons — no extension,
+   * a reply still in flight, and an extension that could not reach
+   * Self-Service — and it is only true for the first. The commonest is the
+   * third: the bridge needs a signed-in tab, and telling a student to
+   * install something they have installed sends them to fix the wrong thing.
+   */
+  programs: "loading" | "ready" | "absent" | { failed: string };
   /** Rule pools once the server has asked Colleague what qualifies. */
   resolved: Map<string, string[]>;
   /** Bumped when another term's seasons land, to reproject against them. */
@@ -181,6 +191,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
     pinned: JSON.parse(localStorage.getItem(PINS) ?? "[]"),
     tracks: JSON.parse(localStorage.getItem(TRACKS) ?? "{}"),
     available: [],
+    programs: installed() ? "loading" : "absent",
     resolved: new Map(),
     seasonsAt: 0,
     load: readLoad(),
@@ -247,14 +258,14 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   // The ranking needs no extension at all, so this is genuinely optional.
   if (installed()) {
     void programs()
-      .then((list) => store.set({ available: list.filter((p) => p.IsActive) }))
+      .then((list) => store.set({ available: list.filter((p) => p.IsActive), programs: "ready" }))
       .catch((err) => {
-        // Signed out is ordinary and says so elsewhere; anything else is a
-        // shape we failed to read, and a picker that is quietly empty teaches
-        // a student that the feature does not work.
-        if (err instanceof BridgeError) return;
+        // Said in the picker rather than swallowed. A quietly empty list
+        // teaches a student that the feature does not work; the reason is
+        // usually that the bridge has no signed-in tab to ask through, which
+        // is a thing they can fix in ten seconds once they know.
         const why = err instanceof Error ? err.message : String(err);
-        notes.append(el("p", "swap muted", `could not read the program list — ${why}`));
+        store.set({ programs: { failed: why } });
       });
   }
 
@@ -301,7 +312,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   subs.add(
     store.watch(
-      (s) => `${s.available.length}:${s.wanted.join(",")}:${s.busy}`,
+      (s) => `${s.available.length}:${s.wanted.join(",")}:${s.busy}:${JSON.stringify(s.programs)}`,
       () => {
         const { available, wanted, busy } = store.get();
         picker.replaceChildren();
@@ -358,8 +369,19 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         }
 
         if (!available.length) {
+          const state = store.get().programs;
           picker.append(
-            el("p", "muted", "connect the extension to add programs you are not enrolled in."),
+            el(
+              "p",
+              "muted",
+              state === "absent"
+                ? "install the bridge to add programs you are not enrolled in."
+                : state === "loading"
+                  ? "reading the list of programs…"
+                  : typeof state === "object"
+                    ? `could not read the list of programs — ${state.failed}`
+                    : "the registrar lists no active programs to add.",
+            ),
           );
           return;
         }

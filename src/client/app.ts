@@ -343,7 +343,7 @@ $("#load-sections").addEventListener("click", () => {
  * the catalog in the store, and a view that fetched its own would be a second
  * answer to "which term am I looking at".
  */
-async function loadTerm(term: string, { focus = true }: { focus?: boolean } = {}) {
+async function loadTerm(term: string) {
   // The control at the top and the one in the view are the same decision.
   const select = $<HTMLSelectElement>("#term");
   if (select.value !== term) {
@@ -386,7 +386,12 @@ async function loadTerm(term: string, { focus = true }: { focus?: boolean } = {}
     // succeeded was being thrown away by the line that tried to remember it:
     // a term of raw sections is ten megabytes, a browser allows five for
     // everything a site stores, and the throw happened before the handover.
-    store.set({ sections, ...(focus ? { view: "semester" as const } : {}) });
+    // No view change. Fetching data is not a change of subject: a student
+    // reading their plan who presses "load catalog" wants the plan to get
+    // better, not to be moved to a different tab. This used to jump to the
+    // section builder, from back when loading a catalog was the only way in
+    // to it.
+    store.set({ sections });
     remember(sections);
   } catch (err) {
     say(message(err), "err");
@@ -480,7 +485,7 @@ async function init() {
     // not a copy lost: fetch the term that was last open and carry on.
     const last = localStorage.getItem(TERM);
     if (!store.get().sections && last && status.terms.some((t) => t.term === last)) {
-      void loadTerm(last, { focus: false });
+      void loadTerm(last);
     }
   } catch {
     say("the planner server is not reachable", "err");

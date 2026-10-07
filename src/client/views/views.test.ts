@@ -408,6 +408,35 @@ describe("semester view", () => {
   });
 
   // And it arrives arranged, which is the other half.
+  /*
+   * Everything on this screen is only as true as the crawl behind it, and
+   * nothing else on the page said when that was: a section cancelled this
+   * morning still draws, and the only tell was a seat count a student had no
+   * reason to distrust.
+   */
+  test("says how long ago the timetable was read", () => {
+    const hourAgo = new Date(Date.now() - 2 * 3_600_000).toISOString();
+    const ctx = ctxOf([sectionOf()]) as unknown as { sections: { fetchedAt: string } };
+    ctx.sections.fetchedAt = hourAgo;
+    semester.mount(root, ctx as unknown as Ctx);
+
+    const age = root.querySelector(".term-bar .tag") as HTMLElement;
+    expect(age.textContent).toBe("read 2 hours ago");
+    expect(age.className).toContain("rule");
+    expect(age.title).toContain("re-crawls it whatever its age");
+  });
+
+  test("and marks it when it is old enough to be worth refreshing", () => {
+    const ctx = ctxOf([sectionOf()]) as unknown as { sections: { fetchedAt: string } };
+    ctx.sections.fetchedAt = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    semester.mount(root, ctx as unknown as Ctx);
+
+    const age = root.querySelector(".term-bar .tag") as HTMLElement;
+    expect(age.textContent).toBe("read 3 days ago");
+    expect(age.className).toContain("bad");
+    expect(age.title).toContain("worth refreshing");
+  });
+
   test("lays the term out without being asked", () => {
     semester.mount(root, ctxOf([inUtc()]));
 

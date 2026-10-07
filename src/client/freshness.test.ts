@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { COURSE_LIST_HOURS, olderThan, planFor, TERM_HOURS } from "./freshness";
+import { COURSE_LIST_HOURS, olderThan, planFor, since, TERM_HOURS } from "./freshness";
 
 const HOUR = 3_600_000;
 const ago = (hours: number) => new Date(Date.now() - hours * HOUR).toISOString();
@@ -73,5 +73,38 @@ describe("the course list", () => {
     expect(olderThan(COURSE_LIST_HOURS, undefined)).toBe(true);
     // The epoch, which is what an undated copy used to report.
     expect(olderThan(COURSE_LIST_HOURS, new Date(0).toISOString())).toBe(true);
+  });
+});
+
+describe("how long ago", () => {
+  const at = (hours: number) => new Date(Date.UTC(2027, 0, 20, 12) - hours * HOUR).toISOString();
+  const now = Date.UTC(2027, 0, 20, 12);
+  const said = (hours: number) => since(at(hours), now);
+
+  test("picks the unit a person would have picked", () => {
+    expect(said(0)).toBe("just now");
+    expect(said(0.5)).toBe("30 minutes ago");
+    expect(said(2)).toBe("2 hours ago");
+    expect(said(26)).toBe("yesterday");
+    expect(said(24 * 4)).toBe("4 days ago");
+  });
+
+  test("a clock a little ahead of the server reads as now, not as the future", () => {
+    // Skew is ordinary; a planner claiming tomorrow's timetable is not.
+    expect(since(new Date(now + 20_000).toISOString(), now)).toBe("just now");
+  });
+
+  test("never crawled says so rather than dating from the epoch", () => {
+    expect(since(undefined, now)).toBe("never");
+    expect(since("not a date", now)).toBe("never");
+  });
+
+  /*
+   * The epoch is what an undated copy used to report, and it is worth
+   * reading as absurd rather than as missing: "57 years ago" sends somebody
+   * to look, where "never" would be quietly believed.
+   */
+  test("and the epoch reads as the nonsense it is", () => {
+    expect(since(new Date(0).toISOString(), now)).toContain("years ago");
   });
 });

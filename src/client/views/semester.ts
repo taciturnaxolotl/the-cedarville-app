@@ -40,6 +40,7 @@ import { type Arrangement, arrange, type SectionChoice, type Shape } from "../..
 import { liveSeats } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
+import { olderThan, since, TERM_HOURS } from "../freshness";
 import { readLoad } from "../load";
 import { type Moves, OUT, readMoves, writeMoves } from "../moves";
 import { baseCode, planningFrom, projectionFrom, read } from "../planning";
@@ -169,6 +170,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
   }
 
   const term = catalog.term;
+  /** Captured here, where the guard above has already narrowed the catalog. */
+  const crawledAt = catalog.fetchedAt;
   const all = offeringsFromListing(catalog.sections);
   const byId = new Map(all.map((o) => [o.id, o]));
   /** Keyed on "CS-1210", which is the language the projection speaks. */
@@ -733,6 +736,25 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         "no generated term to lay out. Pick a later term, or change the load on the plan tab.";
       head.append(aside);
     }
+
+    /*
+     * When this timetable was read.
+     *
+     * Everything on this screen is only as true as the crawl behind it, and
+     * nothing else on the page says when that was: a section cancelled this
+     * morning still draws, and the only tell was a seat count the student had
+     * no reason to distrust. Marked when it is past the day the shell waits
+     * before re-crawling, so stale is visible rather than merely stated.
+     */
+    const stale = olderThan(TERM_HOURS, crawledAt);
+    const age = tag(`read ${since(crawledAt)}`, stale ? "bad" : "rule");
+    age.title =
+      `${term} was crawled ${new Date(crawledAt).toLocaleString()}.` +
+      (stale
+        ? " Sections open and close through registration, so this is worth refreshing: press" +
+          " load catalog above."
+        : " Pressing load catalog re-crawls it whatever its age.");
+    head.append(age);
 
     body.replaceChildren();
     // What gates the most, first: the same order the plan itself takes them in.

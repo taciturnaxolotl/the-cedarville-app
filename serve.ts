@@ -163,9 +163,17 @@ async function api(request: Request, pathname: string): Promise<Response | null>
       console.warn(`${term}: refused a crawl — ${verdict.why}`);
       return json({ error: verdict.why }, 422);
     }
+    // What it changed as well as what it brought. The guards bound how much
+    // of a term one crawl may rewrite; this is the line that says how much of
+    // that bound it used, which is where a run of odd-looking crawls would
+    // show up at all.
+    const moved = verdict.changed
+      ? `, kept ${verdict.changed.kept}, added ${verdict.changed.added}, lost ${verdict.changed.gone}`
+      : "";
     console.log(
       `${term}: ingested ${verdict.sections} sections and ${verdict.courses} courses` +
-        (verdict.replaced ? " (replacing what was held)" : " (first crawl of this term)"),
+        (verdict.replaced ? " (replacing what was held)" : " (first crawl of this term)") +
+        moved,
     );
     return json(verdict);
   }

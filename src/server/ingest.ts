@@ -65,16 +65,30 @@ import type { CatalogStore } from "./store";
  * every upstream addition into an outage. A missing `Id` is a different
  * matter, because it is the primary key.
  */
+/**
+ * Cedarville's heaviest single course is eight credits; the ceiling here is
+ * loose enough not to argue with the registrar and tight enough that a
+ * section cannot claim to be worth a semester on its own.
+ */
+const MAX_CREDITS = 24;
+/** Nobody enrols twenty thousand students in one section. */
+const MAX_SEATS = 10_000;
+
 const Section = z
   .object({
     Id: z.string().min(1),
     CourseId: z.string().min(1),
     CourseName: z.string(),
     TermId: z.string().min(1),
-    MinimumCredits: z.number(),
-    Capacity: z.number(),
-    Enrolled: z.number(),
-    Available: z.number(),
+    // Bounded, not merely numeric. A negative or absurd credit count is not
+    // a thing Colleague says, and the planner adds these up to decide whether
+    // a term is full.
+    MinimumCredits: z.number().min(0).max(MAX_CREDITS),
+    Capacity: z.number().min(0).max(MAX_SEATS),
+    Enrolled: z.number().min(0).max(MAX_SEATS),
+    // Available goes negative on an over-enrolled section, which is a thing
+    // a registrar's override really does produce.
+    Available: z.number().min(-MAX_SEATS).max(MAX_SEATS),
     Meetings: z.array(z.unknown()),
   })
   .passthrough();
@@ -98,7 +112,18 @@ export const Ingest = z.object({
 export type IngestBody = z.infer<typeof Ingest>;
 
 export type Verdict =
-  | { ok: true; sections: number; courses: number; replaced: boolean }
+  | {
+      ok: true;
+      sections: number;
+      courses: number;
+      replaced: boolean;
+      /**
+       * What this crawl did to the term it replaced, which is the part worth
+       * reading in a log. Wholesale fabrication is refused outright; what
+       * gets through is bounded, and these are the bounds it used.
+       */
+      changed?: { kept: number; added: number; gone: number };
+    }
   | { ok: false; why: string };
 
 /**
@@ -216,16 +241,64 @@ export function ingest(store: CatalogStore, raw: unknown): Verdict {
     return { ok: false, why: `section ${astray.Id} belongs to ${astray.TermId}, not ${body.term}` };
   }
 
-  const held = store.read(body.term).sections.length;
-  const floor = Math.floor(held * (1 - SHRINK_LIMIT));
-  if (body.sections.length < floor) {
+  /*
+   * A course nobody has ever heard of.
+   *
+   * The sections are the part of a crawl nothing can check — ten o'clock is
+   * as plausible as eleven — but the *courses* they claim to be sections of
+   * are checkable against the list of every course the school offers, which
+   * arrives by its own crawl and has its own guards. So a crawl may lie about
+   * when a real course meets; it may not invent the course.
+   *
+   * Checked against the list already held rather than the one in this
+   * payload, or inventing a course and its sections would be one request.
+   * Skipped entirely until somebody has filled that list, because refusing
+   * every section on a server that knows no courses yet would mean no server
+   * could ever be filled.
+   *
+   * By code rather than by id, which is not a shortcut. About 1% of codes
+   * carry two records — a course being retired beside its replacement, both
+   * live during the transition — and the course list keeps one id per code
+   * while a section may reference either. Checked by id, one honest section
+   * of 1,728 refused the whole spring: EDEC-2300 taught under course 5185,
+   * listed under 2868. A code is also what the rest of this application
+   * identifies a course by.
+   */
+  const known = new Set(store.readCourses(EVERY_COURSE).map((c) => `${c.SubjectCode}-${c.Number}`));
+  if (known.size) {
+    const invented = body.sections.find((s) => !known.has(s.CourseName));
+    if (invented) {
+      return {
+        ok: false,
+        why:
+          `section ${invented.Id} claims course ${invented.CourseName}, ` +
+          "which is in no catalog this server holds",
+      };
+    }
+  }
+
+  /*
+   * Agreement with the term already held.
+   *
+   * Counting sections let a crawl swap a real term for a same-sized
+   * fabrication, which is the one thing a cache this open must not accept.
+   * Comparing the section ids instead means a replacement has to *be* the
+   * term it is replacing: it may add, it may lose a fifth, and everything
+   * else has to still be there.
+   */
+  const standing = store.read(body.term).sections;
+  const ids = new Set(body.sections.map((s) => s.Id));
+  const kept = standing.filter((s) => ids.has(s.Id)).length;
+  const floor = Math.ceil(standing.length * (1 - SHRINK_LIMIT));
+  if (standing.length && kept < floor) {
     return {
       ok: false,
       why:
-        `refusing to shrink ${body.term} from ${held} sections to ${body.sections.length}; ` +
-        `a crawl may lose up to ${Math.round(SHRINK_LIMIT * 100)}% of a term, not more`,
+        `this crawl keeps ${kept} of the ${standing.length} sections ${body.term} already has; ` +
+        `a crawl may lose up to ${Math.round(SHRINK_LIMIT * 100)}% of a term, not replace it`,
     };
   }
+  const held = standing.length;
 
   const catalog: TermCatalog = {
     term: body.term,
@@ -244,5 +317,6 @@ export function ingest(store: CatalogStore, raw: unknown): Verdict {
     sections,
     courses: body.courses?.length ?? 0,
     replaced: held > 0,
+    changed: { kept, added: body.sections.length - kept, gone: held - kept },
   };
 }

@@ -350,19 +350,41 @@ to the server is a claim that every other student will read.
                   what the crawl did not see, so a student closing the tab
                   halfway would cancel half a term.
 
-    no shrinking  a crawl may lose up to a fifth of a term and no more.
-                  Without this one, three well-formed sections and
-                  `complete: true` empty the catalog for everybody.
+    agreement     a crawl replacing a term must *be* that term: it may add,
+                  it may lose up to a fifth, and the rest of the section ids
+                  have to still be there. Counting sections instead let a
+                  hundred fabrications stand in for a hundred real ones,
+                  because a hundred is a hundred.
+
+    real courses  a section's course must appear in the list of every course
+                  the school offers, which arrives by its own crawl with its
+                  own guards. So a crawl may lie about when a real course
+                  meets; it may not invent the course. Checked by code rather
+                  than by id, because about 1% of codes carry two records and
+                  a section may reference either — checked by id, one honest
+                  section of the spring's 1,728 refused the whole crawl.
+
+    sane numbers  credits and seat counts within ranges a registrar could
+                  mean. Seats left may be negative, because an override
+                  really does over-enrol a section.
 
 Sections must also carry the term they were posted under, or a Fall crawl
-could be written into the Spring cache, where the shrink guard counts rows
-rather than reading them.
+could be written into the Spring cache.
 
 There is deliberately no identity here. There is no account system and nothing
-to attach one to, so every guard is about the claim rather than the claimant. A
-student with a real session can still post a plausible lie about the timetable;
-what they cannot do is quietly delete it. That is the honest limit of a shared
-cache with no accounts, and it is worth stating rather than implying otherwise.
+to attach one to, so every guard is about the claim rather than the claimant.
+What that leaves is bounded: a student with a real session can post a plausible
+lie about when a real course meets, in a term somebody has already crawled, for
+up to a fifth of its sections at a time — and the server logs what each crawl
+kept, added and lost, so a run of odd-looking ones is visible rather than
+silent. What they cannot do is empty the catalog, swap a term for an invented
+one, or add a course that does not exist.
+
+Corroboration would close the rest of it, and cannot: requiring two
+submissions to agree costs an attacker one more request, since there is no
+identity to count submissions *from*. The first crawl of a fresh term is
+likewise trusted, there being nothing yet to hold it to. Both are worth saying
+plainly rather than implying a guarantee that is not there.
 
 `POST /catalog/:term/refresh` still exists and still crawls server-side, for
 wherever a guest endpoint is open. It now refuses a term the catalog has never

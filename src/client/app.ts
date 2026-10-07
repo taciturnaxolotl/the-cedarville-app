@@ -16,7 +16,7 @@
 import { slimCatalog, type TermCatalog, termNow } from "../catalog";
 import type { Capture } from "../content";
 import { ALL_COURSES, crawlAllCourses, crawlTerm } from "../crawl";
-import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "../requirements";
+import { normalize, type ProgramTree } from "../requirements";
 import {
   BRIDGE_VERSION,
   bridgeVersion,
@@ -205,17 +205,6 @@ function adopt(snapshot: Capture) {
   });
 }
 
-/** Every course that could still close a requirement. */
-function candidateCourseIds(): string[] {
-  const ids = new Set<string>();
-  for (const t of store.get().trees) {
-    for (const { group } of openGroups(t)) {
-      for (const id of enumeratedCourseIds(group) ?? []) ids.add(id);
-    }
-  }
-  return [...ids];
-}
-
 $("#tabs").addEventListener("click", (event) => {
   const button = (event.target as HTMLElement).closest("button");
   if (button?.dataset.view) store.set({ view: button.dataset.view as ViewName });
@@ -373,8 +362,18 @@ async function loadTerm(term: string) {
       say(`no catalog for ${term} yet; crawling it here…`);
       sections = await crawlHere(term);
     } else {
-      const courseIds = candidateCourseIds();
-      sections = await fetchCatalog(term, courseIds.length ? courseIds : undefined);
+      /*
+       * The whole term, not the courses a requirement happens to enumerate.
+       *
+       * This used to narrow the fetch to open requirement groups, which is a
+       * smaller set than the plan schedules: a prerequisite pulled in by the
+       * closure belongs to no group, so its sections never arrived and the
+       * semester read "not taught this term" about a course the timetable was
+       * teaching. Narrowing bought 306 sections of 1806 — and the whole term
+       * is 720KB on the wire, gzipped by the server, half a second once per
+       * term. That is not a saving worth a wrong answer.
+       */
+      sections = await fetchCatalog(term);
       say(
         `${sections.sections.length} sections for ${term}, ` +
           `fetched ${new Date(sections.fetchedAt).toLocaleTimeString()}`,
@@ -382,15 +381,25 @@ async function loadTerm(term: string) {
       );
     }
 
+    /*
+     * The course list, if nobody has filled it yet.
+     *
+     * Checked whether or not the term itself had to be crawled, because the
+     * two are filled independently: a server can hold a complete timetable
+     * and no course list at all, which is the state that draws a planned
+     * course with no title and no requisites. Nothing but a signed-in
+     * browser can fill it now.
+     */
+    if (!store.get().allCourses?.length && installed()) await crawlCourseList();
+
     // The store first, and the cache afterwards. A sixty-page crawl that
     // succeeded was being thrown away by the line that tried to remember it:
     // a term of raw sections is ten megabytes, a browser allows five for
     // everything a site stores, and the throw happened before the handover.
-    // No view change. Fetching data is not a change of subject: a student
+    //
+    // And no view change. Fetching data is not a change of subject: a student
     // reading their plan who presses "load catalog" wants the plan to get
-    // better, not to be moved to a different tab. This used to jump to the
-    // section builder, from back when loading a catalog was the only way in
-    // to it.
+    // better, not to be moved to a different tab.
     store.set({ sections });
     remember(sections);
   } catch (err) {

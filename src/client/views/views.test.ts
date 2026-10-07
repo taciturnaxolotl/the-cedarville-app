@@ -2497,7 +2497,13 @@ describe("build view — how heavy a term", () => {
 });
 
 describe("build view — sharing a plan", () => {
-  test("writes out every decision, not just the courses", () => {
+  /*
+   * The export used to be observed through `fetch`, because it posted a copy
+   * to a development route on the catalog server. That route is gone — a
+   * server that holds nobody's transcript should not have a way to be handed
+   * one — so the decisions now go exactly two places, and this watches both.
+   */
+  test("writes out every decision, not just the courses", async () => {
     const tree = normalize(
       program(
         "BS.CYOPR",
@@ -2512,22 +2518,39 @@ describe("build view — sharing a plan", () => {
         { Majors: ["Cyber Operations"] },
       ),
     );
-    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
 
-    const written: unknown[] = [];
+    // The student's own machine, reached through the extension.
+    const sent: { type: string; picks?: unknown }[] = [];
     Object.assign(globalThis, {
-      fetch: async (_url: string, init?: { body?: string }) => {
-        if (init?.body) written.push(JSON.parse(init.body));
-        return { ok: true, json: async () => ({}) };
+      chrome: {
+        runtime: {
+          sendMessage: (_id: string, msg: { type: string }, cb: (r: unknown) => void) => {
+            sent.push(msg);
+            cb({ ok: true, data: true });
+          },
+        },
       },
     });
+    // And the clipboard, for an advisor's inbox. Defined rather than
+    // assigned: happy-dom's own navigator.clipboard is read-only.
+    let copied = "";
+    const clipboard = {
+      writeText: async (text: string) => {
+        copied = text;
+      },
+    };
+    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
     const art = Array.from(root.querySelectorAll(".candidate")).find((r) =>
       r.textContent?.includes("ART-1200"),
     )!;
     (art.querySelector(".pick") as unknown as HTMLElement).click();
     (root.querySelector(".export") as unknown as HTMLElement).click();
+    // The handler awaits the bridge before it reaches the clipboard.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    const picks = written.at(-1) as {
+    const picks = sent.find((m) => m.type === "picks")?.picks as {
       pinned: string[];
       load: { perTerm: number };
       programs: { names: string[] }[];
@@ -2535,6 +2558,34 @@ describe("build view — sharing a plan", () => {
     expect(picks.pinned).toContain("ART-1200");
     expect(picks.load.perTerm).toBeGreaterThan(0);
     expect(picks.programs[0]?.names).toEqual(["Cyber Operations"]);
+    expect(JSON.parse(copied)).toEqual(picks);
+
+    Object.assign(globalThis, { chrome: undefined });
     localStorage.removeItem("cedarville:pins");
+  });
+
+  /*
+   * And without an extension there is nowhere local to send them, which must
+   * not cost the student the copy they asked for. The bridge rejecting rather
+   * than throwing is what makes this pass.
+   */
+  test("still copies when there is no companion to send to", async () => {
+    const tree = normalize(program("BS.CYOPR", [group({ Courses: [course("1", "CS", "1210")] })]));
+    let copied = "";
+    Object.assign(globalThis, { chrome: undefined });
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async (text: string) => {
+          copied = text;
+        },
+      },
+      configurable: true,
+    });
+
+    build.mount(root, { trees: [tree], enrolled: ["BS.CYOPR"] });
+    (root.querySelector(".export") as unknown as HTMLElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(JSON.parse(copied).programs[0]?.code).toBe("BS.CYOPR");
   });
 });

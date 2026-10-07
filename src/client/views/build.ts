@@ -22,7 +22,7 @@ import {
   unreadModifications,
 } from "../../requirements";
 import type { ProgramSummary } from "../../types";
-import { BridgeError, capture, dumpForDev, installed, programs, sendPicks } from "../bridge";
+import { BridgeError, capture, installed, programs, sendPicks } from "../bridge";
 import type { Ctx } from "../ctx";
 import { el, tag } from "../dom";
 import { CEILING, FULL_TIME, type Load, readLoad, SUMMERS, verdictOf, writeLoad } from "../load";
@@ -244,9 +244,7 @@ export function mount(root: HTMLElement, ctx: Ctx) {
 
   // ---- fetching --------------------------------------------------------
 
-  // `programs` throws synchronously when the extension is absent, which a
-  // `.catch` would not see — and an uncaught throw here blanks the page. The
-  // ranking needs no extension at all, so this is genuinely optional.
+  // The ranking needs no extension at all, so this is genuinely optional.
   if (installed()) {
     void programs()
       .then((list) => store.set({ available: list.filter((p) => p.IsActive) }))
@@ -503,9 +501,8 @@ export function mount(root: HTMLElement, ctx: Ctx) {
         pinned,
       };
       const text = JSON.stringify(picks, null, 2);
-      void dumpForDev("picks", picks);
-      // Also to the student's own machine, if they run a companion, so their
-      // own tools plan the degree they chose rather than the cheapest one.
+      // To the student's own machine, if they run a companion, so their own
+      // tools plan the degree they chose rather than the cheapest one.
       const local = await sendPicks(picks).then(
         () => true,
         () => false,

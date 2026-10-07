@@ -1,34 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { APP_ORIGIN, COMPANION, EXTENSION_ORIGIN, loopback } from "./where";
+import { APP_ORIGIN, COMPANION, EXTENSION_ORIGIN } from "./where";
 
 describe("who is allowed to talk to whom", () => {
   /*
-   * The route this guards writes a transcript to the server's disk, which is
-   * the one thing the catalog server promises never to hold. The page half
-   * refuses to call it from anywhere but localhost; this is the half that
-   * does not depend on the caller keeping its word.
+   * There used to be a `loopback` guard here, for a route on the catalog
+   * server that wrote a capture to disk. It read the hostname off the
+   * request, which is a header the client sends — a guard that asks the
+   * attacker whether they are an attacker. The route is gone, and with it the
+   * only thing a transcript could be written to a hosted server through.
+   *
+   * What remains is the arrangement that never needed a guard: the companion
+   * binds to the loopback address rather than inspecting requests for one.
    */
-  test("recognises the loopback interface by name and by address", () => {
-    for (const url of [
-      "http://localhost:5173/dev/capture",
-      "http://127.0.0.1:5173/dev/capture",
-      "http://[::1]:5173/dev/capture",
-    ]) {
-      expect(loopback({ url })).toBe(true);
-    }
-  });
-
-  test("and refuses anything reached over a network", () => {
-    for (const url of [
-      "https://plan.example.edu/dev/capture",
-      "http://192.168.1.20:5173/dev/capture",
-      // The classic: a hostname that merely starts with the right letters.
-      "http://localhost.example.com/dev/capture",
-    ]) {
-      expect(loopback({ url })).toBe(false);
-    }
-  });
-
   test("the companion is loopback only, whatever the port", () => {
     expect(COMPANION.startsWith("http://127.0.0.1:")).toBe(true);
   });

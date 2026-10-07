@@ -7,9 +7,13 @@
  * evaluation is their record and never leaves their browser. There is no
  * account system because there is nothing here to attach to a person.
  *
- * POST /dev/capture is the exception, localhost-only and gitignored: it drops
- * a capture on disk so an agent working on this repo can read a real
- * Colleague response instead of guessing at the schema.
+ * So this server writes exactly one thing: the SQLite catalog cache. There
+ * used to be a development route that dropped a capture on disk, guarded by
+ * `NODE_ENV` and by the hostname the request arrived on — and a hostname is
+ * a header the client sends, which makes it a guard that asks the attacker
+ * whether they are an attacker. Hosting this anywhere meant shipping that.
+ * A capture now goes where it always should have: the companion, on the
+ * student's own machine, which the extension already hands every capture to.
  */
 
 import { mkdir } from "node:fs/promises";
@@ -24,7 +28,6 @@ import {
 } from "./src/server/crawler";
 import { ingest } from "./src/server/ingest";
 import { CatalogStore, type RuleKey, ruleKey } from "./src/server/store";
-import { loopback } from "./src/where";
 
 const PORT = 5173;
 const ROOT = "public";
@@ -37,7 +40,6 @@ const ROOT = "public";
  */
 const TICK_MS = 30 * 60 * 1000;
 const MAX_AGE_HOURS = 6;
-const dev = process.env.NODE_ENV !== "production";
 
 await mkdir(".data", { recursive: true });
 const store = new CatalogStore();
@@ -207,22 +209,6 @@ async function api(request: Request, pathname: string): Promise<Response | null>
     if (missing.length)
       console.log(`resolved ${missing.length} rule groups (${store.ruleCount()} cached)`);
     return json(Object.fromEntries(known), 200, accept);
-  }
-
-  // Writes a transcript to the server's disk, which is the one thing this
-  // server promises never to hold. The page half already refuses to call it
-  // from anywhere but localhost; a promise kept only by the caller is not
-  // kept at all, so the route checks the host it was reached on too. A
-  // deployment that forgets NODE_ENV still cannot be handed a capture.
-  if (dev && loopback(request) && pathname === "/dev/capture" && request.method === "POST") {
-    // Named, because evaluations and the catalog are different artifacts and
-    // one file would mean the second dump silently ate the first.
-    const raw = new URL(request.url).searchParams.get("name") ?? "capture";
-    const name = raw.replace(/[^a-z0-9-]/gi, "") || "capture";
-    const body = await request.text();
-    await Bun.write(`.data/${name}.json`, body);
-    console.log(`wrote .data/${name}.json (${(body.length / 1024).toFixed(0)}kb)`);
-    return new Response(null, { status: 204 });
   }
 
   return null;

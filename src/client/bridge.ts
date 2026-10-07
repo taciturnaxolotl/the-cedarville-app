@@ -28,7 +28,17 @@ export class BridgeError extends Error {}
 
 export const installed = () => Boolean(runtimeOf()?.sendMessage);
 
-function send<K extends Request["type"]>(msg: Request & { type: K }): Promise<ReplyMap[K]> {
+/**
+ * Async so that "no extension here" is a rejection rather than a throw.
+ *
+ * It used to throw synchronously, which looks identical until you write the
+ * obvious thing: `send(...).catch(...)` never sees it, because the throw
+ * happens before there is a promise to attach to. One call site had grown a
+ * comment explaining the workaround and another had quietly lost the rest of
+ * its handler to it — the export button copied nothing to the clipboard on
+ * any machine without the extension.
+ */
+async function send<K extends Request["type"]>(msg: Request & { type: K }): Promise<ReplyMap[K]> {
   const runtime = runtimeOf();
   if (!runtime?.sendMessage) {
     throw new BridgeError(
@@ -95,26 +105,6 @@ export const applyPlan = (changes: Change[]): Promise<Applied> =>
 export const searcher = {
   search: (criteria: SearchCriteria): Promise<SearchPage> => send({ type: "search", criteria }),
 };
-
-/**
- * Hands a capture to the local dev server, which writes it to .data/ so the
- * agent working on this code can read a real response instead of guessing at
- * the schema. Localhost only, gitignored, and a no-op anywhere else.
- */
-export async function dumpForDev(name: string, snapshot: unknown): Promise<void> {
-  // Optional by design, and never worth throwing over: a fire-and-forget
-  // helper that raises synchronously takes its caller down with it.
-  if (globalThis.location?.hostname !== "localhost") return;
-  try {
-    await fetch(`/dev/capture?name=${encodeURIComponent(name)}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(snapshot),
-    });
-  } catch {
-    // The dev server is optional; never let it break a capture.
-  }
-}
 
 // ---- the shared catalog cache -----------------------------------------
 

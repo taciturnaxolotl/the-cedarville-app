@@ -20,7 +20,6 @@ import { enumeratedCourseIds, normalize, openGroups, type ProgramTree } from "..
 import {
   capture,
   catalogStatus,
-  dumpForDev,
   fetchAllCourses,
   fetchCatalog,
   installed,
@@ -226,7 +225,6 @@ $("#capture").addEventListener("click", async () => {
   try {
     const whatIf = $<HTMLSelectElement>("#whatif").value;
     const snapshot = await capture(whatIf ? [whatIf] : []);
-    void dumpForDev("evaluations", snapshot);
     adopt(snapshot);
     store.set({ view: "build" });
     say(`captured ${Object.keys(snapshot.evaluations).length} programs`, "ok");
@@ -343,7 +341,6 @@ async function loadTerm(term: string, { focus = true }: { focus?: boolean } = {}
     // a term of raw sections is ten megabytes, a browser allows five for
     // everything a site stores, and the throw happened before the handover.
     store.set({ sections, ...(focus ? { view: "semester" as const } : {}) });
-    void dumpForDev("catalog", sections);
     remember(sections);
   } catch (err) {
     say(message(err), "err");

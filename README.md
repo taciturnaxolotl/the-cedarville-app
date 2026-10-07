@@ -111,12 +111,19 @@ pins, tracks and credit load through the extension to `POST /picks`, so the
 scripts answer about the degree you chose rather than the cheapest one that
 fits, and say which of the two they did.
 
+This is the only way a transcript reaches a disk, and that is deliberate.
+There was briefly a second: a development route on the catalog server that
+wrote whatever it was posted into `.data/`, guarded by `NODE_ENV` and by the
+hostname the request arrived on. A hostname is a header the client sends, so
+the guard asked the attacker whether they were an attacker — and hosting the
+planner anywhere meant shipping it. The route is gone. The server writes its
+SQLite catalog and nothing else, which is the whole of what it is for.
+
     CEDARVILLE_CAPTURE   where a capture is kept (default: XDG data dir)
     CEDARVILLE_PORT      the companion's port
     CEDARVILLE_COMPANION 0 to decline the listener entirely
     CATALOG_DB           the catalog cache (default: .data/catalog.sqlite)
     CRAWL                "off" to skip the server's own boot crawl
-    NODE_ENV             "production" to close /dev/capture
 
 ### what it refuses to guess
 
